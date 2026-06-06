@@ -313,6 +313,27 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
 
 
 @dataclass
+class ErrField:
+    """Per-cell solution-misfit field over (instrument bin, super-ensemble) -- Figure 3.
+
+    Each super-ensemble (column) holds the bins at its package depth, so plotting depth vs
+    super-ensemble traces the descent/ascent "V". ``resid_*`` is the per-cell residual about
+    the shared baroclinic shape (true frame, NaN where edited out); ``u_oce``/``v_oce`` is
+    the solution velocity sampled at each cell; ``binno`` is the signed instrument bin number.
+    """
+
+    se_index: np.ndarray            # [nbin, nse] super-ensemble index (column broadcast)
+    depth: np.ndarray               # [nbin, nse] cell depth [m, +down], NaN where edited
+    resid_u: np.ndarray             # [nbin, nse] cell residual, true east [m/s]
+    resid_v: np.ndarray             # [nbin, nse] cell residual, true north [m/s]
+    u_oce: np.ndarray               # [nbin, nse] solution east velocity at the cell [m/s]
+    v_oce: np.ndarray               # [nbin, nse] solution north velocity at the cell [m/s]
+    binno: np.ndarray               # [nbin] signed instrument bin number (+down, -up)
+    u_std: float
+    v_std: float
+
+
+@dataclass
 class VelocityResult:
     """Everything the velocity figures need from one end-to-end solve."""
 
@@ -325,6 +346,8 @@ class VelocityResult:
     resid_v: np.ndarray             # [k] cell minus shear-fit (true north) [m/s]
     sadcp: np.ndarray | None = None  # [m,4] ship-ADCP constraint (z,u,v,verr) true -- Fig 9
     btrk: BtrkDiagnostics | None = None  # own-vs-RDI bottom-track check -- Figure 13
+    err: ErrField | None = None     # per-cell misfit / velocity field -- Figure 3
+    drift: DriftTrack | None = None  # ship + package horizontal tracks -- drift map
 
     @property
     def resid_rms(self) -> float:
@@ -357,6 +380,112 @@ def _solution_residuals(se: SuperEns, sp_mag: ShearProfile, *, drot: float,
             & (depth > 0))                                  # drop above-surface up cells
     du, dv = _uvrot(ru_r[mask], rv_r[mask], drot)
     return depth[mask], du, dv
+
+
+def _error_field(se: SuperEns, sp_mag: ShearProfile, vp: VelocityProfile, *,
+                 drot: float, weightmin: float, offset: np.ndarray,
+                 cell_m: float) -> ErrField:
+    """Per-cell residual + ocean-velocity field over (bin, super-ensemble) -- Figure 3.
+
+    Same baroclinic-removed, per-super-ensemble-demeaned residual as
+    :func:`_solution_residuals`, but kept as full 2-D arrays (NaN where edited out) so it can
+    be imaged against depth and super-ensemble number. ``u_oce``/``v_oce`` is the final
+    velocity profile sampled at each cell depth; ``binno`` maps each row to a signed
+    instrument bin number from the package offset.
+    """
+    depth = se.izm
+    ubc = np.interp(depth.ravel(), sp_mag.z, sp_mag.u).reshape(depth.shape)
+    vbc = np.interp(depth.ravel(), sp_mag.z, sp_mag.v).reshape(depth.shape)
+    wt = np.where(se.weight > weightmin, se.weight, np.nan)
+
+    def demean(res: np.ndarray) -> np.ndarray:
+        msk = np.isfinite(res) & np.isfinite(wt)
+        num = np.nansum(np.where(msk, res * wt, 0.0), axis=0)
+        den = np.nansum(np.where(msk, wt, 0.0), axis=0)
+        return res - np.where(den > 0, num / den, np.nan)[None, :]
+
+    valid = (se.weight > weightmin) & (depth > 0)
+    ru_r = np.where(valid, demean(se.ru - ubc), np.nan)
+    rv_r = np.where(valid, demean(se.rv - vbc), np.nan)
+    du, dv = _uvrot(ru_r, rv_r, drot)
+
+    u_oce = np.where(valid, np.interp(depth.ravel(), vp.z, vp.u).reshape(depth.shape), np.nan)
+    v_oce = np.where(valid, np.interp(depth.ravel(), vp.z, vp.v).reshape(depth.shape), np.nan)
+
+    se_index = np.broadcast_to(np.arange(1, depth.shape[1] + 1), depth.shape).astype(float)
+    binno = np.round(offset / cell_m).astype(int)
+
+    def robust_std(a: np.ndarray) -> float:
+        a = a[np.isfinite(a)]
+        if a.size == 0:
+            return np.nan
+        return float(1.4826 * np.median(np.abs(a - np.median(a))))   # MAD, outlier-resistant
+
+    return ErrField(
+        se_index=se_index, depth=np.where(valid, depth, np.nan),
+        resid_u=du, resid_v=dv, u_oce=u_oce, v_oce=v_oce, binno=binno,
+        u_std=robust_std(du), v_std=robust_std(dv),
+    )
+
+
+@dataclass
+class DriftTrack:
+    """Ship and dead-reckoned package (CTD) horizontal tracks during the cast -- drift map.
+
+    Both are local east/north metres relative to the deployment start. The ship track is the
+    CTD-merged GPS; the package track integrates the per-super-ensemble package velocity over
+    ground (``dtiv`` ensembles x ping interval), so the two diverge as the package descends.
+    """
+
+    ship_e: np.ndarray
+    ship_n: np.ndarray
+    ship_sog: np.ndarray            # ship speed over ground [m/s] (colour)
+    pkg_e: np.ndarray
+    pkg_n: np.ndarray
+    i_bottom: int                   # package index at max depth (cast turnaround)
+
+
+def _drift_track(se: SuperEns, ctd: CTDTimeSeries, vp: VelocityProfile, *,
+                 drot: float, ping_dt: float, weightmin: float = 0.1) -> DriftTrack:
+    """Build the ship + dead-reckoned package tracks (legacy drift map)."""
+    lat0 = float(np.nanmean(ctd.lat))
+    m_lat = 111_320.0
+    m_lon = 111_320.0 * np.cos(np.radians(lat0))
+    ship_e = (ctd.lon - ctd.lon[0]) * m_lon
+    ship_n = (ctd.lat - ctd.lat[0]) * m_lat
+    t = ctd.time_elapsed_s.astype(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sog = np.hypot(np.gradient(ship_e, t), np.gradient(ship_n, t))
+
+    # package velocity over ground per super-ensemble: u_pkg = <u_ocean(cell) - measured>
+    ru_t, rv_t = _uvrot(se.ru, se.rv, drot)
+    depth = se.izm
+    uoc = np.interp(depth.ravel(), vp.z, vp.u).reshape(depth.shape)
+    voc = np.interp(depth.ravel(), vp.z, vp.v).reshape(depth.shape)
+    wt = np.where(se.weight > weightmin, se.weight, np.nan)
+
+    def wmean(a):
+        msk = np.isfinite(a) & np.isfinite(wt)
+        num = np.nansum(np.where(msk, a * wt, 0.0), axis=0)
+        den = np.nansum(np.where(msk, wt, 0.0), axis=0)
+        return np.where(den > 0, num / den, np.nan)
+
+    up = wmean(uoc - ru_t)
+    vpk = wmean(voc - rv_t)
+    dt = se.dtiv.astype(float) * float(ping_dt)
+    pkg_e = np.cumsum(np.nan_to_num(up) * dt)
+    pkg_n = np.cumsum(np.nan_to_num(vpk) * dt)
+    # loop closure: the package is deployed and recovered at the ship, so detrend the raw
+    # dead-reckoning bias linearly to land its endpoints on the ship's (what the inverse's
+    # barotropic constraint enforces; without it the integral drifts off by tens of metres).
+    n = pkg_e.size
+    if n > 1:
+        ramp = np.arange(n) / (n - 1)
+        pkg_e = pkg_e - (pkg_e[-1] - float(ship_e[-1])) * ramp
+        pkg_n = pkg_n - (pkg_n[-1] - float(ship_n[-1])) * ramp
+    i_bottom = int(np.nanargmax(se.z)) if se.z.size else 0
+    return DriftTrack(ship_e=ship_e, ship_n=ship_n, ship_sog=sog,
+                      pkg_e=pkg_e, pkg_n=pkg_n, i_bottom=i_bottom)
 
 
 def compute_velocity(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
@@ -433,8 +562,12 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     sadcp_used = sadcp if (solver == "inverse" and sadcp is not None) else None
     from .bottom import btrk_diagnostics
     btrk = btrk_diagnostics(bt, dh) if np.isfinite(bottom.zbottom) else None
+    err = _error_field(se, sp_mag, vp, drot=drot, weightmin=weightmin,
+                       offset=merged.offset, cell_m=dh.down.cell_m)
+    drift = _drift_track(se, ctd, vp, drot=drot, ping_dt=_ping_dt(dh))
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
-                          resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used, btrk=btrk)
+                          resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used,
+                          btrk=btrk, err=err, drift=drift)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:

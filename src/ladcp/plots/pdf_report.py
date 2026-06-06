@@ -18,7 +18,9 @@ from ..qa.inverse import VelocityResult
 from .alignment import alignment_figure
 from .btrack_figure import btrack_figure
 from .depth_figure import depth_figure
+from .drift_figure import drift_figure
 from .edit_figure import edit_figure
+from .error_figure import error_figure
 from .inverse_figure import inverse_diagnostics_figure
 from .raw_dashboard import raw_dashboard
 from .sadcp_figure import sadcp_figure, sadcp_rms_discrepancy
@@ -73,6 +75,12 @@ def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
         pages.append((lambda f: inverse_diagnostics_figure(v, fig=f),
                       f"{station}_inverse.png",
                       "Figure 12 — Inversion diagnostics", _caption_inverse(v)))
+        if v.err is not None:
+            pages.append((lambda f: error_figure(v, fig=f), f"{station}_error.png",
+                          "Figure 3 — Super-ensemble error", _caption_error(v)))
+        if v.drift is not None:
+            pages.append((lambda f: drift_figure(v, fig=f), f"{station}_drift.png",
+                          "Figure 8 — Ship & CTD drift", _caption_drift(v)))
         if v.btrk is not None and v.btrk.n_own:
             pages.append((lambda f: btrack_figure(v, fig=f), f"{station}_btrack.png",
                           "Figure 13 — Bottom-track check", _caption_btrack(v)))
@@ -119,6 +127,14 @@ def _save_pngs(dh, ctd, velocity, out, station, paths):
         emit(inverse_diagnostics_figure(v, station=station,
                                         savepath=str(out / f"{station}_inverse.png")),
              f"{station}_inverse.png")
+        if v.err is not None:
+            emit(error_figure(v, station=station,
+                              savepath=str(out / f"{station}_error.png")),
+                 f"{station}_error.png")
+        if v.drift is not None:
+            emit(drift_figure(v, station=station,
+                              savepath=str(out / f"{station}_drift.png")),
+                 f"{station}_drift.png")
         if v.btrk is not None and v.btrk.n_own:
             emit(btrack_figure(v, station=station,
                                savepath=str(out / f"{station}_btrack.png")),
@@ -325,6 +341,33 @@ def _caption_inverse(v: VelocityResult):
         "trend.\n"
         "• Right: the residual distribution — a tight, zero-centred peak means the single "
         "baroclinic profile explains the super-ensembles well.")
+
+
+def _caption_error(v: VelocityResult):
+    e = v.err
+    return (
+        "What this shows and what to expect:\n"
+        "Per-cell solution misfit and resolved velocity over the cast's super-ensembles "
+        "(each column is one super-ensemble at its package depth, so depth vs super-ensemble "
+        "traces the descent/ascent V).\n"
+        f"• Left: U/V residual about the shared baroclinic shape — std {e.u_std:.3f} / "
+        f"{e.v_std:.3f} m/s. Expect a fine red/blue speckle with no coherent patch; a "
+        "structured block flags a bad super-ensemble or depth range.\n"
+        "• Middle: median residual per instrument bin # — should hug zero; the far (high-|bin|) "
+        "cells are noisiest.\n"
+        "• Right: the resolved ocean U/V velocity at each cell.")
+
+
+def _caption_drift(v: VelocityResult):
+    return (
+        "What this shows and what to expect:\n"
+        "Horizontal tracks during the cast, local metres from the deployment start: the ship "
+        "GPS (dots, coloured by speed over ground) and the package dead-reckoned from the "
+        "LADCP velocity (blue), with start/bottom/end marked.\n"
+        "• On a station-keeping cast the ship stays in a tight cluster; the package loops out "
+        "and back as it descends and is advected, closing near the start on recovery.\n"
+        "• A package track that does not return, or a wildly large excursion, points to a "
+        "reference/dead-reckoning problem.")
 
 
 def _caption_btrack(v: VelocityResult):
