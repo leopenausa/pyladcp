@@ -41,7 +41,7 @@ def write_lad(vp: VelocityProfile, path: str, *, station: str = "",
         f"Deviation   = {drot:.6f}" if np.isfinite(drot) else "Deviation   = ",
         "Columns     = z:u:v:ev",
     ]
-    for z, u, v, ev in zip(vp.z, vp.u, vp.v, vp.uerr):
+    for z, u, v, ev in zip(vp.z, vp.u, vp.v, vp.uerr, strict=False):
         if not np.isfinite(u + v):
             continue
         e = ev if np.isfinite(ev) else 0.0
@@ -72,7 +72,7 @@ def write_bot(bp: BottomProfile, path: str, *, station: str = "",
         f"Bottom depth= {int(zbottom)}" if np.isfinite(zbottom) else "Bottom depth= ",
         "Columns     = z:u:v:err",
     ]
-    for z, u, v, e in zip(bp.z, bp.u, bp.v, bp.uerr):
+    for z, u, v, e in zip(bp.z, bp.u, bp.v, bp.uerr, strict=False):
         if not np.isfinite(u + v):
             continue
         ev = e if np.isfinite(e) else 0.0

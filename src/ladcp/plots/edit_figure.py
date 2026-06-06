@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..models import CTDTimeSeries
 from ..qa.bottom import detect_bottom
 from ..qa.depth import synchronize
 from ..qa.edit import edit_data
 from ..qa.ingest import DualHead
-from ..models import CTDTimeSeries
 
 
 def edit_figure(dh: DualHead, ctd: CTDTimeSeries, *, fig=None, savepath: str | None = None):

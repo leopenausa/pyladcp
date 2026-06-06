@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pathlib
 
-import numpy as np
 import pytest
 
 from ladcp.config import moria05_params

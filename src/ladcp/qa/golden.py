@@ -52,7 +52,7 @@ def load_p_struct(mat_path: str | None = None) -> dict[str, Any]:
             out[f] = v.tolist() if isinstance(v, np.ndarray) else v
     # warnings live in p.warn (cell array of strings)
     if "warn" in p._fieldnames:
-        w = getattr(p, "warn")
+        w = p.warn
         out["warn"] = [str(x) for x in (w if isinstance(w, np.ndarray) else [w])]
     return out
 

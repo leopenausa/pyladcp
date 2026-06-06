@@ -66,8 +66,8 @@ def test_cli_compact_batch(tmp_path):
 
 def test_pdf_report_with_ctd(tmp_path):
     from ladcp.io.ctd_cnv import read_ctd_cnv
-    from ladcp.qa.report import assess
     from ladcp.plots.pdf_report import build_report
+    from ladcp.qa.report import assess
     ctd_path = ROOT / "New_golden" / "Good" / "CTD" / "moria-80_clean.cnv"
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=moria05_params())
     ctd = read_ctd_cnv(str(ctd_path), params=moria05_params())
@@ -82,9 +82,9 @@ def test_pdf_report_with_ctd(tmp_path):
 def test_velocity_figures_in_report(tmp_path):
     # Phase 5e/5f: velocity, shear and inversion-diagnostics pages fold into the report
     from ladcp.io.ctd_cnv import read_ctd_cnv
-    from ladcp.qa.report import assess
-    from ladcp.qa.inverse import compute_velocity_full
     from ladcp.plots.pdf_report import build_report
+    from ladcp.qa.inverse import compute_velocity_full
+    from ladcp.qa.report import assess
     ctd_path = ROOT / "New_golden" / "Good" / "CTD" / "moria-80_clean.cnv"
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=moria05_params())
     ctd = read_ctd_cnv(str(ctd_path), params=moria05_params())

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import minimize
 
-from ..models import Metric, RawADCP, Status
+from ..models import Metric, Status
 from .ingest import DualHead
 from .screen import tilt_series
 

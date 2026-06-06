@@ -141,7 +141,8 @@ def read_pd0(path: str, head: str = "", facing_hint: str | None = None) -> RawAD
         for did, arr in ((ID_CORRELATION, corr), (ID_ECHO, echo), (ID_PCT_GOOD, pctg)):
             t = _find_type(buf, pos, offs, did)
             if t is not None:
-                raw = np.frombuffer(buf, dtype="<u1", count=nc * nb, offset=t + 2).reshape(nc, nb).T
+                raw = np.frombuffer(buf, dtype="<u1", count=nc * nb,
+                                    offset=t + 2).reshape(nc, nb).T
                 arr[:, :, it] = raw.astype(float)
 
         bt = _find_type(buf, pos, offs, ID_BOTTOM_TRACK)

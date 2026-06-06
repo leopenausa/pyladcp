@@ -230,7 +230,7 @@ def _btrk_cells(merged, bt, sync, *, zbottom: float, dzbelow: float = 16.0,
     return izm[mask], resid_u[mask], resid_v[mask], merged.weight[mask]
 
 
-def _btrk_reference(bp_mag: "BottomProfile | None",
+def _btrk_reference(bp_mag: BottomProfile | None,
                     sp: ShearProfile) -> tuple[float, float] | None:
     """Barotropic reference [m/s, magnetic] from the bottom track (legacy ``lainbott``).
 

@@ -90,7 +90,8 @@ def _plot_wfield(ax, dh):
 
 
 def _plot_beam_perf(ax, dh):
-    for head, sign, style in ((dh.down, 1, "-"), (dh.up, -1, "--")) if dh.has_up else ((dh.down, 1, "-"),):
+    heads = ((dh.down, 1, "-"), (dh.up, -1, "--")) if dh.has_up else ((dh.down, 1, "-"),)
+    for head, sign, style in heads:
         if head is None:
             continue
         ea = np.nanmedian(head.echo, axis=2)        # [4, nbin]

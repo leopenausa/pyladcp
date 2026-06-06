@@ -117,7 +117,7 @@ def soundspeed_scale(dh: DualHead, sync: SyncResult, ctd: CTDTimeSeries) -> np.n
     sa = gsw.SA_from_SP(ctd.salinity, ctd.pressure, lon, lat)
     ct = gsw.CT_from_t(sa, ctd.temperature, ctd.pressure)
     css = gsw.sound_speed(sa, ct, ctd.pressure)                # in-situ CTD profile m/s
-    zc = ctd_depth(ctd)                                        # +down, non-monotonic (up+down cast)
+    zc = ctd_depth(ctd)                                        # +down, non-monotonic (up+down)
     order = np.argsort(zc)
     ss = np.interp(sync.z_on_ping, zc[order], css[order],
                    left=css[order][0], right=css[order][-1])

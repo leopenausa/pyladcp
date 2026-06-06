@@ -8,8 +8,6 @@ and the number of shear samples per bin (the statistical backbone of each estima
 
 from __future__ import annotations
 
-import numpy as np
-
 from ..qa.inverse import ShearProfile
 
 

@@ -9,8 +9,6 @@ Titles carry the raw-ping offset estimates (the bit-exact values are velocity-st
 
 from __future__ import annotations
 
-import numpy as np
-
 from ..qa.attitude import dual_head_offset
 from ..qa.ingest import DualHead
 

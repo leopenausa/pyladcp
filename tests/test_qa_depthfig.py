@@ -12,9 +12,9 @@ matplotlib.use("Agg")
 
 from ladcp.config import moria05_params
 from ladcp.io.ctd_cnv import read_ctd_cnv
+from ladcp.plots.depth_figure import depth_figure
 from ladcp.qa.depth import synchronize, water_window
 from ladcp.qa.ingest import load_dualhead
-from ladcp.plots.depth_figure import depth_figure
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 GOOD = ROOT / "New_golden" / "Good"

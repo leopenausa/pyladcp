@@ -7,8 +7,6 @@ Panels:
 
 from __future__ import annotations
 
-import numpy as np
-
 from ..qa.inverse import BottomProfile, VelocityProfile
 
 

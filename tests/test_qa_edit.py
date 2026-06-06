@@ -18,11 +18,11 @@ matplotlib.use("Agg")
 
 from ladcp.config import moria05_params
 from ladcp.io.ctd_cnv import read_ctd_cnv
+from ladcp.plots.edit_figure import edit_figure
 from ladcp.qa.bottom import detect_bottom
 from ladcp.qa.depth import synchronize
 from ladcp.qa.edit import edit_data
 from ladcp.qa.ingest import load_dualhead
-from ladcp.plots.edit_figure import edit_figure
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 GOOD = ROOT / "New_golden" / "Good"

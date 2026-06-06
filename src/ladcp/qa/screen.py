@@ -133,4 +133,4 @@ def _middle_hour_fast(head: RawADCP, vlim: float) -> int:
     spd = np.sqrt(head.vel[0] ** 2 + head.vel[1] ** 2)   # [ncell, nens]
     cols = np.arange(nens)
     sel = (cols > skip) & (cols < nens - skip)
-    return int(np.sum((spd[:, sel] > vlim)))
+    return int(np.sum(spd[:, sel] > vlim))
