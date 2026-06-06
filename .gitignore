@@ -28,6 +28,10 @@ legacy_code/
 # tests/fixtures/ is committed; the full local archive is not)
 /New_golden/
 
+# raw shipboard-ADCP (VmDAS) archive + its ingest cache — local only, never committed
+/sADCP/
+*.npz
+
 # --- generated outputs ---
 figures/
 qa_out/
