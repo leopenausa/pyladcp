@@ -1,8 +1,12 @@
-# LADCP Python Pipeline — Data Contract (DRAFT v0.1)
+# pyladcp — Architecture & Data Contract
 
-Status: **draft for review**. No code yet. This defines the interfaces that let the
-back-end (processing) and front-end (QA review) be built against a stable boundary.
-Derived from the MORIA 2025 legacy LDEO_IX (IX_10) pipeline + decoded raw data.
+Status: **partly realized, partly forward-looking** — this is the original design contract,
+kept as a stage/interface reference. The authoritative interface is now the code under
+`src/ladcp/` (well-docstringed); where this document and the code disagree, the code wins.
+Names have evolved (e.g. the legacy `dr` maps to `VelocityProfile` + `BottomProfile`, not the
+draft's `ProfileResult`). Sections on the **full inverse**, **sADCP combine**, and the
+**owned S0 cast-cutting** describe roadmap items (#2/#4/#5), not current code. Derived from
+the MORIA 2025 legacy LDEO_IX (IX_10) pipeline + decoded raw data.
 
 Conventions: SI units. Horizontal velocity carried as **separate `u` (east), `v` (north)**
 floats (the MATLAB code packs them as complex `u+iv`; we keep them split). Depth `z`
