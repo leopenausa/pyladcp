@@ -1,48 +1,81 @@
-# LADCP Pipeline
+# pyladcp
 
-Python re-implementation of the LDEO_IX (Visbeck inverse-method) LADCP workflow, plus an
-acquisition-quality assessment layer. Self-contained; validated against the MORIA 2025
-legacy outputs.
+[![CI](https://github.com/leopenausa/pyladcp/actions/workflows/ci.yml/badge.svg)](https://github.com/leopenausa/pyladcp/actions/workflows/ci.yml)
 
-## Environment
+Pythonic processing and **acquisition-quality assessment** for lowered-ADCP (LADCP) casts —
+a clean-room re-implementation of the LDEO_IX (Visbeck) inverse-method workflow, validated
+against legacy LDEO_IX outputs (MORIA 2025).
 
-```bash
-conda env create -f environment.yml      # creates 'ladcp_pipeline'
-conda activate ladcp_pipeline
-pip install -e .
-```
+From a dual-head (down + up looker) RDI PD0 pair and a cleaned CTD cast, pyladcp produces a
+QA scorecard, an ocean **velocity profile** (`u`, `v` vs depth), a bottom-track-referenced
+profile, and a multi-page PDF report.
 
-## Validate against the legacy golden output
+## Install
 
 ```bash
-ladcp-validate MORIA-05 --root . --out validation_out
+pip install pyladcp            # (PyPI release pending; for now use the source install below)
 ```
 
-Runs the implemented pipeline components on MORIA-05 and diffs against
-`figures/MORIA-05.{lad,bot,log}`, writing a JSON + Markdown report.
+From source:
+
+```bash
+git clone https://github.com/leopenausa/pyladcp
+cd pyladcp
+pip install -e ".[dev]"
+```
+
+A conda environment is also provided (`conda env create -f environment.yml`).
+
+## Quickstart
+
+```bash
+# auto-discover a station under <root>/LADCP and <root>/CTD
+ladcp-qa 80 --root /path/to/cruise --out qa_out
+
+# or name the files explicitly
+ladcp-qa --down cast-M.000 --up cast-S.000 --ctd cast_clean.cnv --station MyCast --out qa_out
+```
+
+Each station yields, in `--out`:
+
+- `<station>_qa.txt` / `.json` — quality-assessment scorecard
+- `<station>.lad` — ocean velocity profile (`z:u:v:ev`)
+- `<station>.bot` — bottom-track-referenced profile (`z:u:v:err`)
+- `<station>_report.pdf` — 8-page report (scorecard + acquisition figures + velocity / shear /
+  inversion-diagnostics) and the standalone PNGs
+
+The magnetic declination defaults to IGRF-13 from the cast position; override with `--drot`.
+
+## Library
+
+```python
+from ladcp.config import moria05_params
+from ladcp.io.ctd_cnv import read_ctd_cnv
+from ladcp.qa.ingest import load_dualhead
+from ladcp.qa.inverse import compute_velocity_full
+
+dh  = load_dualhead("cast-M.000", "cast-S.000", station="MyCast", params=moria05_params())
+ctd = read_ctd_cnv("cast_clean.cnv", params=moria05_params())
+res = compute_velocity_full(dh, ctd, drot=-5.4)   # res.vp (.lad), res.bp (.bot), res.shear
+```
 
 ## Status
 
-- ✅ conda env, package scaffold, data models (`ProfileResult`, `QCMetrics`)
-- ✅ readers: RDI PD0 (dual-head, beam/earth auto-detect), cleaned CTD `.cnv`, golden `.lad/.bot/.log`
-- ✅ IGRF-13 magnetic declination (`ppigrf`)
-- ✅ validation harness + report; config/bottom-track/CTD gates pass on MORIA-05
-- ⏳ **velocity inversion core** (super-ensembles + weighted least-squares) — next milestone
-- ⏳ owned preprocessing: LADCP deployment→cast cutting, sADCP VmDAS→combined
-- 🟡 known finding: legacy declination is ~2° biased (IGRF-2000 + hardcoded fudge); see docs
+Validated end-to-end against the MORIA-80 golden: velocity `u` corr 0.998, bottom-track
+profile corr 0.991. The current solver is the **shear method + reference** (the LDEO_IX
+`ps.shear==1` path); a full sparse inverse is on the roadmap.
 
-## Docs
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next (full inverse, ship-ADCP constraint,
+config-robustness across instruments, Excel/ODV export, CTD-pipeline integration) and
+[`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) for the data interfaces.
 
-- `docs/DATA_CONTRACT.md` — interfaces (inputs, `ProfileResult`, `QCMetrics`, outputs, validation)
-- `docs/VALIDATION_MORIA05.md` — the single-cast validation spec
+## Acknowledgments
 
-## Layout
+pyladcp re-implements the algorithms of the **LDEO_IX** LADCP package by Martin Visbeck and
+colleagues (Lamont-Doherty Earth Observatory). The original MATLAB code is not distributed
+here. If you use pyladcp, please cite it (see [`CITATION.cff`](CITATION.cff)) and acknowledge
+LDEO_IX.
 
-```
-src/ladcp/
-  models.py config.py
-  io/    pd0.py ctd.py golden.py
-  proc/  magdec.py        (inversion stages to come)
-  validate/ compare.py harness.py cli.py
-tests/   test_smoke_moria05.py
-```
+## License
+
+MIT — see [`LICENSE`](LICENSE).

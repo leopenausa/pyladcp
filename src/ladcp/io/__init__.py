@@ -1,1 +1,1 @@
-"""Input readers: raw PD0, cleaned CTD `.cnv`, and legacy golden outputs."""
+"""Input readers: raw RDI PD0 (``pd0``) and cleaned CTD ``.cnv`` (``ctd_cnv``)."""

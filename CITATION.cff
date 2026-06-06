@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use pyladcp in your research, please cite it as below."
+title: "pyladcp: Pythonic LADCP processing and acquisition-quality assessment"
+abstract: >-
+  A Python re-implementation of the LDEO_IX (Visbeck) lowered-ADCP inverse-method
+  workflow, with an acquisition quality-assessment layer. Validated against legacy
+  LDEO_IX outputs.
+type: software
+authors:
+  - family-names: "Pena"
+    given-names: "Leopoldo D."
+    email: "lpena@ub.edu"
+    orcid: "https://orcid.org/0000-0001-6414-6293"
+version: "0.2.0"
+license: MIT
+repository-code: "https://github.com/leopenausa/pyladcp"
+keywords:
+  - oceanography
+  - LADCP
+  - ADCP
+  - inverse method
+references:
+  - type: software
+    title: "LDEO_IX LADCP processing software"
+    notes: >-
+      pyladcp re-implements the algorithms of the LDEO_IX package by Martin Visbeck
+      and colleagues (Lamont-Doherty Earth Observatory). The original MATLAB code is
+      not distributed with pyladcp.
+    authors:
+      - family-names: "Visbeck"
+        given-names: "Martin"

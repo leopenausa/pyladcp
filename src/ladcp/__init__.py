@@ -1,8 +1,8 @@
-"""LADCP processing + acquisition-quality assessment.
+"""pyladcp — Pythonic LADCP processing + acquisition-quality assessment.
 
-Python re-implementation of the LDEO_IX (Visbeck inverse method) workflow, validated
-against the MORIA 2025 legacy outputs. See docs/DATA_CONTRACT.md and
-docs/VALIDATION_MORIA05.md for the design.
+A re-implementation of the LDEO_IX (Visbeck inverse method) lowered-ADCP workflow,
+validated against legacy LDEO_IX outputs (MORIA 2025). See ``docs/DATA_CONTRACT.md``
+and ``docs/ROADMAP.md``.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

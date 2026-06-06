@@ -1,4 +1,4 @@
-name: ladcp_pipeline
+name: pyladcp
 channels:
   - conda-forge
 dependencies:
@@ -11,6 +11,8 @@ dependencies:
   - matplotlib
   - gsw
   - pytest
+  - ruff
   - pip
   - pip:
       - ppigrf        # IGRF-13 geomagnetic model (pure python)
+      - -e .          # install pyladcp itself (editable)
