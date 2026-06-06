@@ -319,6 +319,7 @@ class VelocityResult:
     resid_z: np.ndarray             # [k] cell depths with a finite fit residual -- Figure 12
     resid_u: np.ndarray             # [k] cell minus shear-fit (true east) [m/s]
     resid_v: np.ndarray             # [k] cell minus shear-fit (true north) [m/s]
+    sadcp: np.ndarray | None = None  # [m,4] ship-ADCP constraint (z,u,v,verr) true -- Fig 9
 
     @property
     def resid_rms(self) -> float:
@@ -398,7 +399,8 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
 
     ``sadcp`` is an optional ship-ADCP profile ``(z, u, v, verr)`` in the true frame
     (``solver="inverse"`` only); it adds the ``lainsadcp`` ocean constraint with weight
-    ``sadcpfac`` (golden default 3). The raw SADCP reader that builds it is deferred to #4a.
+    ``sadcpfac`` (golden default 3). Build it from a raw VmDAS folder with
+    :func:`ladcp.io.sadcp_vmdas.extract_profile`; it is carried on the result for Figure 9.
     """
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
@@ -423,8 +425,9 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     bp = _rotate_bottom(bp_mag, drot) if bp_mag is not None else None
     shear = shear_method(se, dz=dz, drot=drot, z=z)        # true-frame baroclinic (Fig 3)
     rz, ru, rv = _solution_residuals(se, sp_mag, drot=drot, weightmin=weightmin)
+    sadcp_used = sadcp if (solver == "inverse" and sadcp is not None) else None
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
-                          resid_z=rz, resid_u=ru, resid_v=rv)
+                          resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:

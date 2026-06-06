@@ -19,11 +19,12 @@ The work below is sequenced; each step gets its own detailed plan before executi
 
 ### Steps
 1. **Foundation** ✅ — git, lean tree, `pyladcp` skeleton, MIT, CI, fixtures. (this work)
-2. **Full inverse + ship-ADCP constraint (#2 + #5)** — the standard LDEO_IX sparse
-   inverse (`getinv`/`lain*`) as an alternate solver, offered alongside the reduced
-   shear+reference solve; SADCP and bottom-track as weighted constraints with error
-   covariance. Goals: method parity + constraint host + accuracy exploration, validated
-   across MORIA + other data.
+2. **Full inverse + ship-ADCP constraint (#2 + #5)** ✅ — the standard LDEO_IX sparse
+   inverse (`getinv`/`lain*`) shipped as `solver="inverse"`, alongside the reduced
+   shear+reference solve; SADCP (`lainsadcp`) and bottom-track as weighted constraints with
+   error covariance. The VmDAS SADCP ingester (`io/sadcp_vmdas.py`) recovers absolute ocean
+   velocity from raw STA/LTA; validated end-to-end on MORIA 79/80/82 — SADCP vs LADCP-inverse
+   agree to 0.015–0.05 m/s (corr 0.86–0.97) over the upper 300 m.
 3. **Data-driven ingest/config (#4a)** — derive instrument config from PD0 headers + a
    typed config schema; flexible file discovery; load + process the other datasets. (Gates
    broad validation of #2; may run before/with #2 to unlock the test data.)

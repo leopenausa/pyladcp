@@ -209,6 +209,48 @@ def test_cache_roundtrip_and_reuse(tmp_path):
     np.testing.assert_array_equal(reused.time, ds.time)
 
 
+def test_verr_max_drops_unconstrained_bins(tmp_path):
+    f = tmp_path / "syn.STA"
+    t0, t1 = _write_sta(f)
+    ds = ingest_dir(tmp_path, transducer_depth=XDUCER)
+    full = extract_profile(ds, time_start=t0, time_end=t1, lat=62.0, lon=-11.0,
+                           verr_max=10.0)
+    tight = extract_profile(ds, time_start=t0, time_end=t1, lat=62.0, lon=-11.0,
+                            verr_max=0.05)        # below the 0.1 floor -> drop everything
+    assert full is not None and tight is None
+
+
+# --------------------------------------------------------------------------- #
+# Figure 9 (ship-ADCP comparison)
+# --------------------------------------------------------------------------- #
+def test_sadcp_figure_and_rms():
+    import matplotlib
+    matplotlib.use("Agg")
+
+    from ladcp.plots.sadcp_figure import sadcp_figure, sadcp_rms_discrepancy
+    from ladcp.qa.inverse import VelocityProfile, VelocityResult
+
+    z = np.arange(20.0, 200.0, 10.0)
+    u = np.full_like(z, 0.10)
+    v = np.full_like(z, -0.05)
+    vp = VelocityProfile(z=z, u=u, v=v, uerr=np.full_like(z, 0.02),
+                         nvel=np.full_like(z, 5), ubar=0.1, vbar=-0.05,
+                         n=np.full_like(z, 5))
+    sadcp = np.column_stack([z, u + 0.03, v - 0.02, np.full_like(z, 0.1)])
+    r = VelocityResult(vp=vp, bp=None, shear=None, zbottom=300.0,
+                       resid_z=np.array([]), resid_u=np.array([]), resid_v=np.array([]),
+                       sadcp=sadcp)
+    rms = sadcp_rms_discrepancy(r)
+    assert np.isclose(rms, np.sqrt((0.03**2 + 0.02**2) / 2), atol=1e-6)
+    fig = sadcp_figure(r, station="TEST")
+    assert fig is not None
+    # no SADCP -> still renders a placeholder without error
+    r2 = VelocityResult(vp=vp, bp=None, shear=None, zbottom=300.0,
+                        resid_z=np.array([]), resid_u=np.array([]), resid_v=np.array([]))
+    assert np.isnan(sadcp_rms_discrepancy(r2))
+    assert sadcp_figure(r2) is not None
+
+
 # --------------------------------------------------------------------------- #
 # real-data test (skipped unless the MORIA SADCP tree is present)
 # --------------------------------------------------------------------------- #

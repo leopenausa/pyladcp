@@ -20,6 +20,7 @@ from .depth_figure import depth_figure
 from .edit_figure import edit_figure
 from .inverse_figure import inverse_diagnostics_figure
 from .raw_dashboard import raw_dashboard
+from .sadcp_figure import sadcp_figure, sadcp_rms_discrepancy
 from .shear_figure import shear_figure
 from .velocity_figure import velocity_figure
 
@@ -70,6 +71,9 @@ def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
         pages.append((lambda f: inverse_diagnostics_figure(v, fig=f),
                       f"{station}_inverse.png",
                       "Figure 12 — Inversion diagnostics", _caption_inverse(v)))
+        if v.sadcp is not None and len(v.sadcp):
+            pages.append((lambda f: sadcp_figure(v, fig=f), f"{station}_sadcp.png",
+                          "Figure 9 — Ship-ADCP comparison", _caption_sadcp(v)))
 
     paths = {}
     # independent high-res PNGs (each plot fn makes its own figure)
@@ -110,6 +114,10 @@ def _save_pngs(dh, ctd, velocity, out, station, paths):
         emit(inverse_diagnostics_figure(v, station=station,
                                         savepath=str(out / f"{station}_inverse.png")),
              f"{station}_inverse.png")
+        if v.sadcp is not None and len(v.sadcp):
+            emit(sadcp_figure(v, station=station,
+                              savepath=str(out / f"{station}_sadcp.png")),
+                 f"{station}_sadcp.png")
 
 
 # ---------------------------------------------------------------- scorecard ---
@@ -305,3 +313,16 @@ def _caption_inverse(v: VelocityResult):
         "trend.\n"
         "• Right: the residual distribution — a tight, zero-centred peak means the single "
         "baroclinic profile explains the super-ensembles well.")
+
+
+def _caption_sadcp(v: VelocityResult):
+    rms = sadcp_rms_discrepancy(v)
+    return (
+        "What this shows and what to expect:\n"
+        "The shipboard ADCP (SADCP) measures the upper-ocean velocity independently of the "
+        "LADCP, so it is both a constraint on the inverse and an external accuracy check.\n"
+        "• Left: absolute SADCP U/V (points, with their scatter) over the LADCP inverse "
+        "profile (lines). Expect them to track over the SADCP's depth range.\n"
+        f"• Right: the LADCP − SADCP difference vs depth, rms {rms:.3f} m/s over the shared "
+        "range. Expect a small, depth-uniform offset; a large or sheared difference flags a "
+        "reference, timing, or position problem.")

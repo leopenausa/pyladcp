@@ -262,7 +262,7 @@ def extract_profile(ds: SadcpDataset, *, time_start, time_end,
                     lat: float | None = None, lon: float | None = None,
                     dtok_min: float = 0.0, maxdepth: float = np.inf,
                     zbottom: float = np.nan, pos_tol_deg: float = 0.1,
-                    min_samples: int = 3):
+                    min_samples: int = 3, verr_max: float = 1.0):
     """Window the dataset to one cast and average to ``svel = [z, u, v, verr]``.
 
     Port of LDEO_IX ``loadsadcp.m``: select ensembles in ``[start - dtok, end + dtok]``;
@@ -270,10 +270,11 @@ def extract_profile(ds: SadcpDataset, *, time_start, time_end,
     LADCP fix (longitude tolerance widened by ``1/cos(lat)``); time-average u/v per depth;
     set ``verr`` to the across-ensemble standard deviation (floor 0.1 m/s) scaled by
     ``max(n)/n`` so sparsely sampled depths weigh less; keep depths above ``maxdepth`` and
-    ``zbottom - 30``. Depths sampled in fewer than ``min_samples`` ensembles are dropped, so
-    isolated out-of-range noise spikes (which the legacy's CODAS step would have screened)
-    do not enter. Returns an ``(n, 4)`` array in the true frame, or ``None`` if no usable
-    data. ``ds.u``/``ds.v`` are already absolute ocean velocity.
+    ``zbottom - 30``. Depths sampled in fewer than ``min_samples`` ensembles, or whose scaled
+    ``verr`` exceeds ``verr_max`` (effectively unconstrained out-of-range noise the legacy's
+    CODAS step would have screened), are dropped. Returns an ``(n, 4)`` array in the true
+    frame, or ``None`` if no usable data. ``ds.u``/``ds.v`` are already absolute ocean
+    velocity.
     """
     import warnings
 
@@ -302,13 +303,15 @@ def extract_profile(ds: SadcpDataset, *, time_start, time_end,
         umean = np.nanmean(u, axis=1)
         vmean = np.nanmean(v, axis=1)
         verr = np.nanstd(u, axis=1, ddof=1) + np.nanstd(v, axis=1, ddof=1)
-    verr = np.where(np.isfinite(verr) & (verr > 0), verr, 0.1)
+    # floor a zero / near-zero / non-finite scatter to 0.1 m/s (legacy loadsadcp floor),
+    # so a degenerate verr cannot blow up to near-infinite constraint weight
+    verr = np.where(np.isfinite(verr) & (verr > 1e-6), verr, 0.1)
     nmax = n[enough].max()
     with np.errstate(divide="ignore", invalid="ignore"):
         verr = verr * nmax / np.where(n > 0, n, np.nan)
 
     z = ds.depth
-    ok = enough & np.isfinite(umean + vmean) & (z < maxdepth)
+    ok = enough & np.isfinite(umean + vmean) & (z < maxdepth) & (verr <= verr_max)
     if np.isfinite(zbottom):
         ok &= z < (zbottom - 30.0)
     if not ok.any():
