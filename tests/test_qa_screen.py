@@ -15,7 +15,7 @@ from ladcp.qa.golden import LOG_COUNTS
 from ladcp.qa.ingest import load_dualhead
 from ladcp.qa.screen import screen
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 LAD = ROOT / "New_golden" / "Good" / "LADCP"
 DOWN, UP = LAD / "MORIA-80-LADCP-M.000", LAD / "MORIA-80-LADCP-S.000"
 

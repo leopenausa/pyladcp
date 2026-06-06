@@ -24,8 +24,9 @@ WinADCP/
 logsheets/
 legacy_code/
 
-# golden / reference data: ignore everything except the committed test fixture
-New_golden/
+# golden / reference data at repo root (the small test fixture under
+# tests/fixtures/ is committed; the full local archive is not)
+/New_golden/
 
 # --- generated outputs ---
 figures/

@@ -13,7 +13,7 @@ from ladcp.qa.export import write_lad
 from ladcp.qa.ingest import load_dualhead
 from ladcp.qa.inverse import compute_velocity
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 GOOD = ROOT / "New_golden" / "Good"
 DOWN = GOOD / "LADCP" / "MORIA-80-LADCP-M.000"
 UP = GOOD / "LADCP" / "MORIA-80-LADCP-S.000"

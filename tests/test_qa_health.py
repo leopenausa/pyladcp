@@ -14,7 +14,7 @@ from ladcp.qa.ingest import load_dualhead
 from ladcp.qa.range import profiling_range
 from ladcp.qa.report import assess, text_report
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 LAD = ROOT / "New_golden" / "Good" / "LADCP"
 DOWN, UP = LAD / "MORIA-80-LADCP-M.000", LAD / "MORIA-80-LADCP-S.000"
 MAT = ROOT / "New_golden" / "MORIA-80_LEO" / "MORIA-80.mat"

@@ -15,7 +15,7 @@ from ladcp.plots.raw_dashboard import raw_dashboard
 from ladcp.qa.cli import main as cli_main
 from ladcp.qa.ingest import load_dualhead
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 LAD = ROOT / "New_golden" / "Good" / "LADCP"
 DOWN, UP = LAD / "MORIA-80-LADCP-M.000", LAD / "MORIA-80-LADCP-S.000"
 

@@ -16,7 +16,7 @@ from ladcp.qa.depth import synchronize, water_window
 from ladcp.qa.ingest import load_dualhead
 from ladcp.plots.depth_figure import depth_figure
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 GOOD = ROOT / "New_golden" / "Good"
 DOWN = GOOD / "LADCP" / "MORIA-80-LADCP-M.000"
 UP = GOOD / "LADCP" / "MORIA-80-LADCP-S.000"

@@ -17,7 +17,7 @@ from ladcp.io.ctd_cnv import read_ctd_cnv
 from ladcp.qa.golden import load_p_struct
 from ladcp.qa.ingest import extract_config, load_dualhead
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 GOOD = ROOT / "New_golden" / "Good"
 DOWN = GOOD / "LADCP" / "MORIA-80-LADCP-M.000"
 UP = GOOD / "LADCP" / "MORIA-80-LADCP-S.000"
