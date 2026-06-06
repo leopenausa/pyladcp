@@ -354,15 +354,18 @@ def _solution_residuals(se: SuperEns, sp_mag: ShearProfile, *, drot: float,
 
 
 def compute_velocity(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
-                     dz: float = 8.0, params=None) -> VelocityProfile:
-    """End-to-end velocity profile: merge -> super-ensembles -> shear + bottom-track ref.
+                     dz: float = 8.0, params=None, solver: str = "shear"
+                     ) -> VelocityProfile:
+    """End-to-end velocity profile: merge -> super-ensembles -> velocity solution.
 
     Convenience wrapper tying the Phase-5 stages together. ``drot`` is the magnetic
     declination [deg] (magnetic->true rotation); pass the cast value (golden
-    ``p.drot``) or compute it from position via :func:`ladcp.proc.magdec`. The depth-mean
-    reference uses the bottom track when available (:func:`_btrk_reference`).
+    ``p.drot``) or compute it from position via :func:`ladcp.proc.magdec`. ``solver``
+    chooses ``"shear"`` (shear shape + bottom-track reference) or ``"inverse"`` (full
+    constrained least-squares) -- see :func:`compute_velocity_full`.
     """
-    return compute_velocity_full(dh, ctd, drot=drot, dz=dz, params=params).vp
+    return compute_velocity_full(dh, ctd, drot=drot, dz=dz, params=params,
+                                 solver=solver).vp
 
 
 def compute_velocity_and_bottom(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
@@ -373,18 +376,44 @@ def compute_velocity_and_bottom(dh: DualHead, ctd: CTDTimeSeries, *, drot: float
     return r.vp, r.bp, r.zbottom
 
 
+def _ping_dt(dh: DualHead) -> float:
+    """Median seconds between down-looker pings (super-ensemble time scaling)."""
+    t = (dh.down.time - dh.down.time[0]) / np.timedelta64(1, "s")
+    dt = float(np.nanmedian(np.diff(t)))
+    return dt if np.isfinite(dt) and dt > 0 else 1.0
+
+
 def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
-                          dz: float = 8.0, params=None, weightmin: float = 0.1
-                          ) -> VelocityResult:
-    """End-to-end solve returning every product the velocity figures need."""
+                          dz: float = 8.0, params=None, weightmin: float = 0.1,
+                          solver: str = "shear") -> VelocityResult:
+    """End-to-end solve returning every product the velocity figures need.
+
+    ``solver`` selects the velocity (``.lad``) solution, naming the legacy ``ps.shear``
+    choice explicitly: ``"shear"`` (default, ``ps.shear==1``) takes the shear method's
+    baroclinic shape plus a barotropic reference; ``"inverse"`` (``ps.shear==0``) forms the
+    full constrained least-squares inverse (:func:`ladcp.qa.inverse_full.invert`) with
+    bottom-track + navigation constraints. The bottom-track ``.bot`` profile, shear figure
+    and residuals are produced the same way for both.
+    """
+    if solver not in ("shear", "inverse"):
+        raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
     se, z, merged, bt, sync, bottom = _build(dh, ctd, dz=dz, params=params)
     sp_mag = shear_method(se, dz=dz, drot=0.0, z=z)         # magnetic baroclinic shape
     bp_mag = bottom_referenced_profile(merged, bt, sync, zbottom=bottom.zbottom, dz=dz,
                                        drot=0.0)
-    ref = _btrk_reference(bp_mag, sp_mag)
-    uref, vref = ref if ref is not None else (None, None)
-    vp = velocity_profile(se, dz=dz, drot=drot, z=z, uref=uref, vref=vref,
-                          weightmin=weightmin)
+    if solver == "inverse":
+        from .inverse_full import inverse_inputs, invert
+        # weightmin here is the inverse data cut on velerr/scatter (golden ps.weightmin
+        # 0.05), a different quantity from the shear path's correlation-weight cut, so the
+        # inverse keeps its own legacy default rather than the shear-oriented argument.
+        aux = inverse_inputs(se, bt=bt, sync=sync, ctd=ctd, ping_dt=_ping_dt(dh),
+                             zbottom=bottom.zbottom)
+        vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom)
+    else:
+        ref = _btrk_reference(bp_mag, sp_mag)
+        uref, vref = ref if ref is not None else (None, None)
+        vp = velocity_profile(se, dz=dz, drot=drot, z=z, uref=uref, vref=vref,
+                              weightmin=weightmin)
     bp = _rotate_bottom(bp_mag, drot) if bp_mag is not None else None
     shear = shear_method(se, dz=dz, drot=drot, z=z)        # true-frame baroclinic (Fig 3)
     rz, ru, rv = _solution_residuals(se, sp_mag, drot=drot, weightmin=weightmin)

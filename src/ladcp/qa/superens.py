@@ -277,6 +277,7 @@ class SuperEns:
     izd: np.ndarray
     izu: np.ndarray
     counts: dict[str, int] = field(default_factory=dict)
+    group_pings: list[np.ndarray] | None = None   # [nse] original ping indices per kept SE
 
     @property
     def n_se(self) -> int:
@@ -393,5 +394,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
     counts["ruvs_floored"] = int(np.count_nonzero(low))
     counts["reduced_len"] = int(z_se.size)
 
+    # surviving ping-index groups (post empty-SE drop), for solvers that need to map
+    # per-ping products (bottom-track, nav) back onto the super-ensemble columns.
+    group_pings = [groups[i] for i in sel]
+
     return SuperEns(ru=ru, rv=rv, rw=rw, ruvs=ruvs, weight=weight, izm=izm, z=z_se,
-                    dtiv=dtiv, izd=izd, izu=izu, counts=counts)
+                    dtiv=dtiv, izd=izd, izu=izu, counts=counts, group_pings=group_pings)

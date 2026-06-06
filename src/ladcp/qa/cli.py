@@ -47,7 +47,8 @@ def _resolve(root: Path, st: str) -> tuple[str, str | None, str | None, str]:
     return str(down), (str(up) if up else None), (str(ctd) if ctd else None), label
 
 
-def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None) -> int:
+def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
+             solver="shear") -> int:
     params = moria05_params()
     dh = load_dualhead(down, up, station=station, params=params)
     ctd = read_ctd_cnv(ctd_path, params=params) if ctd_path else None
@@ -61,7 +62,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None) -> int:
     # velocity solve (requires both heads + CTD): .lad + .bot text, figures via the report
     result = None
     if dh.has_up and ctd is not None:
-        result = _velocity_outputs(dh, ctd, station, out, drot)
+        result = _velocity_outputs(dh, ctd, station, out, drot, solver)
 
     if make_plots:
         from ..plots.pdf_report import build_report
@@ -71,7 +72,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None) -> int:
     return 0 if qc.overall_status.value != "fail" else 1
 
 
-def _velocity_outputs(dh, ctd, station, out, drot):
+def _velocity_outputs(dh, ctd, station, out, drot, solver="shear"):
     import numpy as np
 
     from ..qa.export import write_bot, write_lad
@@ -87,11 +88,12 @@ def _velocity_outputs(dh, ctd, station, out, drot):
         except Exception:
             drot = 0.0
 
-    result = compute_velocity_full(dh, ctd, drot=drot, params=dh.params)
+    result = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver)
     vp, bp = result.vp, result.bp
     lad = out / f"{station}.lad"
     write_lad(vp, str(lad), station=station, lat=lat, lon=lon, drot=drot, time=when)
-    print(f"        velocity: {lad}  (drot {drot:+.2f} deg, ubar {vp.ubar:+.3f})")
+    print(f"        velocity: {lad}  (solver {solver}, drot {drot:+.2f} deg, "
+          f"ubar {vp.ubar:+.3f})")
 
     if bp is not None and bp.n_bins > 0:
         bot = out / f"{station}.bot"
@@ -113,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-plots", action="store_true", help="skip figures/PDF")
     ap.add_argument("--drot", type=float, default=None,
                     help="magnetic declination [deg] for velocity (default: IGRF from position)")
+    ap.add_argument("--solver", choices=("shear", "inverse"), default="shear",
+                    help="velocity solver: shear shape+reference (default) or full inverse")
     # explicit single-station override
     ap.add_argument("--down", help="down-looker (Master) PD0 file")
     ap.add_argument("--up", help="up-looker (Slave) PD0 file")
@@ -123,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.down:                                   # explicit mode
         station = args.station or Path(args.down).stem
         return _run_one(args.down, args.up, args.ctd, station, args.outdir,
-                        not args.no_plots, drot=args.drot)
+                        not args.no_plots, drot=args.drot, solver=args.solver)
 
     if not args.stations:
         ap.error("give one or more station ids, or use --down/--up/--ctd")
@@ -133,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     for st in args.stations:
         down, up, ctd, label = _resolve(root, st)
         rc |= _run_one(down, up, ctd, label, args.outdir, not args.no_plots,
-                       drot=args.drot)
+                       drot=args.drot, solver=args.solver)
     return rc
 
 
