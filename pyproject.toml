@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ladcp"
+version = "0.1.0"
+description = "LADCP processing + acquisition-quality assessment (Python re-implementation of LDEO_IX)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "xarray",
+    "netcdf4",
+    "matplotlib",
+    "gsw",
+    "ppigrf",
+]
+
+[project.scripts]
+ladcp-validate = "ladcp.validate.cli:main"
+ladcp-qa = "ladcp.qa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

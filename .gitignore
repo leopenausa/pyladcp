@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- caches / tooling ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.memsearch/
+.claude/
+
+# --- large data (kept local, never committed) ---
+raw_ladcp_test/
+test_data/
+clean_ctd/
+WinADCP/
+logsheets/
+legacy_code/
+
+# golden / reference data: ignore everything except the committed test fixture
+New_golden/
+
+# --- generated outputs ---
+figures/
+qa_out/
+validation_out/
+
+# --- archives / binaries ---
+*.rar
+*.zip
+*.mat
+!tests/fixtures/**/*.mat

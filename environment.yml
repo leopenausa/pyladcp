@@ -1,0 +1,16 @@
+name: ladcp_pipeline
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - xarray
+  - netcdf4
+  - matplotlib
+  - gsw
+  - pytest
+  - pip
+  - pip:
+      - ppigrf        # IGRF-13 geomagnetic model (pure python)
