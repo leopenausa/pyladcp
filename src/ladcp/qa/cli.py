@@ -63,6 +63,12 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     result = None
     if dh.has_up and ctd is not None:
         result = _velocity_outputs(dh, ctd, station, out, drot, solver, sadcp_opts)
+        from ..qa.checks import consistency_checks
+        for m in consistency_checks(result):       # checkinv -> scorecard
+            qc.add(m)
+        # refresh the persisted QA text/json now that consistency checks are in
+        (out / f"{station}_qa.txt").write_text(text_report(qc) + "\n")
+        (out / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
 
     if make_plots:
         from ..plots.pdf_report import build_report

@@ -16,6 +16,7 @@ from ..models import CTDTimeSeries, QCMetrics, Status
 from ..qa.ingest import DualHead
 from ..qa.inverse import VelocityResult
 from .alignment import alignment_figure
+from .btrack_figure import btrack_figure
 from .depth_figure import depth_figure
 from .edit_figure import edit_figure
 from .inverse_figure import inverse_diagnostics_figure
@@ -34,6 +35,7 @@ _HEADLINE = [
     "dual_head_offset_est", "ctd_sync_corr", "bottom_depth",
 ]
 _A4 = (8.27, 11.69)
+_CONSISTENCY = ["velocity_error_vs_noise", "bottom_track_consistency", "sadcp_consistency"]
 
 
 def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
@@ -71,6 +73,9 @@ def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
         pages.append((lambda f: inverse_diagnostics_figure(v, fig=f),
                       f"{station}_inverse.png",
                       "Figure 12 — Inversion diagnostics", _caption_inverse(v)))
+        if v.btrk is not None and v.btrk.n_own:
+            pages.append((lambda f: btrack_figure(v, fig=f), f"{station}_btrack.png",
+                          "Figure 13 — Bottom-track check", _caption_btrack(v)))
         if v.sadcp is not None and len(v.sadcp):
             pages.append((lambda f: sadcp_figure(v, fig=f), f"{station}_sadcp.png",
                           "Figure 9 — Ship-ADCP comparison", _caption_sadcp(v)))
@@ -114,6 +119,10 @@ def _save_pngs(dh, ctd, velocity, out, station, paths):
         emit(inverse_diagnostics_figure(v, station=station,
                                         savepath=str(out / f"{station}_inverse.png")),
              f"{station}_inverse.png")
+        if v.btrk is not None and v.btrk.n_own:
+            emit(btrack_figure(v, station=station,
+                               savepath=str(out / f"{station}_btrack.png")),
+                 f"{station}_btrack.png")
         if v.sadcp is not None and len(v.sadcp):
             emit(sadcp_figure(v, station=station,
                               savepath=str(out / f"{station}_sadcp.png")),
@@ -138,6 +147,9 @@ def _scorecard_page(qc: QCMetrics, station: str):
 
     y = 0.855
     y = _section(ax, "Acquisition health", _HEADLINE, qc, y)
+    checks = [k for k in _CONSISTENCY if k in qc.metrics]
+    if checks:
+        y = _section(ax, "Solution consistency (checkinv)", checks, qc, y - 0.02)
     extras = [k for k in qc.metrics if k.startswith("edit_")]
     y = _section(ax, "Editing / screening (informational)", extras, qc, y - 0.02)
 
@@ -313,6 +325,21 @@ def _caption_inverse(v: VelocityResult):
         "trend.\n"
         "• Right: the residual distribution — a tight, zero-centred peak means the single "
         "baroclinic profile explains the super-ensembles well.")
+
+
+def _caption_btrack(v: VelocityResult):
+    b = v.btrk
+    rdi = f"{b.n_rdi} RDI pings" if b.n_rdi else "no RDI track"
+    return (
+        "What this shows and what to expect:\n"
+        "Two independent bottom-track estimates of the package velocity over ground — our "
+        f"own near-seabed-cell track ({b.n_own} pings) and the RDI firmware track "
+        f"({rdi}). They reference the LADCP barotropic velocity, so they should agree.\n"
+        f"• U/V/W panels: own (blue) over RDI (green); medians marked. Bias u {b.u_bias:+.3f} "
+        f"v {b.v_bias:+.3f} m/s — expect |bias| < 0.1; a larger offset flags a bottom-track "
+        "or reference problem.\n"
+        f"• Bottom roughness {b.roughness:.0f} m (scatter of the detected seabed distance); "
+        "large values mean rough or sloped terrain that widens the scatter.")
 
 
 def _caption_sadcp(v: VelocityResult):

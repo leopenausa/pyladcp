@@ -255,3 +255,67 @@ def bottom_metric(b: BottomResult) -> Metric:
         source_stage="qa.bottom",
         note=f"+/- {b.error:.2f} m from {b.n_valid} bottom echoes",
     )
+
+
+@dataclass
+class BtrkDiagnostics:
+    """Own vs RDI bottom-track comparison (port of ``checkbtrk`` essentials, Figure 13).
+
+    Both estimates are the earth-frame package velocity over ground; the RDI firmware
+    bottom track and our own near-seabed-cell track are independent, so their agreement
+    is the headline bottom-track quality check. Velocities are stored as finite-only 1-D
+    arrays for plotting; ``*_bias`` is ``median(own) - median(rdi)`` per component (NaN if
+    no RDI track), ``*_std`` the own-track scatter, ``roughness`` the std of the detected
+    bottom distance.
+    """
+
+    own_u: np.ndarray
+    own_v: np.ndarray
+    own_w: np.ndarray
+    rdi_u: np.ndarray
+    rdi_v: np.ndarray
+    rdi_w: np.ndarray
+    hbot: np.ndarray
+    u_bias: float
+    v_bias: float
+    w_bias: float
+    u_std: float
+    v_std: float
+    w_std: float
+    roughness: float
+    n_own: int
+    n_rdi: int
+
+
+def btrk_diagnostics(bt: BottomTrack, dh) -> BtrkDiagnostics:
+    """Compare our own per-ping bottom track to the RDI firmware track (both earth frame).
+
+    Our ``bt.bvel`` is ``-u_package``; RDI reports the bottom's velocity relative to the
+    transducer, also ``-u_package``, so the two share a sign and are compared directly.
+    Returns the finite velocity samples plus inter-method bias/scatter and roughness.
+    """
+    own = bt.bvel[np.isfinite(bt.bvel)]
+    own_u, own_v = np.real(own), np.imag(own)
+    own_w = bt.bw[np.isfinite(bt.bw)]
+
+    rdi_u = rdi_v = rdi_w = np.array([])
+    btv = getattr(dh.down, "bt_vel", None)
+    if btv is not None:
+        rdi_u = btv[0][np.isfinite(btv[0])]
+        rdi_v = btv[1][np.isfinite(btv[1])]
+        rdi_w = btv[2][np.isfinite(btv[2])]
+
+    def bias(o, r):
+        return float(np.median(o) - np.median(r)) if o.size and r.size else np.nan
+
+    return BtrkDiagnostics(
+        own_u=own_u, own_v=own_v, own_w=own_w,
+        rdi_u=rdi_u, rdi_v=rdi_v, rdi_w=rdi_w,
+        hbot=bt.hbot[np.isfinite(bt.hbot)],
+        u_bias=bias(own_u, rdi_u), v_bias=bias(own_v, rdi_v), w_bias=bias(own_w, rdi_w),
+        u_std=float(np.std(own_u)) if own_u.size else np.nan,
+        v_std=float(np.std(own_v)) if own_v.size else np.nan,
+        w_std=float(np.std(own_w)) if own_w.size else np.nan,
+        roughness=float(np.std(bt.hbot[np.isfinite(bt.hbot)])) if bt.n_valid else np.nan,
+        n_own=int(own_u.size), n_rdi=int(rdi_u.size),
+    )

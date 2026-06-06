@@ -20,6 +20,7 @@ corr 0.98 (u) / 0.97 (v), RMS ~0.03 / 0.015 m/s.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -27,6 +28,9 @@ from ..models import CTDTimeSeries
 from .depth import synchronize
 from .ingest import DualHead
 from .superens import SuperEns, _uvrot, form_superensembles, merge_heads
+
+if TYPE_CHECKING:
+    from .bottom import BtrkDiagnostics
 
 
 @dataclass
@@ -320,6 +324,7 @@ class VelocityResult:
     resid_u: np.ndarray             # [k] cell minus shear-fit (true east) [m/s]
     resid_v: np.ndarray             # [k] cell minus shear-fit (true north) [m/s]
     sadcp: np.ndarray | None = None  # [m,4] ship-ADCP constraint (z,u,v,verr) true -- Fig 9
+    btrk: BtrkDiagnostics | None = None  # own-vs-RDI bottom-track check -- Figure 13
 
     @property
     def resid_rms(self) -> float:
@@ -426,8 +431,10 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     shear = shear_method(se, dz=dz, drot=drot, z=z)        # true-frame baroclinic (Fig 3)
     rz, ru, rv = _solution_residuals(se, sp_mag, drot=drot, weightmin=weightmin)
     sadcp_used = sadcp if (solver == "inverse" and sadcp is not None) else None
+    from .bottom import btrk_diagnostics
+    btrk = btrk_diagnostics(bt, dh) if np.isfinite(bottom.zbottom) else None
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
-                          resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used)
+                          resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used, btrk=btrk)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:
