@@ -93,6 +93,53 @@ def test_shear_path_unchanged(both_solvers):
     assert s["u"].rms < 0.02
 
 
+def test_lainsadcp_weight_math():
+    # row weight == sadcpfac*velerr/verr; rhs == d*w; jz == clip(round(z/dz))
+    from ladcp.qa.inverse_full import _lainsadcp
+    svel = np.array([[40., 0.10, -0.05, 0.05],
+                     [80., 0.12, -0.06, 0.10],
+                     [120., 0.08, -0.04, 0.08],
+                     [160., 0.05, -0.02, 0.04]])
+    jz, w, rhs, kept = _lainsadcp(svel, nz=30, dz=8.0, sadcpfac=3.0, velerr=0.06)
+    assert np.allclose(w, 3.0 * 0.06 / svel[:, 3])
+    assert np.allclose(rhs, (svel[:, 1] + 1j * svel[:, 2]) * w)
+    assert np.array_equal(jz, np.clip(np.round(svel[:, 0] / 8.0).astype(int), 1, 30) - 1)
+
+
+def test_lainsadcp_reproduces_fdccc1_002_golden_weight():
+    # the embedded SADCP profiles + golden velerr must give the logged mean weight 1.5993
+    from ladcp.qa import validate as V
+    from ladcp.qa.inverse_full import _lainsadcp
+    if not V.STATIONS["FDCCC1_002"].mat.exists():
+        pytest.skip("FDCCC1_002 golden not present (local-only)")
+    dr = V.load_dr("FDCCC1_002")
+    svel = np.column_stack([dr.z_sadcp, dr.u_sadcp, dr.v_sadcp, dr.uerr_sadcp])
+    svel = svel[np.isfinite(svel[:, 1])]
+    _, w, _, _ = _lainsadcp(svel, nz=int(225 / 8), dz=8.0, sadcpfac=3.0, velerr=0.056327)
+    assert np.mean(w) == pytest.approx(1.5993, abs=1e-3)
+
+
+def test_sadcp_pulls_solution(both_solvers):
+    # injecting a +0.15 m/s SADCP offset shifts the inverse toward it, scaling with sadcpfac
+    p = moria05_params()
+    dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=p)
+    ctd = read_ctd_cnv(str(CTD), params=p)
+    base = compute_velocity_full(dh, ctd, drot=DROT, params=p, solver="inverse").vp
+    zs = np.array([40., 80., 120., 160., 200.])
+    svel = np.column_stack([zs, np.interp(zs, base.z, base.u) + 0.15,
+                            np.interp(zs, base.z, base.v), np.full(zs.size, 0.05)])
+    band = (base.z >= 32) & (base.z <= 208)
+
+    def du(fac):
+        vp = compute_velocity_full(dh, ctd, drot=DROT, params=p, solver="inverse",
+                                   sadcp=svel, sadcpfac=fac).vp
+        return float(np.nanmean(vp.u[band] - base.u[band]))
+
+    d1, d3, d10 = du(1.0), du(3.0), du(10.0)
+    assert 0 < d1 < d3 < d10          # monotonic pull toward the +0.15 target
+    assert d10 > 0.04
+
+
 def test_bad_solver_name_rejected():
     p = moria05_params()
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=p)

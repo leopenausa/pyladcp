@@ -385,7 +385,8 @@ def _ping_dt(dh: DualHead) -> float:
 
 def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
                           dz: float = 8.0, params=None, weightmin: float = 0.1,
-                          solver: str = "shear") -> VelocityResult:
+                          solver: str = "shear", sadcp: np.ndarray | None = None,
+                          sadcpfac: float = 3.0) -> VelocityResult:
     """End-to-end solve returning every product the velocity figures need.
 
     ``solver`` selects the velocity (``.lad``) solution, naming the legacy ``ps.shear``
@@ -394,6 +395,10 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     full constrained least-squares inverse (:func:`ladcp.qa.inverse_full.invert`) with
     bottom-track + navigation constraints. The bottom-track ``.bot`` profile, shear figure
     and residuals are produced the same way for both.
+
+    ``sadcp`` is an optional ship-ADCP profile ``(z, u, v, verr)`` in the true frame
+    (``solver="inverse"`` only); it adds the ``lainsadcp`` ocean constraint with weight
+    ``sadcpfac`` (golden default 3). The raw SADCP reader that builds it is deferred to #4a.
     """
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
@@ -408,7 +413,8 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
         # inverse keeps its own legacy default rather than the shear-oriented argument.
         aux = inverse_inputs(se, bt=bt, sync=sync, ctd=ctd, ping_dt=_ping_dt(dh),
                              zbottom=bottom.zbottom)
-        vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom)
+        vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom,
+                    svel=sadcp, sadcpfac=sadcpfac if sadcp is not None else 0.0)
     else:
         ref = _btrk_reference(bp_mag, sp_mag)
         uref, vref = ref if ref is not None else (None, None)

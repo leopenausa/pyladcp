@@ -161,6 +161,42 @@ def _smooth_block(rows, nz, nt, *, on_ocean):
     return sp.csr_matrix((nr, nz)), block
 
 
+def _lainsadcp(svel: np.ndarray, nz: int, dz: float, sadcpfac: float, velerr: float):
+    """Ship-ADCP ocean-velocity constraint rows (port of ``getinv.m`` ``lainsadcp``).
+
+    ``svel`` is the SADCP profile matched to the cast, columns ``(z, u, v, verr)`` in the
+    **magnetic** frame (same as the LADCP data). Each finite point pins the ocean velocity
+    at its depth bin: row weight ``sadcpfac * velerr/verr`` (legacy halving/column-norm
+    ``fac2`` is computed but commented out in the source, so it is omitted here -- this
+    reproduces the logged "mean sadcp weight" ~1.6 on FDCCC1_002). Only the ocean block is
+    touched (``Ac`` row = 0). Returns ``(jz, w, rhs, kept)`` where ``kept`` is the
+    ``fac>0.1`` mask the legacy stores as ``dr.*_sadcp``; empty arrays if unusable.
+    """
+    z = np.abs(svel[:, 0])
+    d = svel[:, 1] + 1j * svel[:, 2]
+    verr = svel[:, 3].astype(float).copy()
+    ok = np.isfinite(d)
+    z, d, verr = z[ok], d[ok], verr[ok]
+    empty = (np.array([], int), np.array([]), np.array([], complex), np.zeros(0, bool))
+    if z.size < 1 or sadcpfac <= 0:
+        return empty
+    bad = ~np.isfinite(verr) | (verr == 0)
+    if (~bad).any():
+        verr[bad] = float(np.nanmax(verr[~bad]))
+    else:
+        verr[:] = 1.0
+    if z.size > 3:                                      # weight by scatter when >1 profile
+        if not (velerr > 0):
+            s = np.sort(verr)
+            velerr = float(np.mean(s[:int(np.ceil(0.2 * s.size))]))
+        fac = velerr / verr
+    else:
+        fac = np.ones(z.size)
+    jz = np.clip(np.round(z / dz).astype(int), 1, nz) - 1
+    w = sadcpfac * fac
+    return jz, w, d * w, (fac > 0.1)
+
+
 # --------------------------------------------------------------------------- #
 # one weighted L2 solve
 # --------------------------------------------------------------------------- #
@@ -178,17 +214,21 @@ class _Solution:
     jz: np.ndarray              # [ndata] ocean-bin index
     iens: np.ndarray            # [ndata] super-ensemble index
     ibin: np.ndarray            # [ndata] super-ensemble bin (row) index
+    n_sadcp: int = 0            # SADCP constraint rows applied
 
 
 def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
            smoofac: float, botfac: float, barofac: float, zbottom: float,
+           svel: np.ndarray | None = None, sadcpfac: float = 0.0,
            velerr_override: float | None = None,
            reject: np.ndarray | None = None) -> _Solution:
     """Single constrained weighted L2 inverse solve (``getinv`` body up to ``lainsolv``).
 
     Data rows model ``measured = u_ocean(z) + u_ctd(t)``; ``u_ctd`` is the reference
-    (negative package) velocity. ``velerr_override`` supplies the two-pass velocity error;
-    ``reject`` is a ``[nbin, nse]`` mask of ``lanarrow``-flagged points to drop.
+    (negative package) velocity. ``svel`` is an optional magnetic-frame SADCP profile
+    ``(z, u, v, verr)`` whose rows pin the ocean velocity (``lainsadcp``).
+    ``velerr_override`` supplies the two-pass velocity error; ``reject`` is a
+    ``[nbin, nse]`` mask of ``lanarrow``-flagged points to drop.
     """
     nbin, nt = se.ru.shape
     d = (se.ru + 1j * se.rv).reshape(-1)               # complex data (magnetic)
@@ -280,8 +320,18 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
         crow = (dt / np.nansum(dt) * w * fac)[None, :]
         add_block(sp.csr_matrix((1, nz)), sp.csr_matrix(crow), [aux.uship * w * fac])
 
+    # --- ship-ADCP constraint (legacy lainsadcp) ------------------------------- #
+    n_sadcp = 0
+    if svel is not None and sadcpfac > 0 and np.isfinite(svel[:, 1]).sum() > 2:
+        jzs, ws, rhss, _ = _lainsadcp(svel, nz, dz, sadcpfac, velerr)
+        if jzs.size:
+            n_sadcp = jzs.size
+            ob = sp.coo_matrix((ws, (np.arange(n_sadcp), jzs)),
+                               shape=(n_sadcp, nz)).tocsr()
+            add_block(ob, sp.csr_matrix((n_sadcp, nt)), rhss)
+
     # --- zero-mean fallback (legacy lainocean) --------------------------------- #
-    if n_bt == 0 and not have_baro:
+    if n_bt == 0 and not have_baro and n_sadcp == 0:
         fac = float(np.mean(range_ocean))
         add_block(sp.csr_matrix(np.ones((1, nz)) * fac), sp.csr_matrix((1, nt)), [0.0])
 
@@ -294,7 +344,8 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
     nvel = np.asarray(A2.astype(bool).sum(axis=0)).ravel()
 
     return _Solution(uocean=uocean, uctd=uctd, velerr=velerr, z=z, nz=nz, nt=nt,
-                     n_bt=n_bt, nvel=nvel, d=d, jz=jz, iens=jprof, ibin=ibin)
+                     n_bt=n_bt, nvel=nvel, d=d, jz=jz, iens=jprof, ibin=ibin,
+                     n_sadcp=n_sadcp)
 
 
 def _ocean_error(sol: _Solution) -> np.ndarray:
@@ -355,19 +406,30 @@ def _surface_fill(u: np.ndarray, v: np.ndarray, uerr: np.ndarray, nvel: np.ndarr
 # --------------------------------------------------------------------------- #
 def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
            zbottom: float = np.nan, weightmin: float = 0.05, smoofac: float = 0.0,
-           botfac: float = 1.0, barofac: float = 1.0, outlier: float = 1.0
-           ) -> VelocityProfile:
+           botfac: float = 1.0, barofac: float = 1.0, outlier: float = 1.0,
+           svel: np.ndarray | None = None, sadcpfac: float = 0.0) -> VelocityProfile:
     """Two-pass constrained inverse (process_cast STEP 11 + STEP 14) -> profile.
 
     Pass 1 uses the super-ensemble-scatter velocity error. Its residuals drive both the
     ``lanarrow`` rejection of the worst 1% of data and the two-pass velocity error
     ``velerr = median(uerr)``; pass 2 re-solves with that error on the cleaned data.
-    ``outlier <= 0`` reverts to a single pass. The ocean velocity is rotated magnetic->true
-    by ``drot``.
+    ``outlier <= 0`` reverts to a single pass. ``svel`` is an optional ship-ADCP profile
+    ``(z, u, v, verr)`` in the **true** frame; it is rotated into the magnetic solve frame
+    and added as the ``lainsadcp`` ocean constraint with weight ``sadcpfac``. The ocean
+    velocity is rotated magnetic->true by ``drot``.
     """
-    sol = _solve(se, aux, dz=dz, weightmin=weightmin, smoofac=smoofac, botfac=botfac,
-                 barofac=barofac, zbottom=zbottom)
+    svel_mag = None
+    if svel is not None and sadcpfac > 0:
+        svel_mag = np.asarray(svel, dtype=float).copy()
+        su, sv = _uvrot(svel_mag[:, 1], svel_mag[:, 2], -drot)     # true -> magnetic
+        svel_mag[:, 1], svel_mag[:, 2] = su, sv
 
+    def solve(**kw):
+        return _solve(se, aux, dz=dz, weightmin=weightmin, smoofac=smoofac, botfac=botfac,
+                      barofac=barofac, zbottom=zbottom, svel=svel_mag, sadcpfac=sadcpfac,
+                      **kw)
+
+    sol = solve()
     n_pass = int(np.ceil(outlier)) if outlier and outlier > 0 else 0
     reject = None
     if n_pass > 0:
@@ -375,9 +437,7 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
         for _ in range(n_pass):
             rj = _lanarrow_reject(sol, se.ru.shape, frac=0.01)
             reject = rj if reject is None else (reject | rj)
-            sol = _solve(se, aux, dz=dz, weightmin=weightmin, smoofac=smoofac,
-                         botfac=botfac, barofac=barofac, zbottom=zbottom,
-                         velerr_override=velerr2, reject=reject)
+            sol = solve(velerr_override=velerr2, reject=reject)
 
     uerr = _ocean_error(sol)
     uerr = np.where(np.isfinite(uerr), uerr, sol.velerr)
