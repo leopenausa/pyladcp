@@ -142,9 +142,31 @@ def _find_clean_ctd(ctd_dir: Path, station: str) -> Path | None:
     return None
 
 
+def _ctd_from_hex(rec: dict, label: str, cache_dir: str | Path | None) -> Path | None:
+    """Build (or reuse) a cleaned ``.cnv`` from the index's anchor ``.hex`` (Path A).
+
+    Used only when ``--from-hex`` is set and no pre-processed ``.cnv`` was found.
+    Returns ``None`` (with a warning) if the record has no ``.hex`` or the optional
+    CTD_project converter is unavailable -- the run then proceeds without CTD.
+    """
+    hexp = rec.get("ctd_hex")
+    if not hexp:
+        return None
+    from .io.ctd_raw import DEFAULT_CACHE_DIR, cnv_from_hex
+    try:
+        return cnv_from_hex(hexp, label, cache_dir=cache_dir or DEFAULT_CACHE_DIR)
+    except (RuntimeError, FileNotFoundError) as e:
+        import warnings
+        warnings.warn(f"--from-hex: could not convert {label} from {hexp}: {e}",
+                      stacklevel=2)
+        return None
+
+
 def discover(station: str, *, root: Path, cruise: str = "MORIA",
              index: str | Path | dict | None = None,
-             ctd_dir: Path | None = None) -> StationFiles:
+             ctd_dir: Path | None = None,
+             from_hex: bool = False,
+             ctd_cache: str | Path | None = None) -> StationFiles:
     """Resolve a station's (down, up, ctd) inputs.
 
     Resolution order: an **archive index** (auto-built station->file map) first, then the
@@ -152,6 +174,10 @@ def discover(station: str, *, root: Path, cruise: str = "MORIA",
     /curated layouts; the index stores its own (root-relative) paths. When the index resolves
     the LADCP heads, the cleaned CTD ``.cnv`` is globbed from ``ctd_dir`` (default ``root/CTD``)
     -- the index's raw ``.hex`` is the anchor, not the processing input.
+
+    CTD ingest coexists in two forms: a pre-processed ``.cnv`` (preferred when present),
+    or -- when ``from_hex`` is set and no ``.cnv`` is found -- the raw Seabird ``.hex``
+    anchored by the index, converted on the fly and cached under ``ctd_cache`` (Path A).
     """
     label = _normalize(cruise, station)
 
@@ -161,6 +187,8 @@ def discover(station: str, *, root: Path, cruise: str = "MORIA",
     rec = (idx.get("casts") or {}).get(label)
     if rec is not None:
         ctd = _find_clean_ctd(ctd_dir or (root / "CTD"), label)
+        if ctd is None and from_hex:                  # Path A: convert the anchor .hex
+            ctd = _ctd_from_hex(rec, label, ctd_cache)
         return StationFiles(down=Path(rec["master"]),
                             up=Path(rec["slave"]) if rec["slave"] else None,
                             ctd=ctd, label=label)

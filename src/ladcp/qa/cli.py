@@ -157,6 +157,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--down", help="down-looker (Master) PD0 file")
     ap.add_argument("--up", help="up-looker (Slave) PD0 file")
     ap.add_argument("--ctd", help="cleaned CTD .cnv (enables depth/bottom)")
+    ap.add_argument("--from-hex", action="store_true",
+                    help="if no cleaned CTD .cnv is found, build one from the index's raw "
+                         "Seabird .hex anchor (needs CTD_project; off by default)")
+    ap.add_argument("--ctd-cache", default=None,
+                    help="dir to cache --from-hex converted .cnv for reuse "
+                         "(default: ctd_from_hex)")
     ap.add_argument("--station", default="", help="station label (explicit mode)")
     args = ap.parse_args(argv)
 
@@ -166,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
                       "reingest": args.sadcp_reingest}
 
-    if args.down:                                   # explicit mode
+    if args.down:                                   # explicit mode (pass --ctd directly)
         station = args.station or Path(args.down).stem
         return _run_one(args.down, args.up, args.ctd, station, args.outdir,
                         not args.no_plots, drot=args.drot, solver=args.solver,
@@ -178,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
     rc = 0
     for st in args.stations:
-        sf = discover(st, root=root, cruise=args.cruise, index=args.index)
+        sf = discover(st, root=root, cruise=args.cruise, index=args.index,
+                      from_hex=args.from_hex, ctd_cache=args.ctd_cache)
         rc |= _run_one(str(sf.down), (str(sf.up) if sf.up else None),
                        (str(sf.ctd) if sf.ctd else None), sf.label, args.outdir,
                        not args.no_plots, drot=args.drot, solver=args.solver,
