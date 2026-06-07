@@ -32,7 +32,13 @@ The work below is sequenced; each step gets its own detailed plan before executi
    MORIA-10 = master `MLADC012` + slave `SLADC013`), and Seabird `.cnv` column auto-mapping.
    First cross-val station unlocked: **MORIA-10** (Gulf of Biscay, 549 m) runs end-to-end from
    the raw archive — u corr 0.91–0.94, v corr 0.89–0.97, rms 0.023–0.041, vbar within 0.007,
-   seabed exact (558 m). Remaining: FDCCC1 (raw not on disk + publication-gated).
+   seabed exact (558 m). Then an **auto-built, incremental archive index** (`archive.py`,
+   `ladcp-index` CLI): the Seabird CTD `.hex`/`.hdr` header (`io/ctd_hex.py`) supplies station
+   + absolute NMEA UTC + GPS position, which matches the LADCP master by time-window and pairs
+   the slave by overlap; results cache to `.ladcp_archive.json`, re-scanning only new files.
+   Replaces the hard-coded manifest — `ladcp-qa <st> --index …` resolves raw files by station
+   with no naming convention. Validated on 79/80/82 (auto-resolved to MLADC036/037/039, matching
+   the curated files). Remaining: FDCCC1 (raw not on disk + publication-gated).
 4. **Robustness (#4b)** — single-head casts, beam-vs-earth frames, acquisition-script
    variance, edge cases.
 5. **Outputs (#3)** — Excel + ODV-ready export, once the solution object is final.

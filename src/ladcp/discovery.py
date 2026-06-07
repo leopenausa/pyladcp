@@ -123,13 +123,49 @@ def _discover_curated(root: Path, st: str) -> StationFiles:
     return StationFiles(down=down, up=up, ctd=ctd, label=label)
 
 
-def discover(station: str, *, root: Path, cruise: str = "MORIA") -> StationFiles:
-    """Resolve a station's (down, up, ctd) inputs under ``root``.
+def _load_index(path: Path) -> dict:
+    """Read an archive-index JSON (``{}`` if missing/corrupt). Kept here to avoid a cycle."""
+    import json
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
 
-    A raw-archive manifest entry (slave auto-paired by time) takes precedence; otherwise the
-    curated glob layout is used. ``root`` is the base both layouts are resolved against.
+
+def _find_clean_ctd(ctd_dir: Path, station: str) -> Path | None:
+    """Glob a cleaned ``.cnv`` for ``station`` under ``ctd_dir`` (prefer a *clean* name)."""
+    num = station.split("-")[-1].split("_")[-1]
+    for pat in (f"*{num}*clean*.cnv", f"*{station}*.cnv", f"*{num}*.cnv"):
+        hits = sorted(ctd_dir.glob(pat))
+        if hits:
+            return hits[0]
+    return None
+
+
+def discover(station: str, *, root: Path, cruise: str = "MORIA",
+             index: str | Path | dict | None = None,
+             ctd_dir: Path | None = None) -> StationFiles:
+    """Resolve a station's (down, up, ctd) inputs.
+
+    Resolution order: an **archive index** (auto-built station->file map) first, then the
+    raw-archive manifest, then the curated glob layout. ``root`` is the base for the manifest
+    /curated layouts; the index stores its own (root-relative) paths. When the index resolves
+    the LADCP heads, the cleaned CTD ``.cnv`` is globbed from ``ctd_dir`` (default ``root/CTD``)
+    -- the index's raw ``.hex`` is the anchor, not the processing input.
     """
     label = _normalize(cruise, station)
+
+    # 1. archive index (explicit dict/path, else <root>/.ladcp_archive.json if present)
+    idx = index if isinstance(index, dict) else _load_index(
+        Path(index) if index else root / ".ladcp_archive.json")
+    rec = (idx.get("casts") or {}).get(label)
+    if rec is not None:
+        ctd = _find_clean_ctd(ctd_dir or (root / "CTD"), label)
+        return StationFiles(down=Path(rec["master"]),
+                            up=Path(rec["slave"]) if rec["slave"] else None,
+                            ctd=ctd, label=label)
+
+    # 2. raw-archive manifest (slave auto-paired by time)
     entry = MANIFESTS.get(cruise.upper(), {}).get(label)
     if entry is not None:
         master = root / entry.master
@@ -138,4 +174,6 @@ def discover(station: str, *, root: Path, cruise: str = "MORIA") -> StationFiles
         slave = pair_slave_by_time(master, root / entry.slave_dir)
         ctd = (root / entry.ctd) if entry.ctd else None
         return StationFiles(down=master, up=slave, ctd=ctd, label=label)
+
+    # 3. curated glob layout
     return _discover_curated(root, station)

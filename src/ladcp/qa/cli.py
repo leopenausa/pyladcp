@@ -132,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="base dir for file discovery (default: New_golden/Good)")
     ap.add_argument("--cruise", default="MORIA",
                     help="cruise preset for params + raw-archive manifest (default: MORIA)")
+    ap.add_argument("--index", default=None,
+                    help="archive index JSON (ladcp-index build); resolves raw files by station")
     ap.add_argument("-o", "--out", "--outdir", dest="outdir", default="qa_out",
                     help="output directory (default: qa_out)")
     ap.add_argument("--no-plots", action="store_true", help="skip figures/PDF")
@@ -176,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
     rc = 0
     for st in args.stations:
-        sf = discover(st, root=root, cruise=args.cruise)
+        sf = discover(st, root=root, cruise=args.cruise, index=args.index)
         rc |= _run_one(str(sf.down), (str(sf.up) if sf.up else None),
                        (str(sf.ctd) if sf.ctd else None), sf.label, args.outdir,
                        not args.no_plots, drot=args.drot, solver=args.solver,

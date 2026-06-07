@@ -45,6 +45,7 @@ Issues = "https://github.com/leopenausa/pyladcp/issues"
 
 [project.scripts]
 ladcp-qa = "ladcp.qa.cli:main"
+ladcp-index = "ladcp.archive_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
