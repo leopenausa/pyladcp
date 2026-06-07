@@ -42,17 +42,23 @@ _CONSISTENCY = ["velocity_error_vs_noise", "bottom_track_consistency", "sadcp_co
 
 def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
                  ctd: CTDTimeSeries | None = None,
-                 velocity: VelocityResult | None = None) -> dict[str, str]:
+                 velocity: VelocityResult | None = None,
+                 figdir: str | None = None) -> dict[str, str]:
     """Write high-res PNGs + a vector `<station>_report.pdf`. Returns paths written.
 
     When ``velocity`` (a :class:`~ladcp.qa.inverse.VelocityResult`) is supplied, the velocity
     profile / shear / inversion-diagnostics pages are appended after the acquisition figures.
+
+    ``figdir`` redirects the standalone PNGs into a separate directory (e.g. a ``figures/``
+    subdir) while ``<station>_report.pdf`` stays in ``outdir``; default keeps both together.
     """
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
+    figout = Path(figdir) if figdir else out
+    figout.mkdir(parents=True, exist_ok=True)
 
     # (draw fn into a given figure, png name, page title, caption)
     pages = [(lambda f: raw_dashboard(dh, fig=f), f"{station}_raw.png",
@@ -90,7 +96,7 @@ def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
 
     paths = {}
     # independent high-res PNGs (each plot fn makes its own figure)
-    _save_pngs(dh, ctd, velocity, out, station, paths)
+    _save_pngs(dh, ctd, velocity, figout, station, paths)
 
     pdf_path = out / f"{station}_report.pdf"
     with PdfPages(pdf_path) as pdf:
