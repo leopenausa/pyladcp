@@ -47,13 +47,16 @@ def depth_figure(dh: DualHead, ctd: CTDTimeSeries, *, fig=None, savepath: str | 
     ax.plot(ens[near], seabed[near], ".", ms=2, color="#e67e22",
             label="per-ping seabed (z + bottom dist)")
     ax.plot(ens, z, lw=0.8, color="#2c3e50", label="package depth")
-    ax.axhline(bottom.zbottom, ls="--", color="k",
-               label=f"seabed {bottom.zbottom:.1f} +/- {bottom.error:.2f} m")
+    if np.isfinite(bottom.zbottom):
+        ax.axhline(bottom.zbottom, ls="--", color="k",
+                   label=f"seabed {bottom.zbottom:.1f} +/- {bottom.error:.2f} m")
     ax.invert_yaxis()
     ax.set(xlabel="ensemble", ylabel="depth [m]")
     if near.any():
-        lo = bottom.zbottom - 250
-        ax.set_ylim(bottom.zbottom + 40, max(0, lo))
+        # fall back to the deepest per-ping seabed when bottom detection returned NaN
+        ref = (bottom.zbottom if np.isfinite(bottom.zbottom)
+               else float(np.nanmax(seabed[near])))
+        ax.set_ylim(ref + 40, max(0, ref - 250))
     ax.set_title("seabed detection")
     ax.legend(fontsize=8)
 

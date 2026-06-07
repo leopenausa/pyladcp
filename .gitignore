@@ -21,6 +21,7 @@ raw_ladcp_test/
 raw_CTD/
 test_data/
 clean_ctd/
+Data/
 WinADCP/
 logsheets/
 legacy_code/

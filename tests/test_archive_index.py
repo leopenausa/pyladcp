@@ -69,8 +69,8 @@ def test_time_source_falls_back_when_no_nmea_utc(tmp_path):
 
 
 # --- master matching rule -----------------------------------------------------------
-def _span(a, b):
-    return np.datetime64(a), np.datetime64(b)
+def _span(a, b, n=9999):
+    return np.datetime64(a), np.datetime64(b), n
 
 
 def test_match_master_prefers_containing_window():
@@ -83,12 +83,35 @@ def test_match_master_prefers_containing_window():
     assert rel == "cast" and prov == "ctd-utc-in-master-window"
 
 
+def test_match_master_picks_cast_over_stub_starting_nearer():
+    # the MORIA-02/03/04 pattern: a sub-minute stub starts right at the on-station time,
+    # the real cast starts later -- size must win over proximity.
+    utc = np.datetime64("2025-09-17T05:17:00")
+    spans = {
+        "stub": _span("2025-09-17T05:11", "2025-09-17T05:12", n=29),     # starts 6 min after
+        "cast": _span("2025-09-17T05:54", "2025-09-17T08:33", n=5381),   # starts 37 min after
+        "tail": _span("2025-09-17T08:38", "2025-09-17T08:46", n=261),    # later stub
+    }
+    rel, prov = A._match_master(utc, spans)
+    assert rel == "cast" and prov == "ctd-utc-nearest-cast-start"
+
+
+def test_match_master_shallow_single_cast_still_resolves():
+    # a genuinely small (shallow-shelf) cast that contains the utc must still match even
+    # though it is below the stub threshold -- the size-blind safety net handles it.
+    utc = np.datetime64("2025-09-18T22:11:00")
+    spans = {"shallow": _span("2025-09-18T22:08", "2025-09-18T22:25", n=120)}
+    rel, prov = A._match_master(utc, spans)
+    assert rel == "shallow" and prov == "ctd-utc-in-master-window"
+
+
 def test_match_master_nearest_within_tolerance_then_unmatched():
-    spans = {"m": _span("2025-10-03T06:40", "2025-10-03T07:30")}     # starts 14 min after utc
+    # only a stub is forward in range -> size-blind fallback still picks it
+    spans = {"m": _span("2025-10-03T06:40", "2025-10-03T07:30", n=50)}   # starts 14 min after
     utc = np.datetime64("2025-10-03T06:26:00")
     rel, prov = A._match_master(utc, spans)
     assert rel == "m" and prov == "ctd-utc-nearest-master-start"
-    far = {"m": _span("2025-10-05T06:40", "2025-10-05T07:30")}       # > 2 h away
+    far = {"m": _span("2025-10-05T06:40", "2025-10-05T07:30")}           # > 2 h away
     assert A._match_master(utc, far) == (None, "unmatched")
 
 
@@ -129,3 +152,25 @@ def test_build_index_resolves_known_casts(tmp_path):
     cache0 = idx["scan_cache"]
     idx2 = A.build_index(_RAW_LADCP, _RAW_CTD, root=_REPO, out=out)
     assert idx2["scan_cache"] == cache0
+
+
+_DATA = _REPO / "Data"   # full hex set incl. the fragmented MORIA 01-04
+_HAS_FRAG = _DATA.exists() and (_RAW_LADCP / "MASTER").exists()
+
+
+@pytest.mark.skipif(not _HAS_FRAG, reason="Data/ hex set + raw_ladcp_test/ not present")
+def test_build_index_salvages_fragmented_casts(tmp_path):
+    # stations 01-04 had the deck-unit logging restarted mid-cast: the right master/slave
+    # pair must be picked by cast size + time, not by the stub nearest the on-station UTC.
+    idx = A.build_index(_RAW_LADCP, _DATA, root=_REPO, out=tmp_path / "idx.json")
+    casts = idx["casts"]
+    expect = {
+        "MORIA-01": ("M1910002.000", "S1910002.000", "ctd-utc-in-master-window"),
+        "MORIA-02": ("M1910005.000", "S1910005.000", "ctd-utc-nearest-cast-start"),
+        "MORIA-03": ("MLADC002.000", "SLADC003.000", "ctd-utc-nearest-cast-start"),
+        "MORIA-04": ("MLADC005.000", "SLADC006.000", "ctd-utc-nearest-cast-start"),
+    }
+    for st, (m, s, prov) in expect.items():
+        assert casts[st]["master"].endswith(m), f"{st} master -> {casts[st]['master']}"
+        assert casts[st]["slave"].endswith(s), f"{st} slave -> {casts[st]['slave']}"
+        assert casts[st]["provenance"] == prov
