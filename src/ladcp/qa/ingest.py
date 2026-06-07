@@ -85,3 +85,25 @@ def extract_config(dh: DualHead) -> dict[str, Any]:
             ppe_u=u.pings_per_ens, coord_u=u.coord_frame.value, serial_u=u.serial,
         )
     return cfg
+
+
+def apply_header_config(params: CastParams, dh: DualHead) -> CastParams:
+    """Reconcile ``params`` with the instrument facts decoded from the PD0 headers (#4a).
+
+    Instrument geometry (cell size, blank, beam angle, coord frame, head count) is a
+    property of the *file*, not an operator choice, so it should come from the data
+    rather than a per-cruise preset. This mutates ``params`` in place and returns it:
+
+    * ``up_dn_looker`` is derived from which heads are actually present and how each is
+      facing -- 1 = up+down, 2 = down only, 3 = up only -- overriding any preset guess.
+    * the full header scalar set (:func:`extract_config`) is stashed in
+      ``params.extra["instrument"]`` so the validation harness and reports can diff it
+      against the golden ``p`` struct without re-reading the files.
+    """
+    facing_dn = dh.down.facing == "down"
+    if dh.has_up:
+        params.up_dn_looker = 1 if facing_dn else 3
+    else:
+        params.up_dn_looker = 2 if facing_dn else 3
+    params.extra["instrument"] = extract_config(dh)
+    return params

@@ -25,9 +25,14 @@ The work below is sequenced; each step gets its own detailed plan before executi
    error covariance. The VmDAS SADCP ingester (`io/sadcp_vmdas.py`) recovers absolute ocean
    velocity from raw STA/LTA; validated end-to-end on MORIA 79/80/82 — SADCP vs LADCP-inverse
    agree to 0.015–0.05 m/s (corr 0.86–0.97) over the upper 300 m.
-3. **Data-driven ingest/config (#4a)** — derive instrument config from PD0 headers + a
-   typed config schema; flexible file discovery; load + process the other datasets. (Gates
-   broad validation of #2; may run before/with #2 to unlock the test data.)
+3. **Data-driven ingest/config (#4a)** — *in progress.* Built: header-derived instrument
+   config (`ingest.apply_header_config`), a cruise-keyed param resolver (`config.resolve_params`
+   + `CRUISES`), flexible file discovery (`discovery.py`) that pairs the up-looker to the
+   down-looker by **time overlap** (the VmDAS master/slave deployment indices are offset —
+   MORIA-10 = master `MLADC012` + slave `SLADC013`), and Seabird `.cnv` column auto-mapping.
+   First cross-val station unlocked: **MORIA-10** (Gulf of Biscay, 549 m) runs end-to-end from
+   the raw archive — u corr 0.91–0.94, v corr 0.89–0.97, rms 0.023–0.041, vbar within 0.007,
+   seabed exact (558 m). Remaining: FDCCC1 (raw not on disk + publication-gated).
 4. **Robustness (#4b)** — single-head casts, beam-vs-earth frames, acquisition-script
    variance, edge cases.
 5. **Outputs (#3)** — Excel + ODV-ready export, once the solution object is final.

@@ -7,6 +7,7 @@ legacy ``set_cast_params.m`` (see docs/VALIDATION_MORIA05.md §3).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,3 +109,45 @@ def moria06_params() -> CastParams:
 def moria07_params() -> CastParams:
     """Effective parameters for the MORIA-07 confirmation cast."""
     return _moria_params("MORIA-07")
+
+
+# --- Cruise registry + layered resolution (#4a) -------------------------------------
+#
+# A cruise's *processing* knobs (the operator's ``set_cast_params.m`` defaults) are shared
+# across its clean dual-head casts; only position/time/declination vary per cast, and those
+# are resolved downstream (IGRF declination, CTD position). So a cruise maps to one base
+# ``CastParams`` factory, and :func:`resolve_params` layers per-cast facts on top of it:
+#
+#     cruise preset  ->  station label  ->  (header-derived config)  ->  explicit overrides
+#
+# Header-derived geometry is applied separately by ``ingest.apply_header_config`` once the
+# PD0 files are open; CLI/`overrides` (e.g. an operator-supplied ``drot``) win last.
+
+CRUISES: dict[str, Callable[[str], CastParams]] = {  # cruise_id -> base-params factory
+    "MORIA": _moria_params,
+}
+
+
+def resolve_params(
+    cruise: str,
+    station: str,
+    *,
+    overrides: dict[str, Any] | None = None,
+) -> CastParams:
+    """Build the per-cast :class:`CastParams` for ``station`` of ``cruise`` (#4a).
+
+    Replaces the previous hard-wired ``moria05_params()`` call: the base processing knobs
+    come from the cruise preset, the station label is stamped in, and any ``overrides``
+    (CLI flags such as an explicit ``drot``) are applied last. Instrument geometry is *not*
+    set here -- it is reconciled from the PD0 headers by ``ingest.apply_header_config`` once
+    the files are open, so geometry always reflects the actual data.
+    """
+    key = cruise.upper()
+    if key not in CRUISES:
+        raise KeyError(f"unknown cruise {cruise!r}; known: {sorted(CRUISES)}")
+    params = CRUISES[key](station)
+    for name, value in (overrides or {}).items():
+        if not hasattr(params, name):
+            raise AttributeError(f"CastParams has no field {name!r}")
+        setattr(params, name, value)
+    return params

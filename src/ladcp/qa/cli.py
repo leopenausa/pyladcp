@@ -21,36 +21,18 @@ import argparse
 import json
 from pathlib import Path
 
-from ..config import moria05_params
+from ..config import resolve_params
+from ..discovery import discover
 from ..io.ctd_cnv import read_ctd_cnv
-from .ingest import load_dualhead
+from .ingest import apply_header_config, load_dualhead
 from .report import assess, text_report
 
 
-def _resolve(root: Path, st: str) -> tuple[str, str | None, str | None, str]:
-    """Locate (down, up, ctd, label) for station id ``st`` under ``root``."""
-    def pick(*patterns):
-        for pat in patterns:
-            hits = sorted(root.glob(pat))
-            if len(hits) == 1:
-                return hits[0]
-            if len(hits) > 1:
-                raise SystemExit(f"ambiguous match for {pat!r}: {[h.name for h in hits]}")
-        return None
-
-    down = pick(f"LADCP/*{st}*-M.000", f"LADCP/*{st}*M*.000")
-    if down is None:
-        raise SystemExit(f"no down-looker found for station {st!r} under {root}/LADCP")
-    up = pick(f"LADCP/*{st}*-S.000", f"LADCP/*{st}*S*.000")
-    ctd = pick(f"CTD/*{st}*.cnv")
-    label = down.name.split("-LADCP")[0] if "-LADCP" in down.name else st
-    return str(down), (str(up) if up else None), (str(ctd) if ctd else None), label
-
-
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
-             solver="shear", sadcp_opts=None) -> int:
-    params = moria05_params()
+             solver="shear", sadcp_opts=None, cruise="MORIA") -> int:
+    params = resolve_params(cruise, station)
     dh = load_dualhead(down, up, station=station, params=params)
+    apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
     ctd = read_ctd_cnv(ctd_path, params=params) if ctd_path else None
     qc = assess(dh, ctd=ctd)
 
@@ -147,7 +129,9 @@ def main(argv: list[str] | None = None) -> int:
                                  description="LADCP acquisition quality assessment")
     ap.add_argument("stations", nargs="*", help="station id(s), e.g. 80 or 79 80 82")
     ap.add_argument("--root", default="New_golden/Good",
-                    help="dir holding LADCP/ and CTD/ (default: New_golden/Good)")
+                    help="base dir for file discovery (default: New_golden/Good)")
+    ap.add_argument("--cruise", default="MORIA",
+                    help="cruise preset for params + raw-archive manifest (default: MORIA)")
     ap.add_argument("-o", "--out", "--outdir", dest="outdir", default="qa_out",
                     help="output directory (default: qa_out)")
     ap.add_argument("--no-plots", action="store_true", help="skip figures/PDF")
@@ -184,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         station = args.station or Path(args.down).stem
         return _run_one(args.down, args.up, args.ctd, station, args.outdir,
                         not args.no_plots, drot=args.drot, solver=args.solver,
-                        sadcp_opts=sadcp_opts)
+                        sadcp_opts=sadcp_opts, cruise=args.cruise)
 
     if not args.stations:
         ap.error("give one or more station ids, or use --down/--up/--ctd")
@@ -192,9 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
     rc = 0
     for st in args.stations:
-        down, up, ctd, label = _resolve(root, st)
-        rc |= _run_one(down, up, ctd, label, args.outdir, not args.no_plots,
-                       drot=args.drot, solver=args.solver, sadcp_opts=sadcp_opts)
+        sf = discover(st, root=root, cruise=args.cruise)
+        rc |= _run_one(str(sf.down), (str(sf.up) if sf.up else None),
+                       (str(sf.ctd) if sf.ctd else None), sf.label, args.outdir,
+                       not args.no_plots, drot=args.drot, solver=args.solver,
+                       sadcp_opts=sadcp_opts, cruise=args.cruise)
     return rc
 
 

@@ -65,10 +65,13 @@ class Station:
                     and self.ctd.exists())
 
 
-# MORIA-80 raw lives in the committed test fixture; the others are golden-output only
-# (FDCCC1 raw not on disk -- pending) or have raw under raw_ladcp_test/ but need a
-# station->file mapping (MORIA-10, deferred). drot is NaN in the FDCCC1/MORIA-10 goldens
-# (they ran the legacy IGRF00 magdev, ~1 deg / -3.6 deg in-log) -- see ladcp-magdec-finding.
+# MORIA-80 raw lives in the committed test fixture; MORIA-10 raw is the VmDAS archive under
+# raw_ladcp_test/ (master MLADC012 + slave SLADC013, paired by time via discovery -- the
+# deployment indices are offset by one); FDCCC1 raw is not on disk (pending). The MORIA-10
+# golden's p.drot=-3.5687 is the legacy IGRF00 value (true IGRF-13 here is ~-1.25); we score
+# against the golden frame, so we use its drot to isolate solver quality -- see
+# ladcp-magdec-finding.
+_RAW = _REPO / "raw_ladcp_test" / "LADCP" / "Data"
 _FIX = _FIXGOLDEN / "Good"
 STATIONS: dict[str, Station] = {
     "MORIA-80": Station(
@@ -84,6 +87,10 @@ STATIONS: dict[str, Station] = {
         name="MORIA-10",
         mat=_GOLDEN / "MORIA-10_LEO" / "MORIA-10.mat",
         depth_m=549.0, region="Gulf of Biscay", uses_sadcp=False,
+        raw_down=_RAW / "MASTER" / "MLADC012.000",
+        raw_up=_RAW / "SLAVE" / "SLADC013.000",
+        ctd=_REPO / "clean_ctd" / "moria-10_clean.cnv",
+        drot=-3.568734,
     ),
     "FDCCC1_001": Station(
         name="FDCCC1_001",
