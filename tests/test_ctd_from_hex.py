@@ -24,6 +24,16 @@ def test_xmlcon_for_finds_sibling(tmp_path):
     assert ctd_raw.xmlcon_for(hexp) == xml
 
 
+def test_xmlcon_for_matches_mismatched_case_stem(tmp_path):
+    # the MORIA-25b..g case: .hex stem is lowercase, the .XMLCON carries an uppercase
+    # station letter -> must still match on a case-sensitive filesystem.
+    hexp = tmp_path / "MORIA-25b-CTD.hex"
+    hexp.write_text("* hex\n")
+    xml = tmp_path / "MORIA-25B-CTD.XMLCON"
+    xml.write_text("<config/>\n")
+    assert ctd_raw.xmlcon_for(hexp) == xml
+
+
 def test_xmlcon_for_raises_when_absent(tmp_path):
     hexp = tmp_path / "only.hex"
     hexp.write_text("* hex\n")

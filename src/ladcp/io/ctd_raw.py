@@ -70,12 +70,22 @@ def _load_converter():
 
 
 def xmlcon_for(hex_path: str | Path) -> Path:
-    """Return the ``.XMLCON`` sibling of a Seabird ``.hex`` (case-insensitive)."""
+    """Return the ``.XMLCON`` sibling of a Seabird ``.hex``.
+
+    Matched case-insensitively on the *whole* filename, not just the extension: some
+    archives name the config with a different-case station letter than the ``.hex`` (e.g.
+    ``MORIA-25B-CTD.XMLCON`` beside ``MORIA-25b-CTD.hex``), which a stem-preserving
+    ``with_suffix`` lookup misses on a case-sensitive filesystem.
+    """
     hex_path = Path(hex_path)
-    for ext in (".XMLCON", ".xmlcon", ".XmlCon"):
+    for ext in (".XMLCON", ".xmlcon"):                       # exact-case fast path
         cand = hex_path.with_suffix(ext)
         if cand.exists():
             return cand
+    want = hex_path.stem.lower()                             # e.g. "moria-25b-ctd"
+    for p in hex_path.parent.iterdir():
+        if p.is_file() and p.suffix.lower() == ".xmlcon" and p.stem.lower() == want:
+            return p
     raise FileNotFoundError(f"no .XMLCON beside {hex_path}")
 
 
