@@ -45,11 +45,12 @@ def test_cli_end_to_end(tmp_path):
         "--station", "MORIA-80", "--outdir", str(tmp_path),
     ])
     assert rc == 0
-    assert (tmp_path / "MORIA-80_qa.txt").exists()
-    assert (tmp_path / "MORIA-80_qa.json").exists()
-    assert (tmp_path / "MORIA-80_raw.png").exists()
-    assert (tmp_path / "MORIA-80_alignment.png").exists()
-    assert (tmp_path / "MORIA-80_report.pdf").exists()
+    st = tmp_path / "stations" / "MORIA-80"            # nested per-station layout (#3)
+    assert (st / "MORIA-80_qa.txt").exists()
+    assert (st / "MORIA-80_qa.json").exists()
+    assert (st / "figures" / "MORIA-80_raw.png").exists()
+    assert (st / "figures" / "MORIA-80_alignment.png").exists()
+    assert (st / "MORIA-80_report.pdf").exists()
 
 
 def test_cli_compact_batch(tmp_path):
@@ -60,8 +61,11 @@ def test_cli_compact_batch(tmp_path):
     rc = cli_main(["79", "80", "--root", str(root), "--out", str(tmp_path)])
     assert rc in (0, 1)                       # 1 only if a station FAILs
     for st in ("MORIA-79", "MORIA-80"):
-        assert (tmp_path / f"{st}_report.pdf").exists()
-        assert (tmp_path / f"{st}_depth.png").exists()   # CTD auto-discovered
+        sd = tmp_path / "stations" / st
+        assert (sd / f"{st}_report.pdf").exists()
+        assert (sd / "figures" / f"{st}_depth.png").exists()   # CTD auto-discovered
+        assert (sd / f"{st}.nc").exists()                      # per-station NetCDF export
+    assert not (tmp_path / "exports").exists()    # no cruise aggregate without --cruise-export
 
 
 def test_pdf_report_with_ctd(tmp_path):
