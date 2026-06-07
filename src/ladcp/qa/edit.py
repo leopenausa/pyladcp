@@ -48,8 +48,10 @@ def _ts_field(head, nens: int | None = None) -> np.ndarray:
 def edit_data(dh: DualHead, sync: SyncResult, bottom: BottomResult) -> EditResult:
     d, u = dh.down, dh.up
     nd, nu = d.n_cells, (u.n_cells if u is not None else 0)
-    nens = d.n_ens                                  # joint grid = down ping times (z is here)
-    z = sync.z_on_ping                              # package depth +down
+    # joint grid = first min(down, up) pings, matching merge_heads; trims z_on_ping (built on
+    # the master series) to it so the two heads stack when they logged unequal counts (#frag).
+    nens = min(d.n_ens, u.n_ens) if u is not None else d.n_ens
+    z = sync.z_on_ping[:nens]                       # package depth +down
     zneg = -z                                       # negative-down convention
     zbottom = bottom.zbottom
 
@@ -85,7 +87,8 @@ def edit_data(dh: DualHead, sync: SyncResult, bottom: BottomResult) -> EditResul
                | (np.abs(u.vel[_ERR_COMP][:, :nens]) > 0.2))
         good[:nu] = np.flipud(gu); r0 = nu
     good[r0] = False                                # gap row
-    gd = ~((d.pct_good[_PG_FIELD] < 50) | (np.abs(d.vel[_ERR_COMP]) > 0.2))
+    gd = ~((d.pct_good[_PG_FIELD][:, :nens] < 50)
+           | (np.abs(d.vel[_ERR_COMP][:, :nens]) > 0.2))
     good[r0 + 1:] = gd
 
     ts_after = ts_before.copy()

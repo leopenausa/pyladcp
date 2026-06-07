@@ -307,7 +307,11 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
         bad = ~((hgt > 50.0) & (hgt < 300.0) & (np.abs(hgt - bt.hbot) < 100.0))
         bt.bvel[bad] = np.nan
         bt.bw[bad] = np.nan
-    se = form_superensembles(merged, sync.z_on_ping, avdz=dz, zbottom=bottom.zbottom)
+    # merge_heads trims to min(down, up) pings; align z_on_ping (built on the master ping
+    # series) to that joint length so super-ensembles see matching arrays when the two heads
+    # logged unequal counts (e.g. the fragmented MORIA-01..04 casts). No-op when equal.
+    zop = sync.z_on_ping[:merged.ru.shape[1]]
+    se = form_superensembles(merged, zop, avdz=dz, zbottom=bottom.zbottom)
     zmax = sync.maxdepth if np.isfinite(sync.maxdepth) else float(np.nanmax(se.izm))
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom
 

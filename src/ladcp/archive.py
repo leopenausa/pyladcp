@@ -7,8 +7,10 @@ told which deployment file is which cast. The chain:
    ``name + size + mtime`` so later runs only touch newly arrived files;
 2. **anchor** each cast with a Seabird CTD ``.hex`` header (:mod:`ladcp.io.ctd_hex`), which
    supplies the station label + absolute NMEA UTC + GPS position;
-3. **match** the master whose time window contains that UTC, and **pair** the slave by time
-   overlap (:func:`ladcp.discovery.best_overlap`).
+3. **match** the master cast for that UTC -- the window containing it, or (when the deck-unit
+   logging was restarted and the real cast begins *after* the on-station time, as on MORIA
+   stations 01-04) the largest cast starting shortly after it, never a sub-minute stub -- and
+   **pair** the slave by time overlap (:func:`ladcp.discovery.best_overlap`).
 
 The result is written to a small JSON sidecar (``.ladcp_archive.json``) that
 :func:`ladcp.discovery.discover` reads in preference to the hard-coded manifest.
@@ -28,6 +30,14 @@ from .io.pd0 import read_pd0
 
 INDEX_NAME = ".ladcp_archive.json"
 VERSION = 1
+
+# A deployment file with fewer ensembles than this is a logging stub / false start (the
+# largest such stub seen on MORIA 01-04 is 261 ens; the smallest real cast is ~5400), so it
+# is never chosen as a cast when a genuine cast is also in range.
+MIN_CAST_ENS = 300
+# A cast may begin this long after the logged on-station UTC (deck-unit troubleshooting on
+# MORIA 01-04 delayed the real logging by up to ~55 min); kept well under the >5 h cast spacing.
+_START_TOL = np.timedelta64(2, "h")
 
 
 @dataclass
@@ -102,17 +112,17 @@ def build_index(
     slaves = sorted(sdir.glob("*.000"))
     scan = _scan_files(masters + slaves, scan_cache, root)
 
-    m_spans = {rel: _span(e) for rel, e in scan.items()
-               if Path(rel).parent.name == master_subdir}
+    m_info = {rel: (*_span(e), int(e["n_ens"])) for rel, e in scan.items()
+              if Path(rel).parent.name == master_subdir}
     s_spans = {rel: _span(e) for rel, e in scan.items()
                if Path(rel).parent.name == slave_subdir}
 
     casts: dict[str, dict] = {}
     for h in scan_ctd_dir(ctd_dir):
-        master_rel, provenance = _match_master(h.utc, m_spans)
+        master_rel, provenance = _match_master(h.utc, m_info)
         if master_rel is None:
             continue
-        slave_rel = best_overlap(m_spans[master_rel], s_spans)
+        slave_rel = best_overlap(m_info[master_rel][:2], s_spans)
         casts[h.station] = asdict(CastEntry(
             station=h.station,
             master=str(root / master_rel),
@@ -135,14 +145,34 @@ def build_index(
     return index
 
 
-def _match_master(utc: np.datetime64, m_spans: dict) -> tuple[str | None, str]:
-    """Pick the master whose window contains ``utc``; else the nearest start within 2 h."""
-    contains = [(rel, t0) for rel, (t0, t1) in m_spans.items() if t0 <= utc <= t1]
+def _match_master(utc: np.datetime64, m_info: dict) -> tuple[str | None, str]:
+    """Pick the master cast for ``utc`` from ``rel -> (t0, t1, n_ens)``.
+
+    Order of preference: the cast whose window contains ``utc``; else the largest cast that
+    *starts* within :data:`_START_TOL` after it (the deck-unit logging on MORIA 01-04 was
+    restarted mid-station, so the real cast can begin after the on-station time and is buried
+    among sub-minute stubs); else, only if nothing looks like a cast, fall back to the nearest
+    window/start so genuinely small (shallow-shelf) casts still resolve. The largest qualifying
+    file wins, never a stub.
+    """
+    def is_cast(n: int) -> bool:
+        return n >= MIN_CAST_ENS
+
+    contains = [(rel, n) for rel, (t0, t1, n) in m_info.items() if t0 <= utc <= t1]
+    cast_contains = [(rel, n) for rel, n in contains if is_cast(n)]
+    if cast_contains:
+        return max(cast_contains, key=lambda kv: kv[1])[0], "ctd-utc-in-master-window"
+
+    forward = [(rel, n) for rel, (t0, t1, n) in m_info.items() if utc < t0 <= utc + _START_TOL]
+    cast_forward = [(rel, n) for rel, n in forward if is_cast(n)]
+    if cast_forward:
+        return max(cast_forward, key=lambda kv: kv[1])[0], "ctd-utc-nearest-cast-start"
+
+    # nothing is clearly a cast -- keep the older, size-blind behaviour as a safety net
     if contains:
-        rel = min(contains, key=lambda kv: abs(kv[1] - utc))[0]
-        return rel, "ctd-utc-in-master-window"
-    tol = np.timedelta64(2, "h")
-    near = [(rel, abs(t0 - utc)) for rel, (t0, _) in m_spans.items() if abs(t0 - utc) <= tol]
+        return max(contains, key=lambda kv: kv[1])[0], "ctd-utc-in-master-window"
+    near = [(rel, abs(t0 - utc)) for rel, (t0, _, _) in m_info.items()
+            if abs(t0 - utc) <= _START_TOL]
     if near:
         return min(near, key=lambda kv: kv[1])[0], "ctd-utc-nearest-master-start"
     return None, "unmatched"
