@@ -19,7 +19,7 @@ import numpy as np
 
 from ..qa.inverse import VelocityResult
 
-_CMAP = "RdBu_r"        # red = positive, blue = negative (matches the legacy figure)
+_CMAP = "seismic"       # blue=negative, white=0, red=positive -- matches legacy geterr.m
 
 
 def _clim(a, pct=98.0):
