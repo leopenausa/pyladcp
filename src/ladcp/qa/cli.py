@@ -11,14 +11,19 @@ Explicit form — name the files directly (for non-standard layouts)::
 
     ladcp-qa --down …-M.000 --up …-S.000 --ctd …_clean.cnv --station MORIA-80
 
-Each station yields ``<station>_qa.txt`` + ``_qa.json`` (report), the four QA PNGs, and a
+Each station yields ``<station>_qa.txt`` + ``_qa.json`` (report), the QA PNGs, and a
 combined ``<station>_report.pdf`` (scorecard + figures). ``--no-plots`` skips the figures.
+
+Batches show a progress bar and stay quiet on the console; a failing station is logged and
+skipped rather than aborting the run. ``--verbose`` streams per-station detail instead of the
+bar, and a timestamped run log is written to ``<outdir>/ladcp-qa.log`` (``--log`` / ``--no-log``).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 from ..config import resolve_params
@@ -26,15 +31,18 @@ from ..discovery import discover
 from ..io.ctd_cnv import read_ctd_cnv
 from .ingest import apply_header_config, load_dualhead
 from .report import assess, text_report
+from .runlog import ProgressBar, setup_logging, teardown_logging
+
+log = logging.getLogger("ladcp.qa")
 
 
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
              solver="shear", sadcp_opts=None, cruise="MORIA", formats=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
-    Returns ``(rc, export)``: ``rc`` is the per-station exit code (1 only on FAIL) and
-    ``export`` is a :class:`~ladcp.export.StationExport` when a velocity solution was
-    produced (``None`` for acquisition-only stations).
+    Returns ``(status, export)``: ``status`` is the QA verdict string (``"ok"``/``"warn"``/
+    ``"fail"``) and ``export`` is a :class:`~ladcp.export.StationExport` when a velocity
+    solution was produced (``None`` for acquisition-only stations).
     """
     params = resolve_params(cruise, station)
     dh = load_dualhead(down, up, station=station, params=params)
@@ -47,7 +55,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     st_dir.mkdir(parents=True, exist_ok=True)
     (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n")
     (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
-    print(f"[{qc.overall_status.value.upper():5}] {station}  ->  {st_dir}/")
+    log.info("[%-5s] %s  ->  %s/", qc.overall_status.value.upper(), station, st_dir)
 
     # velocity solve (requires both heads + CTD): .lad + .bot text, figures via the report
     result = None
@@ -70,12 +78,12 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
         from ..plots.pdf_report import build_report
         paths = build_report(dh, qc, str(st_dir), station, ctd=ctd, velocity=result,
                              figdir=str(fig_dir))
-        print(f"        report: {paths['report.pdf']}")
+        log.info("        report: %s", paths["report.pdf"])
 
     if export is not None and formats:
         _write_station_exports(export, st_dir, formats)
 
-    return (0 if qc.overall_status.value != "fail" else 1), export
+    return qc.overall_status.value, export
 
 
 def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=None):
@@ -103,14 +111,14 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=No
     vp, bp = result.vp, result.bp
     lad = out / f"{station}.lad"
     write_lad(vp, str(lad), station=station, lat=lat, lon=lon, drot=drot, time=when)
-    print(f"        velocity: {lad}  (solver {solver}, drot {drot:+.2f} deg, "
-          f"ubar {vp.ubar:+.3f})")
+    log.info("        velocity: %s  (solver %s, drot %+.2f deg, ubar %+.3f)",
+             lad, solver, drot, vp.ubar)
 
     if bp is not None and bp.n_bins > 0:
         bot = out / f"{station}.bot"
         write_bot(bp, str(bot), station=station, lat=lat, lon=lon, drot=drot,
                   zbottom=result.zbottom, time=when)
-        print(f"        bottom-track: {bot}  ({bp.n_bins} bins)")
+        log.info("        bottom-track: %s  (%d bins)", bot, bp.n_bins)
 
     meta = {"lat": lat, "lon": lon, "when": when, "drot": drot,
             "sadcp_source": (sadcp_opts.get("folder") if sadcp_opts and sadcp is not None
@@ -126,14 +134,14 @@ def _write_station_exports(export, st_dir, formats) -> None:
     if "nc" in formats:
         from ..export.netcdf import write_station_nc
         write_station_nc(export, str(st_dir / f"{station}.nc"))
-        print(f"        netcdf: {st_dir / f'{station}.nc'}")
+        log.info("        netcdf: %s", st_dir / f"{station}.nc")
     if "xlsx" in formats:
         from ..export.xlsx import write_station_xlsx
         try:
             write_station_xlsx(export, str(st_dir / f"{station}.xlsx"))
-            print(f"        excel: {st_dir / f'{station}.xlsx'}")
+            log.info("        excel: %s", st_dir / f"{station}.xlsx")
         except ExportDependencyError as e:
-            print(f"        excel skipped: {e}")
+            log.warning("        excel skipped: %s", e)
 
 
 def _write_cruise_exports(exports, outdir, cruise, formats) -> None:
@@ -148,25 +156,25 @@ def _write_cruise_exports(exports, outdir, cruise, formats) -> None:
         from ..export.tables import summary_row
         csv = exp_dir / f"{cruise}_summary.csv"
         pd.DataFrame([summary_row(e) for e in exports]).to_csv(csv, index=False)
-        print(f"  exports: {csv}")
+        log.info("  exports: %s", csv)
     if "odv" in formats:
         from ..export.odv import write_odv
         odv = exp_dir / f"{cruise}_ladcp_odv.txt"
         write_odv(exports, str(odv), cruise=cruise)
-        print(f"  exports: {odv}")
+        log.info("  exports: %s", odv)
     if "nc" in formats:
         from ..export.netcdf import write_cruise_nc
         nc = exp_dir / f"{cruise}_ladcp.nc"
         write_cruise_nc(exports, str(nc), cruise=cruise)
-        print(f"  exports: {nc}")
+        log.info("  exports: %s", nc)
     if "xlsx" in formats:
         from ..export.xlsx import write_cruise_xlsx
         xlsx = exp_dir / f"{cruise}_ladcp.xlsx"
         try:
             write_cruise_xlsx(exports, str(xlsx), cruise=cruise)
-            print(f"  exports: {xlsx}")
+            log.info("  exports: %s", xlsx)
         except ExportDependencyError as e:
-            print(f"  exports: cruise Excel skipped: {e}")
+            log.warning("  exports: cruise Excel skipped: %s", e)
 
 
 def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
@@ -177,7 +185,7 @@ def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
     folder is ignored with a notice. Returns the ``svel`` array or ``None``.
     """
     if solver != "inverse":
-        print("        sadcp: ignored (constraint applies only to --solver inverse)")
+        log.info("        sadcp: ignored (constraint applies only to --solver inverse)")
         return None
     from ..io.sadcp_vmdas import extract_profile, load_or_ingest
 
@@ -188,11 +196,11 @@ def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
     sv = extract_profile(ds, time_start=time_start, time_end=time_end, lat=lat, lon=lon,
                          dtok_min=opts.get("dtok_min", 0.0))
     if sv is None:
-        print(f"        sadcp: no usable {ds.freq_khz} kHz data at this station "
-              "(time/position window empty) -- constraint skipped")
+        log.info("        sadcp: no usable %s kHz data at this station "
+                 "(time/position window empty) -- constraint skipped", ds.freq_khz)
     else:
-        print(f"        sadcp: {sv.shape[0]} bins from {ds.freq_khz} kHz "
-              f"{ds.file_type} ({ds.source})")
+        log.info("        sadcp: %d bins from %s kHz %s (%s)",
+                 sv.shape[0], ds.freq_khz, ds.file_type, ds.source)
     return sv
 
 
@@ -245,6 +253,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="process every station in the --index and build the cruise exports/")
     ap.add_argument("--cruise-export", action="store_true",
                     help="also build the cruise-level exports/ aggregate over the named stations")
+    # run logging / progress (long batches)
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="stream per-station detail to the console (default: progress bar only)")
+    ap.add_argument("--log", metavar="FILE", default=None,
+                    help="run-log path (default: <outdir>/ladcp-qa.log)")
+    ap.add_argument("--no-log", action="store_true", help="do not write a run-log file")
+    ap.add_argument("--no-progress", action="store_true", help="disable the batch progress bar")
     args = ap.parse_args(argv)
 
     valid_fmts = {"xlsx", "odv", "nc", "csv"}
@@ -263,41 +278,90 @@ def main(argv: list[str] | None = None) -> int:
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
                       "reingest": args.sadcp_reingest}
 
-    if args.down:                                   # explicit mode (per-station only)
-        station = args.station or Path(args.down).stem
-        rc, _ = _run_one(args.down, args.up, args.ctd, station, args.outdir,
-                         not args.no_plots, drot=args.drot, solver=args.solver,
-                         sadcp_opts=sadcp_opts, cruise=args.cruise, formats=formats)
-        return rc
+    # resolve the work list: explicit single file set, or a batch of station ids
+    explicit = bool(args.down)
+    if explicit:
+        plan = [args.station or Path(args.down).stem]
+    else:
+        plan = list(args.stations)
+        if args.all_stations:
+            plan = _all_station_labels(args.index, Path(args.root), args.cruise)
+            if not plan:
+                ap.error("--all-stations: no casts found in the archive index "
+                         "(give --index path/to/.ladcp_archive.json)")
+        if not plan:
+            ap.error("give one or more station ids, use --all-stations, or --down/--up/--ctd")
 
-    stations = list(args.stations)
-    if args.all_stations:
-        stations = _all_station_labels(args.index, Path(args.root), args.cruise)
-        if not stations:
-            ap.error("--all-stations: no casts found in the archive index "
-                     "(give --index path/to/.ladcp_archive.json)")
-    if not stations:
-        ap.error("give one or more station ids, use --all-stations, or --down/--up/--ctd")
+    n = len(plan)
+    console_detail = args.verbose or n <= 1            # stream detail for -v or a single cast
+    logfile = None if args.no_log else (args.log or str(Path(args.outdir) / "ladcp-qa.log"))
+    setup_logging(logfile, console_level=logging.INFO if console_detail else logging.WARNING)
+    log.info("ladcp-qa: %d station(s), solver=%s, out=%s", n, args.solver, args.outdir)
+    bar = ProgressBar(n, enabled=(not explicit and n > 1 and not console_detail
+                                  and not args.no_progress))
 
     root = Path(args.root)
-    rc = 0
+    results: list[tuple[str, str]] = []                # (label, status)
     exports = []
-    for st in stations:
-        sf = discover(st, root=root, cruise=args.cruise, index=args.index,
-                      from_hex=args.from_hex, ctd_cache=args.ctd_cache)
-        st_rc, export = _run_one(str(sf.down), (str(sf.up) if sf.up else None),
-                                 (str(sf.ctd) if sf.ctd else None), sf.label, args.outdir,
-                                 not args.no_plots, drot=args.drot, solver=args.solver,
-                                 sadcp_opts=sadcp_opts, cruise=args.cruise, formats=formats)
-        rc |= st_rc
-        if export is not None:
-            exports.append(export)
+    try:
+        for item in plan:
+            label = item
+            bar.start(label)
+            try:
+                if explicit:
+                    down, up, ctd_path = args.down, args.up, args.ctd
+                else:
+                    sf = discover(item, root=root, cruise=args.cruise, index=args.index,
+                                  from_hex=args.from_hex, ctd_cache=args.ctd_cache)
+                    label = sf.label
+                    down = str(sf.down)
+                    up = str(sf.up) if sf.up else None
+                    ctd_path = str(sf.ctd) if sf.ctd else None
+                bar.start(label)
+                status, export = _run_one(down, up, ctd_path, label, args.outdir,
+                                          not args.no_plots, drot=args.drot,
+                                          solver=args.solver, sadcp_opts=sadcp_opts,
+                                          cruise=args.cruise, formats=formats)
+                if export is not None:
+                    exports.append(export)
+            except (Exception, SystemExit) as e:       # one bad cast must not abort the batch
+                status = "error"
+                bar.clear()
+                log.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
+            results.append((label, status))
+            bar.advance(f"{label} [{status}]")
+        bar.close()
 
-    # cruise-level aggregate only when explicitly requested (batch / whole index)
-    if formats and exports and (args.all_stations or args.cruise_export):
-        _write_cruise_exports(exports, args.outdir, args.cruise, formats)
+        # cruise-level aggregate only when explicitly requested (batch / whole index)
+        if formats and exports and (args.all_stations or args.cruise_export):
+            _write_cruise_exports(exports, args.outdir, args.cruise, formats)
 
-    return rc
+        _log_summary(results, logfile, console_detail)
+    finally:
+        teardown_logging()
+
+    return 1 if any(s in ("fail", "error") for _, s in results) else 0
+
+
+def _log_summary(results: list[tuple[str, str]], logfile, console_detail: bool) -> None:
+    """Log a one-line tally plus any problem stations; echo to console when it's quiet."""
+    from collections import Counter
+
+    counts = Counter(status for _, status in results)
+    tally = ", ".join(f"{counts[k]} {k}" for k in ("ok", "warn", "fail", "error") if counts[k])
+    summary = f"done: {len(results)} station(s) — {tally}"
+    problems = [(label, status) for label, status in results if status in ("fail", "error")]
+    log.info(summary)
+    for label, status in problems:
+        log.info("  %-14s %s", label, status)
+    if logfile:
+        log.info("run log: %s", logfile)
+    if not console_detail:                             # console handler is quiet -> echo it
+        print(summary)
+        for label, status in problems:
+            print(f"  {label}: {status}")
+        if logfile:
+            print(f"run log: {logfile}")
 
 
 def _all_station_labels(index, root: Path, cruise: str) -> list[str]:
