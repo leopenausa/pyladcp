@@ -63,6 +63,5 @@ def test_profile_is_non_empty_and_matches_golden(fdccc1_001):
     dr = V.load_dr("FDCCC1_001")
     sc = V.score_profile(vr.vp.z, vr.vp.u, vr.vp.v, dr)
     assert sc["u"].n >= 10                           # was 0 (empty) before the fix
-    # full-inverse shape on this shallow near-touch cast; the legacy medianan(na=0) reference
-    # (separate commit) lifts this to ~0.97.
-    assert sc["u"].corr > 0.88
+    assert sc["u"].corr > 0.9                        # legacy medianan(na=0) reference lifts this
+    #                                                  shallow near-touch full inverse to ~0.97

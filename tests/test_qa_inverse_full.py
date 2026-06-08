@@ -88,12 +88,12 @@ def test_inverse_grid_stops_at_seabed(both_solvers):
 def test_shear_path_unchanged(both_solvers):
     # The solver switch itself does not perturb the shear shape (corr stays ~0.998). The absolute
     # rms reflects the velocity-path editing fix set now applied before averaging
-    # (units/floor/btgate/outlier_n): MORIA-80 shear rms ~0.024 (was <0.02 pre-editing) while the
+    # (units/floor/refmed/btgate/outlier_n): MORIA-80 shear rms ~0.031 (bias-dominated) while the
     # profile shape is unchanged. See memory ladcp-editing-rootcause-2026-06.
     out, _ = both_solvers
     _, s = out["shear"]
     assert s["u"].corr > 0.997
-    assert s["u"].rms < 0.030
+    assert s["u"].rms < 0.035
 
 
 def test_lainsadcp_weight_math():

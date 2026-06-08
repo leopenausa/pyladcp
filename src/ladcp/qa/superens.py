@@ -39,6 +39,19 @@ _PG_FIELD = 3            # percent-good field 4 (earth) used for weighting fallb
 _SE_OUTLIER_NBLOCK = 289
 
 
+def _medianan_na0(a: np.ndarray) -> np.ndarray:
+    """Legacy ``medianan(x)`` (na=0): per column the single sorted order statistic at MATLAB
+    ``round(L/2)`` of the finite values (half-away-from-zero). Reproduces ``prepinv.m:524``."""
+    a = np.asarray(a, float)
+    flat = a.reshape(a.shape[0], -1)
+    out = np.full(flat.shape[1], np.nan)
+    for j in range(flat.shape[1]):
+        xs = np.sort(flat[:, j][np.isfinite(flat[:, j])])
+        if xs.size:
+            out[j] = xs[int(np.floor(xs.size / 2 + 0.5)) - 1]
+    return out.reshape(a.shape[1:])
+
+
 def _uvrot(u: np.ndarray, v: np.ndarray, rot_deg: float) -> tuple[np.ndarray, np.ndarray]:
     """Rotate the (u, v) vector by ``rot_deg`` degrees (legacy ``uvrot.m``)."""
     r = -np.radians(rot_deg)
@@ -442,7 +455,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
         warnings.simplefilter("ignore", RuntimeWarning)
         for im, g in enumerate(groups):
             for src, out in ((ru_src, ru), (rv_src, rv), (rw_src, rw)):
-                ref = np.nanmedian(src[np.ix_(izr, g)], axis=0)   # [n_g] per-ping reference
+                # legacy per-ping reference ur=medianan(d.ru(izr,i1)) (na=0; prepinv.m:524) -- a
+                # single sorted order statistic, NOT numpy's mean-of-two-centre median.
+                ref = _medianan_na0(src[np.ix_(izr, g)])   # [n_g] per-ping reference
                 av = np.nanmean(ref)
                 r = np.where(np.isfinite(ref), ref, 0.0)
                 out[:, im] = np.nanmean(src[:, g] - r[None, :], axis=1) + av
