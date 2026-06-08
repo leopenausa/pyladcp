@@ -26,6 +26,10 @@ class CastParams:
     # editing
     edit_mask_dn_bins: tuple[int, ...] = (1,)
     edit_mask_up_bins: tuple[int, ...] = (1,)
+    edit_sidelobes: bool = True     # legacy edit_data: drop side-lobe-contaminated cells
+                                    # (surface up-reflection + range-dependent seabed wedge)
+                                    # from the velocity weights (golden default on)
+    dzbelow: float = 16.0           # below-bottom margin [m] (legacy p.dzbelow(1)=2*bin)
     cut: float = 0.0                # surface cut / draft trim [ensembles or m, per legacy]
     pglim: float = 0.0              # percent-good minimum
     elim: float = 0.2               # error-velocity limit [m/s]
