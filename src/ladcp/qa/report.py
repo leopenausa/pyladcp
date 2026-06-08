@@ -59,7 +59,9 @@ def assess(dh: DualHead, params: CastParams | None = None,
         sync_status = Status.OK if sync.corr > 0.9 else Status.WARN
         qc.add(Metric("ctd_sync_corr", round(sync.corr, 3), "", sync_status,
                       source_stage="qa.depth",
-                      note=f"lag {sync.lag} s; max package depth {sync.maxdepth:.0f} m"))
+                      note=f"offset {sync.lag} s; max package depth {sync.maxdepth:.0f} m"))
+        for m in _sync_quality_metrics(dh, sync):
+            qc.add(m)
         for m in _depth_sanity_metrics(sync):
             qc.add(m)
         qc.add(bottom_metric(detect_bottom(dh, sync, ctd=ctd)))
@@ -88,6 +90,45 @@ def _coord_frame_metrics(dh: DualHead) -> tuple[list[Metric], bool]:
             "velocities require a beam->earth transform (not yet implemented); "
             "acquisition metrics valid, velocity/sync/bottom NOT computed"))
     return metrics, earth
+
+
+def _sync_quality_metrics(dh: DualHead, sync) -> list[Metric]:
+    """Fail-loud guards that the CTD<->LADCP synchronization actually landed on the cast.
+
+    The single most dangerous silent failure (FDCCC1_001) was a mis-sync that mapped the CTD
+    depth onto the ADCP's on-deck pings: every metric still computed, but the in-water depth
+    window contained no valid velocity and the profile collapsed to empty. These two flags make
+    that loud. Pure flags -- they change no result.
+
+    * ``ctd_sync_locate`` -- the coarse cross-correlation peak (:func:`depth._coarse_offset`).
+      A low value means the cast could not be confidently located in the recording.
+    * ``ctd_sync_coverage`` -- the fraction of in-water pings that carry a valid velocity. Near
+      zero means the depth window and the data disagree (a mis-sync), so the solve would be
+      empty/garbage.
+    """
+    metrics: list[Metric] = []
+    cs = sync.coarse_score
+    if np.isfinite(cs):
+        metrics.append(Metric(
+            "ctd_sync_locate", round(float(cs), 2), "",
+            Status.WARN if cs < 0.5 else Status.OK, source_stage="qa.depth",
+            note=("CTD cast could not be confidently located in the ADCP record (weak vertical-"
+                  "velocity cross-correlation); the depth/velocity mapping may be wrong"
+                  if cs < 0.5 else None)))
+    z = np.asarray(sync.z_on_ping, float)
+    n = dh.down.n_ens
+    i0, i1 = water_window(z[:n])
+    inwin = np.zeros(n, dtype=bool)
+    inwin[i0:i1 + 1] = True
+    good = (np.isfinite(dh.down.vel[0]).sum(axis=0) >= 3)[:n]
+    denom = int(inwin.sum())
+    frac = float((good & inwin).sum() / denom) if denom else 0.0
+    metrics.append(Metric(
+        "ctd_sync_coverage", round(frac, 2), "fraction",
+        Status.WARN if frac < 0.2 else Status.OK, source_stage="qa.depth",
+        note=("in-water depth window carries almost no valid velocity: CTD/LADCP likely "
+              "mis-synced -- the profile would be empty or garbage" if frac < 0.2 else None)))
+    return metrics
 
 
 def _depth_sanity_metrics(sync) -> list[Metric]:
