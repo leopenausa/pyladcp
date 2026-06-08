@@ -96,11 +96,17 @@ STATIONS: dict[str, Station] = {
         name="FDCCC1_001",
         mat=_GOLDEN / "FDCCC1_001_LEO" / "FDCCC1_001.mat",
         depth_m=125.0, region="W Med (Cap de Creus)", uses_sadcp=False,
+        raw_down=_REPO / "FDCCC1" / "MA001000.000",     # beam coords -> b2earth at ingest
+        raw_up=_REPO / "FDCCC1" / "SL001000.000",
+        ctd=_REPO / "FDCCC1" / "FDCCC1_001.cnv",
     ),
     "FDCCC1_002": Station(
         name="FDCCC1_002",
         mat=_GOLDEN / "FDCCC1_002_LEO" / "FDCCC1_002.mat",
         depth_m=225.0, region="W Med (Cap de Creus)", uses_sadcp=True,
+        raw_down=_REPO / "FDCCC1" / "MA002000.000",
+        raw_up=_REPO / "FDCCC1" / "SL002000.000",
+        ctd=_REPO / "FDCCC1" / "FDCCC1_002.cnv",
     ),
 }
 

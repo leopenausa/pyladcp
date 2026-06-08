@@ -161,6 +161,23 @@ def read_pd0(path: str, head: str = "", facing_hint: str | None = None) -> RawAD
 
     serial = _read_serial(buf, p0, offs0, fl)
 
+    # beam -> earth: rotate per-head at load (legacy loadrdi b2earth) so the rest of the pipeline,
+    # which assumes earth-frame vel[0..3] = (u,v,w,e), runs unchanged. Earth-frame files skip this.
+    beam2earth_info = None
+    if coord_frame == CoordFrame.BEAM:
+        from .beam2earth import beam_to_earth
+        beam_angle = _beam_angle(sysconf)
+        beams_up = facing == "up"
+        vel, n3 = beam_to_earth(vel, heading, pitch, roll,
+                                beam_angle_deg=beam_angle, beams_up=beams_up)
+        n3_bt = 0
+        if have_bt:
+            bt_e, n3_bt = beam_to_earth(bt_vel[:, None, :], heading, pitch, roll,
+                                        beam_angle_deg=beam_angle, beams_up=beams_up)
+            bt_vel = bt_e[:, 0, :]
+        beam2earth_info = {"n_3beam": n3, "n_3beam_bt": n3_bt, "beam_angle_deg": beam_angle}
+        coord_frame = CoordFrame.EARTH
+
     return RawADCP(
         head=head or facing,
         coord_frame=coord_frame,
@@ -190,7 +207,7 @@ def read_pd0(path: str, head: str = "", facing_hint: str | None = None) -> RawAD
         meta={"path": path, "ex_byte": ex, "n_ensembles": nt,
               "sysconfig": sysconf, "facing_from_bit": facing_from_bit,
               "facing_warning": facing_warning, "dist_first_m": dist_first_m,
-              "beam_angle_deg": _beam_angle(sysconf)},
+              "beam_angle_deg": _beam_angle(sysconf), "beam2earth": beam2earth_info},
     )
 
 
@@ -219,8 +236,15 @@ def _facing_from_name(path: str) -> str | None:
 
 
 def _beam_angle(sysconf: int) -> int:
-    """Beam angle [deg] from the fixed-leader system-config word (bits 6-7 of LSB)."""
-    return {0: 15, 1: 20, 2: 30, 3: 0}.get((sysconf >> 6) & 0x03, 20)
+    """Beam angle [deg] from the fixed-leader system-config word.
+
+    The angle is the low two bits of the *high* byte (legacy ``rditype.m`` ``angles[15 20 30 0]``
+    indexed by the MSB's bits 0-1). The previous decode read LSB bits 6-7 -- which are XDCR-HD +
+    facing -- and so returned 20 deg only by luck for down-lookers (facing bit 0) and a bogus 0 deg
+    for up-lookers (facing bit 1). That latent error was harmless for earth-frame data (the up
+    head's angle was unused) but breaks the beam->earth transform (1/sin(0)); read the right bits.
+    """
+    return {0: 15, 1: 20, 2: 30, 3: 0}.get((sysconf >> 8) & 0x03, 20)
 
 
 def _find_type(buf: bytes, pos: int, offs, type_id: int):

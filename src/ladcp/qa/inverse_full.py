@@ -422,6 +422,12 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
     and added as the ``lainsadcp`` ocean constraint with weight ``sadcpfac``. The ocean
     velocity is rotated magnetic->true by ``drot``.
     """
+    if se.ru.shape[1] == 0:                              # no super-ensembles (degenerate cast)
+        z = np.arange(1, 2) * dz                         # -> empty NaN profile, not a crash
+        nan = np.full(z.size, np.nan)
+        return VelocityProfile(z=z, u=nan, v=nan, uerr=nan, nvel=np.zeros(z.size, dtype=int),
+                               ubar=np.nan, vbar=np.nan, n=np.zeros(z.size, dtype=int))
+
     svel_mag = None
     if svel is not None and sadcpfac > 0:
         svel_mag = np.asarray(svel, dtype=float).copy()

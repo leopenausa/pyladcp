@@ -267,8 +267,11 @@ def bottom_referenced_profile(merged, bt, sync, *, zbottom: float, dz: float = 8
     """
     depth, resid_u, resid_v, w_all = _btrk_cells(merged, bt, sync, zbottom=zbottom,
                                                  weightmin=weightmin)
-    if depth.size == 0:
+    fin = np.isfinite(depth)
+    if not fin.any():                    # no seabed (zbottom NaN) -> no bottom-referenced profile
         return None
+    if not fin.all():                    # drop non-finite cells (degenerate near-touch casts)
+        depth, resid_u, resid_v, w_all = depth[fin], resid_u[fin], resid_v[fin], w_all[fin]
     if z is None:
         z = np.arange(np.floor(depth.min() / dz) * dz, depth.max() + dz, dz)
     z = np.asarray(z, dtype=float)
