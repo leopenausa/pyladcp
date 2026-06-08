@@ -61,6 +61,7 @@ _SEABED_REFINE_WIN = 30.0  # refine zbottom from per-ping picks within this of t
 _NEAR_BOTTOM = 200.0       # near-bottom window (deepest-package-depth minus this) [m] (getdpthi)
 _NEARTOUCH_MIN = 3         # min near-bottom bottom echoes to trust a zmax near-touch fallback
 _BOTTOM_ERR_WARN = 10.0  # seabed scatter above this [m] -> flag the depth as uncertain
+_SEABED_XCHECK = 25.0    # |stack - legacy-polyfit| above this [m] -> flag disagreement (WARN)
 _BTRK_BELOW = 0.5        # bins below the target-strength max used for bottom velocity
 _BTRK_WLIM = 0.05        # max |W_btrk - W_ref| [m/s] to accept a bottom velocity
 
@@ -73,6 +74,9 @@ class BottomResult:
     n_valid: int
     is_fallback: bool = False   # True when the stack failed and zbottom is the zmax near-touch
                                 # lower bound (or NaN) rather than a stacked echo lock
+    zbottom_legacy: float = np.nan   # faithful getdpthi.m polyfit seabed -- DIAGNOSTIC cross-check
+                                     # only, never the reported value (see _legacy_seabed)
+    legacy_error: float = np.nan     # legacy self-reported zbottomerror [m]
 
 
 def targ(ea: np.ndarray, dis: np.ndarray, at: float, bl: float,
@@ -183,6 +187,8 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
     z = sync.z_on_ping
     botdepth = z + hbot_raw                                # per-ping seabed depth
     zmax = float(np.nanmax(z))
+    # faithful legacy getdpthi polyfit, computed as a cross-check only (never reported)
+    zb_leg, leg_err = _legacy_seabed(z, hbot_raw, zmax)
 
     d = dh.down
     zd = (d.meta.get("dist_first_m", d.blank_m + d.cell_m / 2.0)
@@ -199,7 +205,8 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
         near = np.isfinite(botdepth) & (np.abs(botdepth - zbottom) < _SEABED_REFINE_WIN)
         error = float(np.median(np.abs(botdepth[near] - zbottom))) if near.any() else 0.0
         hbot = np.where(near, hbot_raw, np.nan)
-        return BottomResult(zbottom, error, hbot, int(np.isfinite(hbot).sum()))
+        return BottomResult(zbottom, error, hbot, int(np.isfinite(hbot).sum()),
+                            zbottom_legacy=zb_leg, legacy_error=leg_err)
 
     # stack failed (weak or dead-zone bottom echo). The package nearly touched, so the deepest
     # depth it reached is the seabed to within a few metres (validated <=11 m vs altimeter +
@@ -210,12 +217,14 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
     # picks to those so they sit below the lower-bound line instead of crossing it.
     near = np.isfinite(botdepth) & (z > zmax - _NEAR_BOTTOM)
     if int(near.sum()) < _NEARTOUCH_MIN:                   # no near-bottom echo -> bed unknown
-        return BottomResult(np.nan, np.nan, np.full_like(hbot_raw, np.nan), 0, is_fallback=True)
+        return BottomResult(np.nan, np.nan, np.full_like(hbot_raw, np.nan), 0, is_fallback=True,
+                            zbottom_legacy=zb_leg, legacy_error=leg_err)
     bed = near & (botdepth >= zmax) & (botdepth < zmax + _SEABED_REFINE_WIN)
     error = (float(np.median(botdepth[bed] - zmax)) if int(bed.sum()) >= 3
              else float(_BOTTOM_ERR_WARN))                 # honest uncertainty, never NaN
     hbot = np.where(bed, hbot_raw, np.nan)
-    return BottomResult(zmax, error, hbot, int(np.isfinite(hbot).sum()), is_fallback=True)
+    return BottomResult(zmax, error, hbot, int(np.isfinite(hbot).sum()), is_fallback=True,
+                        zbottom_legacy=zb_leg, legacy_error=leg_err)
 
 
 def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
@@ -261,6 +270,49 @@ def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
         return zmax, False                                # no reliable echo -> deepest reached
     k = strong[-1]                                        # deepest strong stacked peak = seabed
     return float(grid[k]), True                           # 1 m grid; parabola refine overshoots
+
+
+def _legacy_seabed(z: np.ndarray, hbot: np.ndarray, maxdepth: float) -> tuple[float, float]:
+    """Faithful port of the legacy ``getdpthi.m`` seabed polyfit (lines 327-424, n==n2 branch).
+
+    DIAGNOSTIC cross-check only -- never the reported seabed. Legacy derives the bed purely from
+    the per-ping bottom distances ``hbot`` in the near-bottom window: a robust median -> half-trim
+    deg-1 -> deg-2 fit of ``hbot + depth`` vs ensemble, evaluated at the deepest ping, with a
+    ``NaN`` gate when the self-error exceeds 20 m or the bed would sit implausibly above the
+    deepest package depth. It is excellent on clean casts but locks *silently* onto constant-range
+    multiples (its >20 m gate never fires there -- their scatter is ~0.3 m), which is exactly why
+    :func:`detect_bottom` reports the constant-depth stack instead and only compares against this
+    value to flag disagreement. Returns ``(zbottom, zbottomerror)``; ``(nan, nan)`` if unknown.
+    """
+    dz_neg = -np.asarray(z, dtype=float)                  # legacy d.z is negative-down
+    hb = np.asarray(hbot, dtype=float)
+    if not np.isfinite(dz_neg).any():
+        return np.nan, np.nan
+    ibottom = int(np.nanargmax(-dz_neg))                  # deepest ping (max(-d.z))
+    maxnegz = float(np.nanmax(-dz_neg))
+    iok = np.where(((maxnegz + dz_neg) < _NEAR_BOTTOM) & (hb > 0) & np.isfinite(hb))[0]
+    if iok.size <= 2:
+        return np.nan, np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                   # polyfit conditioning on raw indices
+        bd = hb[iok] - dz_neg[iok]                         # seabed depth per ping = hbot + depth
+        resid = np.median(bd) - bd
+        half = np.argsort(np.abs(resid))[: resid.size // 2]
+        c1 = np.polyfit(iok[half], bd[half], 1)
+        resid = np.polyval(c1, iok) - bd
+        half = np.argsort(np.abs(resid))[: resid.size // 2]
+        std_half = np.std(resid[half])
+        keep = (np.abs(resid) < 2 * std_half) | (np.abs(resid) < 30)
+        iok2 = iok[keep]
+        if iok2.size < 3:
+            return np.nan, np.nan
+        bd2 = hb[iok2] - dz_neg[iok2]
+        c2 = np.polyfit(iok2, bd2, 2)
+        zbottom = float(np.polyval(c2, ibottom))
+        err = float(np.median(np.abs(np.polyval(c2, iok2) - bd2)))
+    if (zbottom - maxdepth < -(maxdepth * 0.01 + 10)) or (err > 20):
+        return np.nan, err
+    return zbottom, err
 
 
 @dataclass
@@ -347,7 +399,10 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_below: float = _BTRK_BEL
 
 
 def bottom_metric(b: BottomResult) -> Metric:
-    ok = np.isfinite(b.zbottom) and not b.is_fallback and b.error <= _BOTTOM_ERR_WARN
+    disagree = (np.isfinite(b.zbottom) and np.isfinite(b.zbottom_legacy)
+                and abs(b.zbottom - b.zbottom_legacy) > _SEABED_XCHECK)
+    ok = (np.isfinite(b.zbottom) and not b.is_fallback and b.error <= _BOTTOM_ERR_WARN
+          and not disagree)
     if not np.isfinite(b.zbottom):
         note = "no bottom echo found"
     elif b.is_fallback:
@@ -355,6 +410,10 @@ def bottom_metric(b: BottomResult) -> Metric:
                 f"+/- {b.error:.1f} m, {b.n_valid} echoes")
     else:
         note = f"+/- {b.error:.2f} m from {b.n_valid} bottom echoes"
+    if disagree:
+        note += (f"; stack {b.zbottom:.0f} vs legacy-polyfit {b.zbottom_legacy:.0f} m differ by "
+                 f"{abs(b.zbottom - b.zbottom_legacy):.0f} m -- near-bottom multiples (legacy "
+                 f"biased deep) or shallow false-lock (stack); inspect")
     return Metric(
         "bottom_depth", round(b.zbottom, 1), "m",
         Status.OK if ok else Status.WARN,
