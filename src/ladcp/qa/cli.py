@@ -57,10 +57,15 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
     log.info("[%-5s] %s  ->  %s/", qc.overall_status.value.upper(), station, st_dir)
 
-    # velocity solve (requires both heads + CTD): .lad + .bot text, figures via the report
+    # velocity solve (requires both heads + CTD + earth-frame data): .lad + .bot text, figures
+    from ..models import CoordFrame
+    earth = all(h.coord_frame == CoordFrame.EARTH for h in (dh.down, dh.up) if h is not None)
     result = None
     export = None
-    if dh.has_up and ctd is not None:
+    if dh.has_up and ctd is not None and not earth:
+        log.warning("        velocity skipped: %s-coordinate data needs a beam->earth transform "
+                    "(not yet implemented); QA metrics still written", dh.down.coord_frame.value)
+    if dh.has_up and ctd is not None and earth:
         result, meta = _velocity_outputs(dh, ctd, station, st_dir, drot, solver, sadcp_opts)
         from ..qa.checks import consistency_checks
         for m in consistency_checks(result):       # checkinv -> scorecard

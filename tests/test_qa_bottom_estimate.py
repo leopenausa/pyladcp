@@ -3,7 +3,8 @@
 These guard the deep-bias fix: the seabed depth is recovered by stacking raw echo amplitude
 along constant-depth loci (:func:`_stack_seabed`), which rejects the transmission-loss tail
 (constant *range*, not depth) and mid-water scattering layers, and falls back to the deepest
-package depth when no echo stacks. :func:`_seabed_bin` is the per-ping raw-amplitude pick.
+package depth when no echo stacks. The per-ping pick (:func:`bottom_distance`) is the strongest
+``targ`` return (legacy ``getbtrack``) and is exercised on real data elsewhere.
 """
 
 from __future__ import annotations
@@ -15,9 +16,10 @@ from ladcp.models import Status
 from ladcp.qa.bottom import (
     _BOTTOM_ERR_WARN,
     _SEABED_STACK_MIN,
+    _STACK_COVER_MIN,
     BottomResult,
-    _seabed_bin,
     _stack_seabed,
+    _support_cover,
     bottom_metric,
 )
 
@@ -91,20 +93,17 @@ def test_stack_fallback_when_no_return():
     assert zb == pytest.approx(np.nanmax(z), abs=1.0)
 
 
-def test_seabed_bin_deepest_prominent_peak():
-    zd = _zd()
-    gate = (zd > 50.0) & (zd < 300.0)
-    col = np.full(zd.size, 60.0)
-    col[20] += 30.0                                        # shallow scattering layer
-    col[40] += 25.0                                        # deeper seabed (still prominent)
-    k = _seabed_bin(col, gate)
-    assert k == pytest.approx(40.0, abs=1.0)               # deepest prominent peak
-
-    # a single peak followed by a gradual tail -> the peak, not the tail
-    col2 = np.full(zd.size, 60.0)
-    col2[30] += 30.0
-    col2[31:50] += np.linspace(15.0, 2.0, 19)             # decaying shoulder (low prominence)
-    assert _seabed_bin(col2, gate) == pytest.approx(30.0, abs=1.0)
+def test_support_cover_wide_vs_narrow():
+    # a genuine bed at 1000 m (package reaching 1000 m) is seen across a wide span of package
+    # depths -> high cover; a constant-range artifact's picks cluster in a thin band -> low cover.
+    wide = _support_cover(np.linspace(750.0, 995.0, 50), zbottom=1000.0, zmax=1000.0)
+    narrow = _support_cover(np.linspace(200.0, 235.0, 50), zbottom=1000.0, zmax=1000.0)
+    assert wide >= 0.6 and wide >= _STACK_COVER_MIN       # genuine bed clearly accepted
+    assert narrow < _STACK_COVER_MIN                      # narrow artifact band rejected
+    # degenerate / empty support never divides by zero
+    assert _support_cover(np.array([]), 1000.0, 1000.0) == 0.0
+    # no geometrically visible span (zbottom beyond reach of zmax) -> 1.0, never rejects
+    assert _support_cover(np.array([10.0, 12.0]), zbottom=40.0, zmax=10.0) == 1.0
 
 
 def test_metric_ok_warn_nan():
@@ -115,8 +114,17 @@ def test_metric_ok_warn_nan():
                                        hbot=np.array([]), n_valid=600))
     assert noisy.status is Status.WARN          # finite but uncertain -> flagged honestly
 
-    fallback = bottom_metric(BottomResult(zbottom=4718.0, error=np.nan,
-                                          hbot=np.array([]), n_valid=0))
-    assert fallback.status is Status.WARN        # no stacked echo -> flagged
+    # near-touch zmax fallback: finite zbottom + small error, but flagged because it is a
+    # lower bound, not a stacked echo lock
+    fallback = bottom_metric(BottomResult(zbottom=4718.0, error=8.0, hbot=np.array([]),
+                                          n_valid=12, is_fallback=True))
+    assert fallback.status is Status.WARN
+    assert "lower bound" in fallback.note
+
+    # no bottom echo at all -> NaN zbottom, flagged, distinct note
+    nobed = bottom_metric(BottomResult(zbottom=np.nan, error=np.nan, hbot=np.array([]),
+                                       n_valid=0, is_fallback=True))
+    assert nobed.status is Status.WARN
+    assert "no bottom" in nobed.note
 
     assert _SEABED_STACK_MIN > 0                  # sanity: threshold is configured

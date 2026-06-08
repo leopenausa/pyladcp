@@ -267,8 +267,11 @@ def bottom_referenced_profile(merged, bt, sync, *, zbottom: float, dz: float = 8
     """
     depth, resid_u, resid_v, w_all = _btrk_cells(merged, bt, sync, zbottom=zbottom,
                                                  weightmin=weightmin)
-    if depth.size == 0:
+    fin = np.isfinite(depth)
+    if not fin.any():                    # no seabed (zbottom NaN) -> no bottom-referenced profile
         return None
+    if not fin.all():                    # drop non-finite cells (degenerate near-touch casts)
+        depth, resid_u, resid_v, w_all = depth[fin], resid_u[fin], resid_v[fin], w_all[fin]
     if z is None:
         z = np.arange(np.floor(depth.min() / dz) * dz, depth.max() + dz, dz)
     z = np.asarray(z, dtype=float)
@@ -542,6 +545,16 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     """
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
+    # earth-frame guard: refuse beam-coordinate data rather than emit silent garbage velocities
+    # (merge_heads reads vel[0..3] as u,v,w,e -- valid only in the earth frame). A beam->earth
+    # transform is not yet implemented; this is the single source of truth that blocks it.
+    from ..models import CoordFrame
+    for label, head in (("down", dh.down), ("up", dh.up)):
+        if head is not None and head.coord_frame != CoordFrame.EARTH:
+            raise ValueError(
+                f"{label}-looker is in {head.coord_frame.value!r} coordinates; the velocity solve "
+                "requires earth-frame velocities. A beam->earth transform is not yet implemented "
+                "(the QA report flags this as a coord_frame WARN).")
     se, z, merged, bt, sync, bottom = _build(dh, ctd, dz=dz, params=params)
     sp_mag = shear_method(se, dz=dz, drot=0.0, z=z)         # magnetic baroclinic shape
     bp_mag = bottom_referenced_profile(merged, bt, sync, zbottom=bottom.zbottom, dz=dz,

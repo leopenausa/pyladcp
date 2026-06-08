@@ -38,7 +38,7 @@ def consistency_checks(r: VelocityResult) -> list[Metric]:
             note=f"profile err {uerr:.3f} vs noise floor {noise:.3f} m/s"))
 
     b = r.btrk
-    if b is not None and b.n_rdi > 0:
+    if b is not None and b.n_rdi > 0 and b.n_own > 0:
         bias = float(np.nanmax(np.abs([b.u_bias, b.v_bias])))
         status = Status.OK if bias <= 0.1 else Status.WARN
         out.append(Metric(

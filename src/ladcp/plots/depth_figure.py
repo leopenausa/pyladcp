@@ -48,8 +48,9 @@ def depth_figure(dh: DualHead, ctd: CTDTimeSeries, *, fig=None, savepath: str | 
             label="per-ping seabed (z + bottom dist)")
     ax.plot(ens, z, lw=0.8, color="#2c3e50", label="package depth")
     if np.isfinite(bottom.zbottom):
+        tag = " — near-bottom lower bound" if bottom.is_fallback else ""
         ax.axhline(bottom.zbottom, ls="--", color="k",
-                   label=f"seabed {bottom.zbottom:.1f} +/- {bottom.error:.2f} m")
+                   label=f"seabed {bottom.zbottom:.1f} +/- {bottom.error:.1f} m{tag}")
     ax.invert_yaxis()
     ax.set(xlabel="ensemble", ylabel="depth [m]")
     if near.any():
