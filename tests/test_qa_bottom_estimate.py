@@ -16,8 +16,10 @@ from ladcp.models import Status
 from ladcp.qa.bottom import (
     _BOTTOM_ERR_WARN,
     _SEABED_STACK_MIN,
+    _STACK_COVER_MIN,
     BottomResult,
     _stack_seabed,
+    _support_cover,
     bottom_metric,
 )
 
@@ -89,6 +91,19 @@ def test_stack_fallback_when_no_return():
     zb, is_echo = _stack_seabed(z, ea, zd, np.ones_like(z))
     assert not is_echo
     assert zb == pytest.approx(np.nanmax(z), abs=1.0)
+
+
+def test_support_cover_wide_vs_narrow():
+    # a genuine bed at 1000 m (package reaching 1000 m) is seen across a wide span of package
+    # depths -> high cover; a constant-range artifact's picks cluster in a thin band -> low cover.
+    wide = _support_cover(np.linspace(750.0, 995.0, 50), zbottom=1000.0, zmax=1000.0)
+    narrow = _support_cover(np.linspace(200.0, 235.0, 50), zbottom=1000.0, zmax=1000.0)
+    assert wide >= 0.6 and wide >= _STACK_COVER_MIN       # genuine bed clearly accepted
+    assert narrow < _STACK_COVER_MIN                      # narrow artifact band rejected
+    # degenerate / empty support never divides by zero
+    assert _support_cover(np.array([]), 1000.0, 1000.0) == 0.0
+    # no geometrically visible span (zbottom beyond reach of zmax) -> 1.0, never rejects
+    assert _support_cover(np.array([10.0, 12.0]), zbottom=40.0, zmax=10.0) == 1.0
 
 
 def test_metric_ok_warn_nan():

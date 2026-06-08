@@ -62,6 +62,9 @@ _NEAR_BOTTOM = 200.0       # near-bottom window (deepest-package-depth minus thi
 _NEARTOUCH_MIN = 3         # min near-bottom bottom echoes to trust a zmax near-touch fallback
 _BOTTOM_ERR_WARN = 10.0  # seabed scatter above this [m] -> flag the depth as uncertain
 _SEABED_XCHECK = 25.0    # |stack - legacy-polyfit| above this [m] -> flag disagreement (WARN)
+_STACK_COVER_MIN = 0.4   # min package-depth support span (fraction of the geometrically visible
+                         # range) for a stack lock to be a real bed and not a constant-range
+                         # artifact -- see _support_cover / detect_bottom
 _BTRK_BELOW = 0.5        # bins below the target-strength max used for bottom velocity
 _BTRK_WLIM = 0.05        # max |W_btrk - W_ref| [m/s] to accept a bottom velocity
 
@@ -197,6 +200,18 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
     zstack, is_echo = _stack_seabed(z, ea, zd, sc)
 
     if is_echo:
+        # support-spread guard: a real bed at a constant depth is seen by pings spanning a wide
+        # range of package depths (range = zbottom - z stays in the echo band as the package
+        # descends), so the per-ping seabed picks near the lock cover most of the geometrically
+        # visible span. A constant-*range* artifact (multiple / previous-ping interference) only
+        # crosses the constant-depth lock line over a narrow band of package depths, so its
+        # support is a thin cluster. Reject a narrow-support lock and fall back to the near-touch
+        # zmax bound rather than report the artifact (FDCCC1_001: 242 m lock, golden 127 m;
+        # support covers only 26% vs >=61% on every genuine lock across 40 MORIA + FDCCC casts).
+        near0 = np.isfinite(botdepth) & (np.abs(botdepth - zstack) < _SEABED_REFINE_WIN)
+        is_echo = _support_cover(z[near0], zstack, zmax) >= _STACK_COVER_MIN
+
+    if is_echo:
         # the parabola-refined stack peak is the reported seabed (unbiased -- the volume-
         # scatterer range-gain that pulls a per-ping targ pick ~1-2 m deep does not enter it).
         # The per-ping picks lying near it -- the pings that actually saw the bed -- give the
@@ -225,6 +240,27 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
     hbot = np.where(bed, hbot_raw, np.nan)
     return BottomResult(zmax, error, hbot, int(np.isfinite(hbot).sum()), is_fallback=True,
                         zbottom_legacy=zb_leg, legacy_error=leg_err)
+
+
+def _support_cover(z_support: np.ndarray, zbottom: float, zmax: float) -> float:
+    """Fraction of the geometrically visible package-depth span that the lock's echoes cover.
+
+    A real bed at ``zbottom`` is visible whenever the package range ``zbottom - z`` falls in the
+    bottom-echo band ``_BTRK_RANGE``, i.e. for package depths ``z`` in
+    ``[zbottom - hi, min(zmax, zbottom - lo)]`` -- a span the descent actually traverses. The
+    per-ping seabed picks near a genuine lock spread across most of that span; a constant-range
+    artifact masquerading as a constant-depth bed only does so over a thin band of package
+    depths. Returns ``support_span / visible_span`` (1.0 when the geometry leaves no span to
+    cover, so the guard never rejects on a degenerate denominator).
+    """
+    z_support = np.asarray(z_support, float)
+    if z_support.size < 2:
+        return 0.0
+    lo, hi = _BTRK_RANGE
+    visible = min(float(zmax), zbottom - lo) - max(0.0, zbottom - hi)
+    if visible <= 0.0:
+        return 1.0
+    return float(z_support.max() - z_support.min()) / visible
 
 
 def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
