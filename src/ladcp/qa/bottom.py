@@ -1,22 +1,26 @@
 """Seabed detection from the down-looker echo (port of getbtrack/getdpthi essentials).
 
-The seabed produces a strong echo-amplitude return below the normal water column. We
-convert echo amplitude to an attenuation-corrected target strength (``targ``), find the
-per-ensemble peak distance by parabola fit (``localmax2``), accept it as a bottom echo
-when it stands ``btrk_ts`` dB above bin 1 and lies within ``btrk_range``, then combine
-the bottom distance with the synchronized package depth to get the seabed depth::
+The seabed produces a strong echo-amplitude return below the normal water column. The
+reported seabed depth (:func:`detect_bottom` -> :func:`_stack_seabed`) exploits the fact
+that the seabed depth is *constant* across pings: raw echo amplitude is stacked along
+constant-depth loci ``D = z_package + range`` and the seabed is the deepest trial depth that
+reinforces well above the per-ping background. This is robust to the transmission-loss tail
+of the volume-scatterer target strength (``targ``), which sits at constant *range* (not
+depth) and smears out -- an earlier per-ping ``targ``-peak pick was biased 50-150 m deep on
+weak/far returns. A cast that nearly touched bottom leaves the bed inside the inner range-gate
+dead zone with no stackable echo; there we fall back to the deepest depth the package reached
+(a tight lower bound) and flag the result. The per-ping bottom *distance* (:func:`bottom_distance`,
+for the QA figures and echo count) is localized on raw amplitude (:func:`_seabed_bin`).
 
-    zbottom = robust_fit( z_package + bottom_distance )   over near-bottom pings
+When a CTD cast is supplied distances are sound-speed corrected (:func:`soundspeed_scale`,
+legacy getdpthi ``sc=ss./d.sv``); the firmware sizes its range bins with a fixed onboard
+sound speed (here 1450 m/s), so the true distance scales by the in-situ/onboard ratio.
 
-The seabed depth is fit with a quadratic over the near-bottom pings and evaluated at the
-deepest ping (faithful port of getdpthi.m). When a CTD cast is supplied the bottom
-distance is corrected for sound speed (:func:`soundspeed_scale`, legacy getdpthi
-``sc=ss./d.sv``); the firmware sizes its range bins with a fixed onboard sound speed
-(here 1450 m/s), so the true distance scales by the in-situ/onboard ratio.
-
-Validated against MORIA-80 (golden ``p.zbottom`` 1079.02, ``p.zbottomerror`` 0.56):
-quadratic estimator alone gives 1079.3 m; with the sound-speed correction 1080.1 m
-(physically deeper, within the golden +/-0.6 m band and the 2 m QA gate).
+Validated against the CTD altimeter (seabed = depth + altimeter, where altimeter < 28 m) on
+the MORIA stations that approached close enough: median |error| ~1.2 m, max ~12 m, no station
+worse than 20 m (vs median 1 m but max 153 m and 7 stations > 20 m for the old ``targ``-peak
+pick). MORIA-80 golden ``p.zbottom`` 1079.02; this gives ~1080.8 m (altimeter 1079.5 m).
+See ``scripts/validate_seabed_altimeter.py`` for the scorer.
 """
 
 from __future__ import annotations
@@ -36,7 +40,19 @@ _SOURCE_LEVEL = 100.0    # eas in targ()
 _APERTURE_DEG = 2.0
 _BTRK_TS = 10.0          # dB excess over bin 1 to call a bottom echo
 _BTRK_RANGE = (50.0, 300.0)
-_NEAR_BOTTOM = 200.0     # within this many m of max depth -> near-bottom ping
+# Per-ping seabed distance (bottom_distance, for the QA figures + echo count) is localized on
+# the *raw* echo amplitude -- not the volume-scatterer target strength targ(), whose range-gain
+# over-amplifies far bins and pulls a per-ping pick metres deep on weak/far returns. The seabed
+# is the deepest topographically-prominent peak, which also passes over mid-water scattering
+# layers above it (see _seabed_bin).
+_SEABED_MIN_PROM = 8.0   # dB, min peak prominence to call a per-ping return
+# The reported seabed depth (detect_bottom -> _stack_seabed) stacks raw amplitude along
+# constant-depth loci, which the targ tail can't bias because it sits at constant range.
+_SEABED_STACK_DD = 1.0     # depth-grid step for the stack [m]
+_SEABED_STACK_PROM = 5.0   # min prominence on the stack curve to be a candidate [dB]
+_SEABED_STACK_MIN = 15.0   # min stacked amplitude over background to trust the echo [dB]
+_SEABED_REFINE_WIN = 30.0  # refine zbottom from per-ping picks within this of the stack [m]
+_BOTTOM_ERR_WARN = 10.0  # seabed scatter above this [m] -> flag the depth as uncertain
 _BTRK_BELOW = 0.5        # bins below the target-strength max used for bottom velocity
 _BTRK_WLIM = 0.05        # max |W_btrk - W_ref| [m/s] to accept a bottom velocity
 
@@ -84,18 +100,62 @@ def localmax2(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.
     return xout, yout, imax
 
 
+def _parabola_vertex(col: np.ndarray, k: int) -> float:
+    """3-point parabola-refined fractional bin index of the peak at integer bin ``k``."""
+    if k <= 0 or k >= col.size - 1:
+        return float(k)
+    y1, y2, y3 = col[k - 1], col[k], col[k + 1]
+    denom = y1 - 2.0 * y2 + y3
+    if not np.isfinite(denom) or denom == 0.0:
+        return float(k)
+    return k + 0.5 * (y1 - y3) / denom
+
+
+def _seabed_bin(col: np.ndarray, gate: np.ndarray, *,
+                min_prom: float = _SEABED_MIN_PROM) -> float:
+    """Fractional range-bin of the seabed in one ping's amplitude profile, or NaN.
+
+    The seabed is the *deepest topographically-prominent* peak (>= ``min_prom`` dB) of the
+    raw echo amplitude within ``gate``. Prominence -- height above the valley separating it
+    from any taller neighbour -- distinguishes a real reflector (the seabed, or a mid-water
+    scattering layer) from the gradual reverberation/transmission-loss tail that has no dip
+    before it. Taking the *deepest* prominent peak passes over scattering layers above the
+    bed; using raw amplitude (not ``targ``) avoids the volume-scatterer range-gain that
+    biases the pick deep.
+    """
+    from scipy.signal import find_peaks
+
+    c = np.where(gate, col, np.nan)
+    if np.isfinite(c).sum() < 5:
+        return np.nan
+    floor = float(np.nanpercentile(c, 25))
+    cf = np.nan_to_num(c, nan=floor)
+    peaks, _ = find_peaks(cf, prominence=min_prom)
+    if peaks.size:
+        return _parabola_vertex(cf, int(peaks[-1]))    # deepest prominent peak = seabed
+    kmax = int(np.nanargmax(c))                         # fallback: a lone strong return
+    if c[kmax] - floor < min_prom:
+        return np.nan
+    return _parabola_vertex(cf, kmax)
+
+
 def bottom_distance(dh: DualHead) -> np.ndarray:
-    """Per-ping distance to the seabed echo [m], NaN where no valid bottom echo."""
+    """Per-ping distance to the seabed echo [m], NaN where no valid bottom echo.
+
+    Localized on the raw echo amplitude (deepest strong return; see :func:`_seabed_bin`)
+    rather than the target strength, then gated to the ``_BTRK_RANGE`` window.
+    """
     d = dh.down
-    at = _ATT_300 if d.freq_khz == 300 else _ATT_OTHER
     zd = (d.meta.get("dist_first_m", d.blank_m + d.cell_m / 2.0)
           + np.arange(d.n_cells) * d.cell_m).astype(float)
     ea = np.nanmedian(d.echo, axis=0) * 0.45               # beams -> dB (counts*0.45)
-    tg = targ(ea, zd, at, d.cell_m)
-    zpeak, ypeak, _ = localmax2(zd, tg)
-    dts = ypeak - tg[0]
-    valid = (dts > _BTRK_TS) & (zpeak > _BTRK_RANGE[0]) & (zpeak < _BTRK_RANGE[1])
-    hbot = np.where(valid, zpeak, np.nan)
+    gate = (zd > _BTRK_RANGE[0]) & (zd < _BTRK_RANGE[1])
+    n = ea.shape[1]
+    hbot = np.full(n, np.nan)
+    for j in range(n):
+        kb = _seabed_bin(ea[:, j], gate)
+        if np.isfinite(kb):
+            hbot[j] = float(np.interp(kb, np.arange(zd.size), zd))
     return hbot
 
 
@@ -128,41 +188,88 @@ def soundspeed_scale(dh: DualHead, sync: SyncResult, ctd: CTDTimeSeries) -> np.n
 
 def detect_bottom(dh: DualHead, sync: SyncResult,
                   ctd: CTDTimeSeries | None = None) -> BottomResult:
-    """Estimate seabed depth from bottom distance + synchronized package depth.
+    """Estimate seabed depth by depth-stacking the down-looker echo.
 
-    When ``ctd`` is supplied, the bottom distance is corrected for sound speed
-    (:func:`soundspeed_scale`); otherwise the uncorrected nominal-sound-speed
-    distance is used (~1 m deep on a ~1080 m cast).
+    ``hbot`` (per-ping seabed distance, :func:`bottom_distance`) drives the QA figures and
+    echo count; the reported ``zbottom`` comes from :func:`_stack_seabed`, which is robust
+    to the transmission-loss tail that biased a per-ping pick deep. ``error`` is the scatter
+    of the per-ping seabed depths about ``zbottom`` (NaN when no echo stacked, i.e. the
+    fallback used the deepest package depth). When ``ctd`` is supplied distances are
+    sound-speed corrected (:func:`soundspeed_scale`).
     """
-    hbot = bottom_distance(dh)
-    if ctd is not None:
-        hbot = hbot * soundspeed_scale(dh, sync, ctd)
+    hbot_raw = bottom_distance(dh)
+    sc = soundspeed_scale(dh, sync, ctd) if ctd is not None else np.ones_like(hbot_raw)
+    hbot_raw = hbot_raw * sc
     z = sync.z_on_ping
-    botdepth = z + hbot                                    # seabed depth per ping
-    n_valid = int(np.isfinite(hbot).sum())
+    botdepth = z + hbot_raw                                # per-ping seabed depth (raw pick)
 
-    # near-bottom pings with a valid bottom echo (getdpthi: within 200 m of deepest)
-    iok = np.where(np.isfinite(botdepth) & (hbot > 0)
-                   & ((np.nanmax(z) - z) < _NEAR_BOTTOM))[0]
-    if iok.size < 10:
-        return BottomResult(np.nan, np.nan, hbot, n_valid)
-    ibottom = int(np.nanargmax(z))
-    bd = botdepth[iok]
+    d = dh.down
+    zd = (d.meta.get("dist_first_m", d.blank_m + d.cell_m / 2.0)
+          + np.arange(d.n_cells) * d.cell_m).astype(float)
+    ea = np.nanmedian(d.echo, axis=0) * 0.45
+    zstack, is_echo = _stack_seabed(z, ea, zd, sc)
 
-    # robust rejection then quadratic fit evaluated at the deepest ping
-    # (faithful port of getdpthi.m lines 338-350)
-    err = np.abs(np.median(bd) - bd)
-    half = np.argsort(err)[: err.size // 2]
-    c = np.polyfit(iok[half], bd[half], 1)
-    err = np.abs(np.polyval(c, iok) - bd)
-    half = np.argsort(err)[: err.size // 2]
-    keep = (err < 2.0 * np.std(err[half])) | (err < 30.0)
-    iok, bd = iok[keep], bd[keep]
-
-    c = np.polyfit(iok, bd, 2)
-    zbottom = float(np.polyval(c, ibottom))
-    error = float(np.median(np.abs(np.polyval(c, iok) - bd)))
+    # the stack anchors the seabed region; the precise per-ping raw picks lying near it are
+    # the pings that actually saw the bed -- their median refines zstack to ~metre precision
+    # and excludes mid-water scatterers (and the deep tail). No echo stacked -> keep the
+    # deepest-package-depth fallback and report no echoes.
+    near = np.isfinite(botdepth) & (np.abs(botdepth - zstack) < _SEABED_REFINE_WIN)
+    if is_echo and int(near.sum()) >= 5:
+        zbottom = float(np.median(botdepth[near]))
+        near = np.isfinite(botdepth) & (np.abs(botdepth - zbottom) < _SEABED_REFINE_WIN)
+        error = float(np.median(np.abs(botdepth[near] - zbottom)))
+    else:
+        zbottom = zstack
+        error = np.nan
+    hbot = np.where(near, hbot_raw, np.nan)                # real bottom echoes (for the figure)
+    n_valid = int(np.isfinite(hbot).sum()) if is_echo else 0
     return BottomResult(zbottom, error, hbot, n_valid)
+
+
+def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
+                  sc: np.ndarray) -> tuple[float, bool]:
+    """Seabed depth by stacking raw echo amplitude along constant-depth loci.
+
+    The seabed depth is constant across pings, so a true bottom return reinforces when the
+    amplitude is summed along ``D = z_ping + range`` for trial depths ``D``; the
+    transmission-loss / reverberation tail sits at constant *range* (not depth) and smears
+    out. The seabed is the *deepest* trial depth whose stacked amplitude stands
+    ``_SEABED_STACK_MIN`` dB above the per-ping background -- deeper than any mid-water
+    scattering layer, and immune to the range-gain that pulls a per-ping ``targ`` pick deep.
+    When nothing stacks that strongly there is no reliable echo (typically a cast that
+    nearly touched bottom, so the bed sat in the inner range-gate dead zone): fall back to
+    the deepest depth the package reached, a tight lower bound on the seabed.
+    """
+    from scipy.signal import find_peaks
+
+    z = np.asarray(z, float)
+    zmax = float(np.nanmax(z))
+    lo, hi = _BTRK_RANGE
+    bg = np.nanpercentile(ea, 25, axis=0)                  # per-ping background [dB]
+    grid = np.arange(zmax - 20.0, zmax + hi, _SEABED_STACK_DD)
+    stack = np.full(grid.size, np.nan)
+    for i, dcand in enumerate(grid):
+        r = (dcand - z) / sc                              # range each ping must see [m]
+        ok = np.isfinite(r) & (r > lo) & (r < hi)
+        if ok.sum() < 10:
+            continue
+        idx = np.where(ok)[0]
+        amp = np.array([np.interp(r[j], zd, ea[:, j], left=np.nan, right=np.nan)
+                        for j in idx])
+        resid = amp - bg[idx]
+        if np.isfinite(resid).any():
+            stack[i] = np.nanmedian(resid)
+    fin = np.isfinite(stack)
+    if fin.sum() < 3:
+        return zmax, False
+    filled = np.nan_to_num(stack, nan=float(np.nanmin(stack[fin])))
+    peaks, _ = find_peaks(filled, prominence=_SEABED_STACK_PROM)
+    strong = [p for p in peaks if filled[p] >= _SEABED_STACK_MIN]
+    if not strong:
+        return zmax, False                                # no reliable echo -> deepest reached
+    k = strong[-1]                                        # deepest strong stacked peak = seabed
+    kfrac = _parabola_vertex(filled, k)
+    return float(np.interp(kfrac, np.arange(grid.size), grid)), True
 
 
 @dataclass
@@ -249,9 +356,11 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_below: float = _BTRK_BEL
 
 
 def bottom_metric(b: BottomResult) -> Metric:
+    ok = np.isfinite(b.zbottom) and b.error <= _BOTTOM_ERR_WARN
     return Metric(
         "bottom_depth", round(b.zbottom, 1), "m",
-        Status.OK if np.isfinite(b.zbottom) else Status.WARN,
+        Status.OK if ok else Status.WARN,
+        threshold=_BOTTOM_ERR_WARN,
         source_stage="qa.bottom",
         note=f"+/- {b.error:.2f} m from {b.n_valid} bottom echoes",
     )

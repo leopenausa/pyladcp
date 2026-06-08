@@ -63,6 +63,12 @@ LONG_NAME = {
     "n_vel": "velocity samples per bin",
     "n": "samples per bin",
 }
+# CF standard names, so CF-aware tools (ODV, QGIS, Ferret) can interpret the columns.
+STANDARD_NAME = {
+    "depth_m": "depth",
+    "u_ms": "eastward_sea_water_velocity",
+    "v_ms": "northward_sea_water_velocity",
+}
 
 
 def _pyladcp_version() -> str:
@@ -129,6 +135,15 @@ def sadcp_frame(result: VelocityResult) -> pd.DataFrame | None:
         "v_ms": sv[:, 2],
         "verr_ms": sv[:, 3],
     })
+
+
+def locate_frame(df: pd.DataFrame, export: StationExport) -> pd.DataFrame:
+    """Prepend station id + position columns so an extracted data sheet is self-locating."""
+    out = df.copy()
+    out.insert(0, "station", export.station)
+    out.insert(1, "latitude_deg", float(export.lat))
+    out.insert(2, "longitude_deg", float(export.lon))
+    return out
 
 
 def qa_frame(qc: QCMetrics) -> pd.DataFrame:

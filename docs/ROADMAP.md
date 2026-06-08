@@ -44,5 +44,16 @@ The work below is sequenced; each step gets its own detailed plan before executi
 5. **Outputs (#3)** — Excel + ODV-ready export, once the solution object is final.
 6. **Release hardening (#7)** — public-API freeze, `ruff format` pass, docs site,
    versioning/CHANGELOG, PyPI publish.
-7. **CTD-pipeline integration (#6)** — agentic raw-CTD → cleaned `.cnv` per station with
-   safety checks (depends on the CTD_project; see memory `ladcp-ctd-pipeline-integration`).
+7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → the cleaned 6-col `.cnv`
+   the solver consumes, so casts without a pre-processed profile still run. The recipe
+   lives in CTD_project (`ctd_pipeline.convert_for_ladcp`: datcnv → ITS-90/PSS-78 derive →
+   SBE Wild Edit → 1 s time-bin → 6-col extract); pyladcp calls it through `io/ctd_raw.py`
+   as an **optional** dependency (located via `LADCP_CTD_PROJECT` or a sibling dir; pyladcp
+   does not require it). Wired into `discover(from_hex=, ctd_cache=)` and
+   `ladcp-qa --from-hex` (default off — a pre-processed `.cnv` always wins; conversion is
+   the fallback), caching converted files to a reuse folder. Validated **byte-for-byte vs
+   the operator on all 23 MORIA stations** (prDM ≤0.002 dbar, T/S ≤0.001); end-to-end on
+   MORIA-79/80/82, which had no operator CTD and now get it from their `.hex` anchor.
+   (The work also surfaced + fixed a real SBE-conformance bug in CTD_project's own Wild Edit
+   — see memory [[ctd-wildedit-sbe-fix]].) Future option: an *agentic* variant with
+   per-cast safety checks on top of this deterministic recipe.

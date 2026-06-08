@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from ladcp.export import ExportDependencyError
-from ladcp.export.tables import profile_frame
+from ladcp.export.tables import locate_frame, profile_frame
 from ladcp.export.xlsx import write_cruise_xlsx, write_station_xlsx
 
 
@@ -18,10 +18,11 @@ def test_station_xlsx_sheets(synth_export, tmp_path):
     write_station_xlsx(synth_export, str(path))
     book = pd.read_excel(path, sheet_name=None)
     assert {"profile", "shear", "metadata", "qa", "bottom_track", "sadcp"} <= set(book)
-    # profile sheet matches the source frame
+    # data sheets are self-locating: station id + position lead each row
+    assert list(book["profile"].columns[:3]) == ["station", "latitude_deg", "longitude_deg"]
     pd.testing.assert_frame_equal(
         book["profile"].reset_index(drop=True),
-        profile_frame(synth_export.result).reset_index(drop=True),
+        locate_frame(profile_frame(synth_export.result), synth_export).reset_index(drop=True),
         check_dtype=False)
 
 
@@ -32,6 +33,8 @@ def test_cruise_xlsx_sheets(synth_exports, tmp_path):
     book = pd.read_excel(path, sheet_name=None)
     assert {"profiles", "summary", "metadata"} <= set(book)
     assert set(book["profiles"]["station"]) == {"MORIA-79", "MORIA-80"}
+    # stacked profiles carry per-row position
+    assert {"latitude_deg", "longitude_deg"} <= set(book["profiles"].columns)
     assert len(book["summary"]) == 2
 
 

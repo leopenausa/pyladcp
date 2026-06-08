@@ -6,6 +6,7 @@ import numpy as np
 
 from ladcp.export.tables import (
     bottomtrack_frame,
+    locate_frame,
     metadata_dict,
     profile_frame,
     qa_frame,
@@ -36,6 +37,18 @@ def test_sadcp_frame_optional(synth_export):
     # a station without a ship-ADCP constraint yields None
     synth_export.result.sadcp = None
     assert sadcp_frame(synth_export.result) is None
+
+
+def test_locate_frame_prepends_position(synth_export):
+    df = profile_frame(synth_export.result)
+    located = locate_frame(df, synth_export)
+    assert list(located.columns[:3]) == ["station", "latitude_deg", "longitude_deg"]
+    assert (located["station"] == "MORIA-80").all()
+    assert (located["latitude_deg"] == synth_export.lat).all()
+    assert (located["longitude_deg"] == synth_export.lon).all()
+    # original frame is untouched and the velocity columns survive after the prefix
+    assert "station" not in df.columns
+    assert list(located.columns[3:]) == list(df.columns)
 
 
 def test_qa_frame_rows(synth_export):

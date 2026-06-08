@@ -14,6 +14,7 @@ from . import ExportDependencyError
 from .tables import (
     StationExport,
     bottomtrack_frame,
+    locate_frame,
     metadata_dict,
     profile_frame,
     qa_frame,
@@ -39,18 +40,19 @@ def _meta_frame(export: StationExport) -> pd.DataFrame:
 def write_station_xlsx(export: StationExport, path: str) -> str:
     """Write a station's profile/bottom-track/shear/sadcp/metadata/qa sheets. Returns ``path``."""
     _require_openpyxl()
+    # data sheets carry station id + position so each is self-locating when extracted
     sheets = {
-        "profile": profile_frame(export.result),
-        "shear": shear_frame(export.result),
+        "profile": locate_frame(profile_frame(export.result), export),
+        "shear": locate_frame(shear_frame(export.result), export),
         "metadata": _meta_frame(export),
         "qa": qa_frame(export.qc),
     }
     bt = bottomtrack_frame(export.result)
     if bt is not None:
-        sheets["bottom_track"] = bt
+        sheets["bottom_track"] = locate_frame(bt, export)
     sv = sadcp_frame(export.result)
     if sv is not None:
-        sheets["sadcp"] = sv
+        sheets["sadcp"] = locate_frame(sv, export)
 
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for name in ("profile", "bottom_track", "shear", "sadcp", "metadata", "qa"):
@@ -64,9 +66,7 @@ def write_cruise_xlsx(exports: list[StationExport], path: str, *, cruise: str = 
     _require_openpyxl()
     profiles = []
     for exp in exports:
-        df = profile_frame(exp.result).copy()
-        df.insert(0, "station", exp.station)
-        profiles.append(df)
+        profiles.append(locate_frame(profile_frame(exp.result), exp))
     profiles_df = (pd.concat(profiles, ignore_index=True) if profiles
                    else pd.DataFrame(columns=["station"]))
     summary_df = pd.DataFrame([summary_row(e) for e in exports])

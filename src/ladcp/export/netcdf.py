@@ -10,10 +10,12 @@ Global attributes carry the station metadata. The cruise file stacks every stati
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from .tables import (
     LONG_NAME,
+    STANDARD_NAME,
     UNITS,
     StationExport,
     bottomtrack_frame,
@@ -30,18 +32,41 @@ def _var(values, dim: str, col: str) -> xr.DataArray:
         attrs["units"] = UNITS[col]
     if col in LONG_NAME:
         attrs["long_name"] = LONG_NAME[col]
+    if col in STANDARD_NAME:
+        attrs["standard_name"] = STANDARD_NAME[col]
     return xr.DataArray(np.asarray(values, float), dims=(dim,), attrs=attrs)
 
 
 def _depth_coord(values, name: str) -> dict:
     return {name: xr.DataArray(np.asarray(values, float), dims=(name,),
                                attrs={"units": "m", "long_name": "depth below sea surface",
-                                      "positive": "down"})}
+                                      "standard_name": "depth", "positive": "down",
+                                      "axis": "Z"})}
+
+
+def _scalar_coords(export: StationExport) -> dict:
+    """Scalar CF latitude/longitude (and time) coordinates that locate the station."""
+    coords = {
+        "latitude": xr.DataArray(
+            float(export.lat),
+            attrs={"units": "degrees_north", "standard_name": "latitude",
+                   "long_name": "station latitude", "axis": "Y"}),
+        "longitude": xr.DataArray(
+            float(export.lon),
+            attrs={"units": "degrees_east", "standard_name": "longitude",
+                   "long_name": "station longitude", "axis": "X"}),
+    }
+    if export.time is not None:
+        coords["time"] = xr.DataArray(
+            np.datetime64(export.time),
+            attrs={"standard_name": "time", "long_name": "cast start time", "axis": "T"})
+    return coords
 
 
 def _station_dataset(export: StationExport) -> xr.Dataset:
     prof = profile_frame(export.result)
     coords = _depth_coord(prof["depth_m"], "depth")
+    coords |= _scalar_coords(export)
     data = {
         "u": _var(prof["u_ms"], "depth", "u_ms"),
         "v": _var(prof["v_ms"], "depth", "v_ms"),
@@ -110,26 +135,34 @@ def write_cruise_nc(exports: list[StationExport], path: str, *, cruise: str = ""
         uerr[i, idx] = f["uerr_ms"].to_numpy()
 
     md = [metadata_dict(e) for e, _ in frames]
+    time = pd.to_datetime([m["time_utc"] or None for m in md])
     ds = xr.Dataset(
         {
             "u": (("station", "depth"), u, {"units": "m s-1",
-                                            "long_name": "eastward sea water velocity"}),
+                                            "long_name": "eastward sea water velocity",
+                                            "standard_name": "eastward_sea_water_velocity"}),
             "v": (("station", "depth"), v, {"units": "m s-1",
-                                            "long_name": "northward sea water velocity"}),
+                                            "long_name": "northward sea water velocity",
+                                            "standard_name": "northward_sea_water_velocity"}),
             "uerr": (("station", "depth"), uerr, {"units": "m s-1",
                                                   "long_name": "velocity uncertainty"}),
-            "latitude": ("station", [m["latitude_deg"] for m in md],
-                         {"units": "degrees_north"}),
-            "longitude": ("station", [m["longitude_deg"] for m in md],
-                          {"units": "degrees_east"}),
-            "bottom_depth": ("station", [m["bottom_depth_m"] for m in md], {"units": "m"}),
-            "time_utc": ("station", [m["time_utc"] for m in md]),
+            "bottom_depth": ("station", [m["bottom_depth_m"] for m in md],
+                             {"units": "m", "long_name": "bottom depth"}),
         },
         coords={
             "station": stations,
             "depth": xr.DataArray(union, dims=("depth",),
-                                  attrs={"units": "m", "positive": "down",
+                                  attrs={"units": "m", "positive": "down", "axis": "Z",
+                                         "standard_name": "depth",
                                          "long_name": "depth below sea surface"}),
+            "latitude": ("station", [m["latitude_deg"] for m in md],
+                         {"units": "degrees_north", "standard_name": "latitude",
+                          "long_name": "station latitude", "axis": "Y"}),
+            "longitude": ("station", [m["longitude_deg"] for m in md],
+                          {"units": "degrees_east", "standard_name": "longitude",
+                           "long_name": "station longitude", "axis": "X"}),
+            "time": ("station", time,
+                     {"standard_name": "time", "long_name": "cast start time", "axis": "T"}),
         },
         attrs={"Conventions": "CF-1.8", "cruise": cruise,
                "title": f"LADCP cruise velocity sections — {cruise}"},
