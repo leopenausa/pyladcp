@@ -201,14 +201,20 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
         hbot = np.where(near, hbot_raw, np.nan)
         return BottomResult(zbottom, error, hbot, int(np.isfinite(hbot).sum()))
 
-    # stack failed -> near-touch zmax fallback, guarded by the presence of near-bottom echoes
+    # stack failed (weak or dead-zone bottom echo). The package nearly touched, so the deepest
+    # depth it reached is the seabed to within a few metres (validated <=11 m vs altimeter +
+    # echo-sounder) -- a flagged lower bound. Deriving a depth from the per-ping echoes is worse:
+    # on these casts the bed sits in the inner range-gate dead zone and the only returns are
+    # constant-range multiples (which a cluster fit happily locks onto, 10-30 m off). Only echoes
+    # at or below zmax can be the bed (one mapping *above* zmax is mid-water); restrict the figure
+    # picks to those so they sit below the lower-bound line instead of crossing it.
     near = np.isfinite(botdepth) & (z > zmax - _NEAR_BOTTOM)
-    if int(near.sum()) < _NEARTOUCH_MIN:                   # no evidence the bed was reached
+    if int(near.sum()) < _NEARTOUCH_MIN:                   # no near-bottom echo -> bed unknown
         return BottomResult(np.nan, np.nan, np.full_like(hbot_raw, np.nan), 0, is_fallback=True)
-    touch = near & (np.abs(botdepth - zmax) < _SEABED_REFINE_WIN)   # echoes at the touch depth
-    error = (float(np.median(np.abs(botdepth[touch] - zmax))) if int(touch.sum()) >= 3
+    bed = near & (botdepth >= zmax) & (botdepth < zmax + _SEABED_REFINE_WIN)
+    error = (float(np.median(botdepth[bed] - zmax)) if int(bed.sum()) >= 3
              else float(_BOTTOM_ERR_WARN))                 # honest uncertainty, never NaN
-    hbot = np.where(touch, hbot_raw, np.nan)               # genuine near-bed picks only
+    hbot = np.where(bed, hbot_raw, np.nan)
     return BottomResult(zmax, error, hbot, int(np.isfinite(hbot).sum()), is_fallback=True)
 
 
