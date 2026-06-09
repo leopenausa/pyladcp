@@ -28,6 +28,7 @@ class StationFiles:
     up: Path | None
     ctd: Path | None
     label: str
+    ctd_utc: str | None = None   # CTD cast-start UTC from the archive index (sync absolute prior)
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,7 @@ def discover(station: str, *, root: Path, cruise: str = "MORIA",
             ctd = _ctd_from_hex(rec, label, ctd_cache)
         return StationFiles(down=Path(rec["master"]),
                             up=Path(rec["slave"]) if rec["slave"] else None,
-                            ctd=ctd, label=label)
+                            ctd=ctd, label=label, ctd_utc=rec.get("utc"))
 
     # 2. raw-archive manifest (slave auto-paired by time)
     entry = MANIFESTS.get(cruise.upper(), {}).get(label)

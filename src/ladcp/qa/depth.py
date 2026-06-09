@@ -115,7 +115,28 @@ def _coarse_offset(tad: np.ndarray, w_ad: np.ndarray,
     return float(g_ad[k]), float(score[k])
 
 
-def synchronize(dh: DualHead, ctd: CTDTimeSeries, *, nlag: int = 600) -> SyncResult:
+def _score_at_offset(tad: np.ndarray, w_ad: np.ndarray, t_ctd: np.ndarray,
+                     w_ctd: np.ndarray, tau: float) -> float:
+    """Normalized cross-correlation of the CTD vs ADCP vertical velocity at a *given* offset.
+
+    Used to report the localization quality when the cast is placed by the absolute-time prior
+    (:func:`synchronize`) instead of the whole-record search. ``[-1, 1]``; 0 if too little
+    overlap. Unlike :func:`_coarse_offset` this accepts a negative ``tau`` (ADCP started after
+    the CTD, i.e. mid-cast), which the search cannot represent.
+    """
+    wa = np.interp(t_ctd + tau, tad, np.where(np.isfinite(w_ad), w_ad, 0.0),
+                   left=np.nan, right=np.nan)
+    m = np.isfinite(wa) & np.isfinite(w_ctd)
+    if int(m.sum()) < 5:
+        return 0.0
+    a = w_ctd[m] - w_ctd[m].mean()
+    b = wa[m] - wa[m].mean()
+    na, nb = float(np.sqrt((a * a).sum())), float(np.sqrt((b * b).sum()))
+    return float((a * b).sum() / (na * nb)) if na > 0 and nb > 0 else 0.0
+
+
+def synchronize(dh: DualHead, ctd: CTDTimeSeries, *, nlag: int = 600,
+                locate_window: float = 600.0) -> SyncResult:
     """Synchronize CTD to LADCP and return the package depth on ping times.
 
     Coarse-localizes the cast within the full ADCP record (:func:`_coarse_offset`), then
@@ -123,6 +144,14 @@ def synchronize(dh: DualHead, ctd: CTDTimeSeries, *, nlag: int = 600) -> SyncRes
     ``nlag`` caps the fine search; it is further clamped to ``< t_ctd.size/2`` so the
     ``bestlag`` correlation window cannot collapse to its degenerate ``(0, 1.0)`` early exit
     on short CTD series.
+
+    When the CTD cast-start UTC is known (``ctd.meta['utc_start']`` -- the archive index or the
+    ``.cnv`` header), its offset from the ADCP record start is a strong absolute-time prior. The
+    whole-record search can only place the CTD *inside* the ADCP record (offset >= 0); when the
+    ADCP began mid-cast (fragmented deployment) the true offset is negative and the search
+    false-locks. The prior is trusted only when the search *disagrees* with it by more than
+    ``locate_window`` -- so correctly-located casts are untouched and only the false-locks are
+    corrected (MORIA-02/03/04: search ~0 s vs prior ~-2000 s).
     """
     depth = ctd_depth(ctd)
     t_ctd = np.asarray(ctd.time_elapsed_s, float)
@@ -132,6 +161,14 @@ def synchronize(dh: DualHead, ctd: CTDTimeSeries, *, nlag: int = 600) -> SyncRes
     tad = (dh.down.time - dh.down.time[0]) / np.timedelta64(1, "s")
 
     tau, coarse_score = _coarse_offset(tad, w_ad, t_ctd, w_ctd)
+
+    utc0 = ctd.meta.get("utc_start")
+    if utc0 is not None:
+        prior = float((np.datetime64(utc0) - np.datetime64(dh.down.time[0]))
+                      / np.timedelta64(1, "s"))
+        if not np.isfinite(coarse_score) or abs(tau - prior) > locate_window:
+            tau = prior                                   # prior overrides a search false-lock
+            coarse_score = _score_at_offset(tad, w_ad, t_ctd, w_ctd, prior)
 
     # fine integer refinement on the coarse-aligned grid (sub-coarse / sign cleanup)
     w_ad_on_ctd = np.interp(t_ctd + tau, tad,
