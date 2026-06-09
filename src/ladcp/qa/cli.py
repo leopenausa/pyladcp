@@ -72,6 +72,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
         from ..qa.checks import consistency_checks
         for m in consistency_checks(result):       # checkinv -> scorecard
             qc.add(m)
+        qc.add(_declination_metric(meta["drot"], meta["drot_source"]))
         # refresh the persisted QA text/json now that consistency checks are in
         (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n")
         (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
@@ -102,12 +103,22 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=No
     lat = float(np.nanmedian(ctd.lat))
     lon = float(np.nanmedian(ctd.lon))
     when = dh.down.time[0].astype("datetime64[s]").item()
-    if drot is None:
+    if drot is not None:
+        drot_source = "explicit"                # user-supplied --drot
+    else:
+        drot_source = "igrf"                    # IGRF-13 from cast position + date
         try:
             from ..proc.magdec import magnetic_declination
             drot = magnetic_declination(lat, lon, when)
-        except Exception:
-            drot = 0.0
+        except Exception as e:                  # ppigrf missing / bad coeffs / bad input
+            log.warning("        declination: IGRF failed (%s: %s) -- velocity LEFT IN "
+                        "MAGNETIC FRAME (drot=0, NOT true north)", type(e).__name__, e)
+            drot, drot_source = 0.0, "fallback-zero"
+        if not np.isfinite(drot):               # NaN position -> NaN declination
+            log.warning("        declination: IGRF non-finite at lat=%.4f lon=%.4f (missing CTD "
+                        "position?) -- velocity LEFT IN MAGNETIC FRAME (drot=0, NOT true north)",
+                        lat, lon)
+            drot, drot_source = 0.0, "fallback-zero"
 
     t_lad = dh.down.time
     sadcp = (_sadcp_profile(sadcp_opts, t_lad.min(), t_lad.max(), lat, lon, solver)
@@ -127,10 +138,24 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=No
                   zbottom=result.zbottom, time=when)
         log.info("        bottom-track: %s  (%d bins)", bot, bp.n_bins)
 
-    meta = {"lat": lat, "lon": lon, "when": when, "drot": drot,
+    meta = {"lat": lat, "lon": lon, "when": when, "drot": drot, "drot_source": drot_source,
             "sadcp_source": (sadcp_opts.get("folder") if sadcp_opts and sadcp is not None
                              else None)}
     return result, meta
+
+
+def _declination_metric(drot, source):
+    """QA metric making the velocity frame's declination provenance visible (WARN if the
+    IGRF lookup fell back to 0, i.e. the profile is in the *magnetic* frame, not true north)."""
+    from ..models import Metric, Status
+    note = {
+        "igrf": "IGRF-13 from cast position + date",
+        "explicit": "user-supplied --drot",
+        "fallback-zero": "IGRF unavailable -- profile is in the MAGNETIC frame, NOT true north",
+    }.get(source, source)
+    return Metric(name="declination", value=round(float(drot), 3), unit="deg",
+                  status=Status.OK if source in ("igrf", "explicit") else Status.WARN,
+                  source_stage="qa.magdec", note=note)
 
 
 def _write_station_exports(export, st_dir, formats) -> None:
