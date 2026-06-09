@@ -124,6 +124,13 @@ class VelocityProfile:
     n: np.ndarray               # [nz] shear samples per bin
 
 
+# max near-surface gap (m) the profile may bridge by filling from the shallowest reliable bin.
+# A genuine surface gap (up-looker can't quite reach the surface) is small; a larger gap means
+# the upper water column was never sampled (ADCP began mid-descent on a fragmented cast) and
+# must stay NaN rather than be padded with a fake constant velocity.
+_SURFACE_FILL_MAX = 250.0
+
+
 def velocity_profile(se: SuperEns, *, dz: float = 8.0, drot: float = 0.0,
                      z: np.ndarray | None = None, uship: float = 0.0,
                      vship: float = 0.0, weightmin: float = 0.1, velerr: float = 0.03,
@@ -185,14 +192,22 @@ def velocity_profile(se: SuperEns, *, dz: float = 8.0, drot: float = 0.0,
     uerr = velerr * np.sqrt(nmed / np.clip(nvel, 1, None))
     uerr = np.where(nvel > 0, np.clip(uerr, velerr * 0.6, None), np.nan)
 
-    # fill only the sparsely-sampled SURFACE bins (no data above the shallowest bin) with
-    # the nearest reliable value, as the golden .lad does. The seabed is NOT filled: the
-    # down-looker samples to the bottom, so a flat near-bottom tail would be an artefact.
+    # fill only a genuine near-SURFACE gap (no data above the shallowest bin) with the nearest
+    # reliable value, as the golden .lad does. A gap larger than _SURFACE_FILL_MAX means the
+    # upper water column was never sampled (e.g. an ADCP file that began mid-descent on a
+    # fragmented cast) -- leave it NaN rather than fabricate a flat profile. The seabed is NOT
+    # filled: the down-looker samples to the bottom, so a flat near-bottom tail would be wrong.
     good = nvel >= max(2.0, 0.15 * nmed)
     if good.any():
         lo = int(np.argmax(good))
-        for a in (u, v, uerr):
-            a[:lo] = a[lo]
+        if zg[lo] <= _SURFACE_FILL_MAX:
+            for a in (u, v, uerr):
+                a[:lo] = a[lo]
+        else:                                  # large unsampled surface gap -> honest NaN
+            samp = np.where(nvel > 0)[0]
+            cut = int(samp[0]) if samp.size else lo
+            for a in (u, v, uerr):
+                a[:cut] = np.nan
 
     return VelocityProfile(z=zg, u=u, v=v, uerr=uerr, nvel=nvel,
                            ubar=float(np.nanmean(u)), vbar=float(np.nanmean(v)), n=sp.n)

@@ -30,7 +30,7 @@ from scipy.sparse.linalg import lsqr
 
 from ..models import CTDTimeSeries
 from .depth import SyncResult, water_window
-from .inverse import VelocityProfile
+from .inverse import _SURFACE_FILL_MAX, VelocityProfile
 from .superens import SuperEns, _uvrot
 
 # constraint-normalisation defaults (legacy default.m / getinv.m)
@@ -322,7 +322,10 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
             w = 1.0
         fac = np.sqrt(np.nansum(range_ctd))
         crow = (dt / np.nansum(dt) * w * fac)[None, :]
-        add_block(sp.csr_matrix((1, nz)), sp.csr_matrix(crow), [aux.uship * w * fac])
+        # uctd is the reference (-package) velocity, so the depth-mean is pinned to -uship
+        # (legacy lainbaro RHS is -1*uship). The earlier +uship was silent on station-kept casts
+        # (uship~0) but flipped the barotropic by 2*uship on a steaming ship (MORIA-20).
+        add_block(sp.csr_matrix((1, nz)), sp.csr_matrix(crow), [-aux.uship * w * fac])
 
     # --- ship-ADCP constraint (legacy lainsadcp) ------------------------------- #
     n_sadcp = 0
@@ -383,15 +386,19 @@ def _lanarrow_reject(sol: _Solution, shape: tuple[int, int],
 
 
 def _surface_fill(u: np.ndarray, v: np.ndarray, uerr: np.ndarray, nvel: np.ndarray,
-                  *, frac: float = 0.4, floor: float = 3.0) -> None:
+                  z: np.ndarray, *, frac: float = 0.4, floor: float = 3.0) -> None:
     """Fill the under-constrained surface bins from the first reliable bin (in place).
 
     The shallowest ocean bins of the inverse are weakly constrained and confounded with
     the package velocity, so they collapse toward zero (diagnosed on MORIA-79 v). As the
     shear path does (:func:`~ladcp.qa.inverse.velocity_profile`), every bin above the
-    shallowest *reliable* bin is set to that bin's value. The coverage threshold is higher
-    than the shear path's (``0.15*median``) because the inverse's collapse spans several
-    bins rather than the odd sparse one, so a single-bin criterion would leave it half-fixed.
+    shallowest *reliable* bin is set to that bin's value -- but ONLY across a genuine surface
+    gap (the first reliable bin shallower than ``_SURFACE_FILL_MAX``). A larger gap means the
+    upper water column was never sampled (e.g. an ADCP file that began mid-descent on a
+    fragmented cast); it is left NaN rather than padded with a fake constant. The coverage
+    threshold is higher than the shear path's (``0.15*median``) because the inverse's collapse
+    spans several bins rather than the odd sparse one, so a single-bin criterion would leave it
+    half-fixed.
     """
     good = nvel[nvel > 0]
     if good.size == 0:
@@ -401,6 +408,12 @@ def _surface_fill(u: np.ndarray, v: np.ndarray, uerr: np.ndarray, nvel: np.ndarr
     if not reliable.any():
         return
     lo = int(np.argmax(reliable))
+    if z[lo] > _SURFACE_FILL_MAX:                          # large unsampled gap -> honest NaN
+        samp = np.where(nvel > 0)[0]                       # NaN the smoothed top above real data
+        cut = int(samp[0]) if samp.size else lo
+        for a in (u, v, uerr):
+            a[:cut] = np.nan
+        return
     for a in (u, v, uerr):
         a[:lo] = a[lo]
 
@@ -460,7 +473,7 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
     if has.size:
         last = int(has[-1]) + 1
         z, u, v, uerr, nvel = z[:last], u[:last], v[:last], uerr[:last], nvel[:last]
-    _surface_fill(u, v, uerr, nvel)                    # repair the collapsed surface bins
+    _surface_fill(u, v, uerr, nvel, z)                 # repair the collapsed surface bins
     valid = nvel > 0
     return VelocityProfile(
         z=z, u=u, v=v, uerr=uerr, nvel=nvel,

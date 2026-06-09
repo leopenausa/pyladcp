@@ -13,7 +13,11 @@ import numpy as np
 
 from ..models import Metric, Status
 from ..plots.sadcp_figure import sadcp_rms_discrepancy
-from .inverse import VelocityResult
+from .inverse import _SURFACE_FILL_MAX, VelocityResult
+
+_SHIP_DRIFT_WARN = 300.0          # net in-cast GPS displacement [m] above which the ship was
+#                                   not on station (barotropic reference corrected but layback
+#                                   uncertainty remains)
 
 
 def consistency_checks(r: VelocityResult) -> list[Metric]:
@@ -24,8 +28,33 @@ def consistency_checks(r: VelocityResult) -> list[Metric]:
     * **bottom_track_consistency** — bias between our own and the RDI firmware bottom track;
       legacy flags |bias| > 0.1 m/s.
     * **sadcp_consistency** — RMS of (LADCP − ship-ADCP) over their shared depth range.
+    * **profile_surface_coverage** — flags an unsampled upper water column (the ADCP began
+      mid-cast: a recording gap or a fragmented file), so the profile starts far below the surface.
     """
     out: list[Metric] = []
+
+    z, nvel = r.vp.z, r.vp.nvel
+    sampled = np.where(nvel > 0)[0]
+    if sampled.size:
+        z_top = float(z[sampled[0]])
+        if z_top > _SURFACE_FILL_MAX:
+            out.append(Metric(
+                "profile_surface_coverage", round(z_top, 0), "m", Status.WARN,
+                source_stage="qa.checks",
+                note=(f"no LADCP velocity above {z_top:.0f} m -- the ADCP began mid-cast "
+                      f"(recording gap or fragmented file); the upper {z_top:.0f} m is "
+                      f"unsampled, not zero velocity")))
+
+    if r.drift is not None and r.drift.ship_e.size > 1:
+        net = float(np.hypot(r.drift.ship_e[-1] - r.drift.ship_e[0],
+                             r.drift.ship_n[-1] - r.drift.ship_n[0]))
+        if net > _SHIP_DRIFT_WARN:
+            out.append(Metric(
+                "ship_drift", round(net, 0), "m", Status.WARN,
+                source_stage="qa.checks",
+                note=(f"ship moved {net:.0f} m during the cast (not on station); the barotropic "
+                      f"reference uses this GPS drift, but a moving ship on a long wire leaves "
+                      f"residual layback uncertainty in the absolute velocity")))
 
     noise = r.resid_rms
     uerr = float(np.nanmedian(r.vp.uerr)) if r.vp.uerr.size else np.nan
