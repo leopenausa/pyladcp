@@ -17,6 +17,10 @@ A condensed record of how the package evolved. Full detail lives in git history.
   sound-speed correction, bottom-track velocities + `.bot`, and the velocity/shear/inverse
   figures folded into the PDF. Validated vs MORIA-80: `u` corr **0.998**, `.bot` corr
   **0.991**, `zbottom` within ~1 m of golden.
+- **Full inverse + ship-ADCP (2026-06).** Added the standard LDEO_IX sparse least-squares
+  inverse (`getinv`/`lain*`) as `--solver inverse` alongside the shear solve, with bottom-track
+  and barotropic-nav constraints and an optional VmDAS ship-ADCP (`lainsadcp`) constraint.
+  Validated on MORIA 79/80/82: SADCP vs LADCP-inverse agree 0.015–0.05 m/s over the upper 300 m.
 - **Magnetic declination finding.** Our IGRF-13 (`ppigrf`) declination is correct; the
   golden `p.drot = -9.878°` is a legacy IGRF-2000 + hardcoded-fudge bug (~4.4° off). The
   product default is per-station IGRF-13; `--drot` reproduces the golden for validation.

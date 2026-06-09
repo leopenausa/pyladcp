@@ -105,16 +105,6 @@ def moria05_params() -> CastParams:
     return _moria_params("MORIA-05")
 
 
-def moria06_params() -> CastParams:
-    """Effective parameters for the MORIA-06 confirmation cast (2040 m, different regime)."""
-    return _moria_params("MORIA-06")
-
-
-def moria07_params() -> CastParams:
-    """Effective parameters for the MORIA-07 confirmation cast."""
-    return _moria_params("MORIA-07")
-
-
 # --- Cruise registry + layered resolution (#4a) -------------------------------------
 #
 # A cruise's *processing* knobs (the operator's ``set_cast_params.m`` defaults) are shared

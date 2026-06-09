@@ -65,8 +65,9 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     result = None
     export = None
     if dh.has_up and ctd is not None and not earth:
-        log.warning("        velocity skipped: %s-coordinate data needs a beam->earth transform "
-                    "(not yet implemented); QA metrics still written", dh.down.coord_frame.value)
+        log.warning("        velocity skipped: %s-coordinate data is unsupported (beam frames are "
+                    "auto-rotated to earth at ingest; only earth/beam are handled); QA metrics "
+                    "still written", dh.down.coord_frame.value)
     if dh.has_up and ctd is not None and earth:
         result, meta = _velocity_outputs(dh, ctd, station, st_dir, drot, solver, sadcp_opts)
         from ..qa.checks import consistency_checks

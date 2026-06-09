@@ -20,8 +20,3 @@ def medianan(x: np.ndarray, na: int = 0) -> float:
     idx = np.round(np.arange(-na, na + 1) + L / 2.0).astype(int)
     idx = idx[(idx >= 1) & (idx <= L)]
     return float(np.mean(xs[idx - 1]))
-
-
-def medianan_rows(a: np.ndarray, na: int = 0) -> np.ndarray:
-    """Apply :func:`medianan` along the last axis of a 2-D array, row by row."""
-    return np.array([medianan(row, na) for row in np.atleast_2d(a)])
