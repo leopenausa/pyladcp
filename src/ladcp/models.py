@@ -1,8 +1,8 @@
-"""Data-contract objects (see docs/DATA_CONTRACT.md).
+"""Data-contract objects (see docs/ARCHITECTURE.md).
 
 These are deliberately lightweight dataclasses / containers. Heavy gridded products
-(ProfileResult) also know how to serialise to the legacy `.lad`/`.bot` ASCII formats
-and to xarray/NetCDF, but those are added incrementally.
+also know how to serialise to the legacy `.lad`/`.bot` ASCII formats (see qa/export.py),
+but those are added incrementally.
 
 Conventions: SI units. Horizontal velocity carried as separate ``u`` (east) and ``v``
 (north) arrays. Depth ``z`` positive-down in metres. Time as UTC ``datetime64[ns]``.
@@ -88,45 +88,6 @@ class CTDTimeSeries:
     @property
     def n(self) -> int:
         return self.time_elapsed_s.size
-
-
-@dataclass
-class ProfileResult:
-    """Core inverse-solution output (≈ legacy `dr`). Built incrementally.
-
-    Only the primary-solution fields are mandatory; sub-solutions and diagnostics are
-    populated as the corresponding pipeline stages come online.
-    """
-
-    # identity / metadata
-    station: str
-    name: str = ""
-    date: np.datetime64 | None = None
-    lat: float = np.nan
-    lon: float = np.nan
-    magnetic_deviation: float = np.nan
-    config: dict[str, Any] = field(default_factory=dict)
-
-    # primary solution [nz]
-    z: np.ndarray | None = None
-    u: np.ndarray | None = None
-    v: np.ndarray | None = None
-    uerr: np.ndarray | None = None
-    nvel: np.ndarray | None = None
-
-    # depth means
-    ubar: float = np.nan
-    vbar: float = np.nan
-
-    # bottom-track sub-solution
-    zbot: np.ndarray | None = None
-    ubot: np.ndarray | None = None
-    vbot: np.ndarray | None = None
-    uerrbot: np.ndarray | None = None
-    bottom_depth: float = np.nan
-
-    # extras (filled later): sadcp, down/up, shear, kinematics, acoustic diagnostics
-    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

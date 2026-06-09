@@ -41,7 +41,8 @@ The work below is sequenced; each step gets its own detailed plan before executi
    the curated files). Remaining: FDCCC1 (raw not on disk + publication-gated).
 4. **Robustness (#4b)** — single-head casts, beam-vs-earth frames, acquisition-script
    variance, edge cases.
-5. **Outputs (#3)** — Excel + ODV-ready export, once the solution object is final.
+5. **Outputs (#3)** ✅ — Excel + ODV + NetCDF + CSV export (per-station files and cruise-level
+   aggregates under `exports/`); shipped as `ladcp/export/`.
 6. **Release hardening (#7)** — public-API freeze, `ruff format` pass, docs site,
    versioning/CHANGELOG, PyPI publish.
 7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → the cleaned 6-col `.cnv`
