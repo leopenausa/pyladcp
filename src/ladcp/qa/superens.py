@@ -44,11 +44,13 @@ def _medianan_na0(a: np.ndarray) -> np.ndarray:
     ``round(L/2)`` of the finite values (half-away-from-zero). Reproduces ``prepinv.m:524``."""
     a = np.asarray(a, float)
     flat = a.reshape(a.shape[0], -1)
-    out = np.full(flat.shape[1], np.nan)
-    for j in range(flat.shape[1]):
-        xs = np.sort(flat[:, j][np.isfinite(flat[:, j])])
-        if xs.size:
-            out[j] = xs[int(np.floor(xs.size / 2 + 0.5)) - 1]
+    # Vectorized: np.sort pushes NaN to the end of each column, so the finite values occupy
+    # rows [0, L); take the MATLAB round(L/2) order statistic per column in one shot.
+    L = np.isfinite(flat).sum(axis=0)                            # [M] finite count per column
+    srt = np.sort(flat, axis=0)                                  # NaN -> end of each column
+    k = np.clip(np.floor(L / 2 + 0.5).astype(int) - 1, 0, None)  # 0-based order-stat index
+    out = np.take_along_axis(srt, k[None, :], axis=0)[0]
+    out[L == 0] = np.nan
     return out.reshape(a.shape[1:])
 
 
