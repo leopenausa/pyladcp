@@ -25,6 +25,10 @@ Data/
 WinADCP/
 logsheets/
 legacy_code/
+# station data / legacy / from-hex cache — local only
+FDCCC1/
+vbIX/
+ctd_from_hex/
 
 # golden / reference data at repo root (the small test fixture under
 # tests/fixtures/ is committed; the full local archive is not)

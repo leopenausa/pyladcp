@@ -33,6 +33,25 @@ from .ingest import DualHead
 from .screen import screen
 
 _PG_FIELD = 3            # percent-good field 4 (earth) used for weighting fallback
+# Legacy reuses ``p.outlier_n`` (raw pings / 5 min; golden value 289) as the block length at the
+# SE-stage ``outlier.m`` call (``prepinv.m:611``). For typical ``nse < 289`` the anomaly RMS is
+# computed over ONE global block, not per-12 local blocks -- see ladcp-editing-rootcause-2026-06.
+_SE_OUTLIER_NBLOCK = 289
+
+
+def _medianan_na0(a: np.ndarray) -> np.ndarray:
+    """Legacy ``medianan(x)`` (na=0): per column the single sorted order statistic at MATLAB
+    ``round(L/2)`` of the finite values (half-away-from-zero). Reproduces ``prepinv.m:524``."""
+    a = np.asarray(a, float)
+    flat = a.reshape(a.shape[0], -1)
+    # Vectorized: np.sort pushes NaN to the end of each column, so the finite values occupy
+    # rows [0, L); take the MATLAB round(L/2) order statistic per column in one shot.
+    L = np.isfinite(flat).sum(axis=0)                            # [M] finite count per column
+    srt = np.sort(flat, axis=0)                                  # NaN -> end of each column
+    k = np.clip(np.floor(L / 2 + 0.5).astype(int) - 1, 0, None)  # 0-based order-stat index
+    out = np.take_along_axis(srt, k[None, :], axis=0)[0]
+    out[L == 0] = np.nan
+    return out.reshape(a.shape[1:])
 
 
 def _uvrot(u: np.ndarray, v: np.ndarray, rot_deg: float) -> tuple[np.ndarray, np.ndarray]:
@@ -185,6 +204,10 @@ class MergedHeads:
     izu: np.ndarray
     hrot: np.ndarray            # [nens] per-ping up->down rotation applied [deg]
     std_min: float = np.nan     # super-ensemble scatter floor (Single_Ping_Err/sqrt(ppe))
+    beam_dn: float = 20.0       # down-looker beam angle [deg]  (side-lobe geometry)
+    beam_up: float = 20.0       # up-looker beam angle [deg]
+    cell_dn: float = 0.0        # down-looker cell length [m]
+    cell_up: float = 0.0        # up-looker cell length [m]
 
 
 def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
@@ -258,8 +281,11 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
         sw = float(np.nanmedian(sw[sw > 0]))
     std_min = sw / np.tan(np.radians(beam)) / ppe
 
+    beam_up = float(u.meta.get("beam_angle_deg", beam))
     return MergedHeads(ru=ru, rv=rv, rw=rw, re=re, weight=weight, offset=offset,
-                       izd=izd, izu=izu, hrot=hrot, std_min=std_min)
+                       izd=izd, izu=izu, hrot=hrot, std_min=std_min,
+                       beam_dn=float(beam), beam_up=beam_up,
+                       cell_dn=float(d.cell_m), cell_up=float(u.cell_m))
 
 
 @dataclass
@@ -321,9 +347,74 @@ def _outlier(ru, rv, rw, weight, izd, izu, *, nblock, nfac=(4.0, 3.0)) -> dict:
     return counts
 
 
+def _edit_velocity_mask(
+    izm_full: np.ndarray, z: np.ndarray, merged: MergedHeads, *,
+    zbottom: float | None, edit_sidelobes: bool, dzbelow: float,
+    mask_dn_bins: tuple[int, ...], mask_up_bins: tuple[int, ...],
+) -> np.ndarray:
+    """Legacy ``edit_data.m`` velocity edits as a boolean ``[nbin, nens]`` removal mask.
+
+    Operates on the merged depth grid (``izm_full = package_depth + bin_offset``, +down) and
+    returns the cells to set NaN in the velocity *before* super-ensemble averaging -- the edits
+    the goldens ran by default but pyladcp previously applied only to the Figure-14 target-
+    strength field:
+
+    * **bin masking** -- the nearest-transducer bin of each head (ringing), rows ``izu[0]`` /
+      ``izd[0]`` (legacy ``edit_mask_up_bins`` / ``edit_mask_dn_bins``, golden = bin 1).
+    * **side-lobe contamination** (``edit_sidelobes``): cells the slanted-beam side lobe reaches
+      a hard boundary through -- near the surface (up-looker reflection,
+      ``< (1-cos B_up) z + 1.5*cell``) and, *range-dependently*, near the seabed (down-looker,
+      ``> zbottom - [(1-cos B_dn)(zbottom - z) + 1.5*cell]``). The seabed cut is the PURE legacy
+      wedge (``edit_data.m:147-154``) -- it grows with height above bottom and carries NO flat
+      floor; ``1.5*cell`` is legacy's ``0.015*Cell_length`` (cm) expressed in metres. ``dzbelow``
+      is used only for the no-side-lobe fallback below.
+
+    The surface side-lobe and bin masking need no seabed and always apply; the seabed removal
+    applies only when ``zbottom`` is finite. With ``edit_sidelobes=False`` the seabed cut falls
+    back to the flat ``zbottom - dzbelow``.
+    """
+    nbin, nens = izm_full.shape
+    mask = np.zeros((nbin, nens), dtype=bool)
+    fin = np.isfinite(izm_full)
+    izu, izd = merged.izu, merged.izd
+
+    for b in mask_up_bins:                                  # nearest-TX up bin (izu near->far)
+        if 1 <= b <= izu.size:
+            mask[izu[b - 1]] = True
+    for b in mask_dn_bins:                                  # nearest-TX down bin
+        if 1 <= b <= izd.size:
+            mask[izd[b - 1]] = True
+
+    # legacy 0.015*Cell_length consumes CENTIMETRES (== 1.5 bins); pyladcp's cell_* is in metres,
+    # so the faithful side-lobe margin factor is 1.5 (0.015*cell_cm == 1.5*cell_m).
+    cellfac = 1.5
+    have_bottom = zbottom is not None and np.isfinite(zbottom)
+    if edit_sidelobes:
+        d2r = np.pi / 180.0
+        sl_surf = (1.0 - np.cos(merged.beam_up * d2r)) * z[None, :] + cellfac * merged.cell_up
+        mask |= fin & (izm_full < sl_surf)
+    if have_bottom:
+        # near-seabed cut: the flat dzbelow floor (preserves the validated deep profile) extended
+        # upward by the range-dependent side-lobe wedge (grows with height above bottom).
+        margin = float(dzbelow)
+        if edit_sidelobes:
+            wedge = ((1.0 - np.cos(merged.beam_dn * d2r)) * (zbottom - z[None, :])
+                     + cellfac * merged.cell_dn)
+            # legacy edit_data seabed cut is the PURE range-dependent wedge -- no flat floor (the
+            # only legacy "16" is getdpthi's cut BELOW the bed, a disjoint region).
+            sl_bot = zbottom - wedge
+        else:
+            sl_bot = zbottom - margin
+        mask |= fin & (izm_full > sl_bot)
+    return mask
+
+
 def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0,
                         superens_std_min: float | None = None,
-                        zbottom: float | None = None, dzbelow: float = 16.0) -> SuperEns:
+                        zbottom: float | None = None, dzbelow: float = 16.0,
+                        edit_sidelobes: bool = True,
+                        mask_dn_bins: tuple[int, ...] = (1,),
+                        mask_up_bins: tuple[int, ...] = (1,)) -> SuperEns:
     """Average merged ensembles into super-ensembles (``prepinv.m`` STEP 10).
 
     Groups by depth travel (:func:`group_ensembles`), removes the reference velocity
@@ -332,9 +423,12 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
     the scatter at the single-ping accuracy. ``.counts['reduced_len']`` is the golden
     *reduced ensemble size*.
 
-    When ``zbottom`` is given, cells deeper than ``zbottom - dzbelow`` are dropped before
-    averaging (``edit_data`` below-bottom removal): the down-looker's bins below the seabed
-    carry strong bottom reflections that otherwise bias and flatten the deepest profile.
+    Before averaging it applies the legacy ``edit_data`` velocity edits
+    (:func:`_edit_velocity_mask`): bin masking, side-lobe contamination
+    (``edit_sidelobes``) and the below-bottom margin. These remove cells whose slanted-beam
+    side lobe reflects off the surface or the seabed -- the down-looker's near-seabed bins
+    otherwise bias and flatten the deepest profile, and the wedge is range-dependent, so the
+    edit matters most on shallow casts. ``.counts['edit_removed']`` records the cells dropped.
     """
     if superens_std_min is None:
         superens_std_min = merged.std_min
@@ -345,12 +439,13 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
     izr = np.array([izd[1], izd[2], izu[1], izu[2]], dtype=int)   # reference bins
     izm_full = z[None, :] + merged.offset[:, None]
 
-    ru_src, rv_src, rw_src = merged.ru, merged.rv, merged.rw
-    if zbottom is not None:                                       # below-bottom removal
-        below = izm_full > (zbottom - dzbelow)
-        ru_src = np.where(below, np.nan, merged.ru)
-        rv_src = np.where(below, np.nan, merged.rv)
-        rw_src = np.where(below, np.nan, merged.rw)
+    edit = _edit_velocity_mask(izm_full, z, merged, zbottom=zbottom,
+                               edit_sidelobes=edit_sidelobes, dzbelow=dzbelow,
+                               mask_dn_bins=mask_dn_bins, mask_up_bins=mask_up_bins)
+    n_edit = int(edit.sum())
+    ru_src = np.where(edit, np.nan, merged.ru)
+    rv_src = np.where(edit, np.nan, merged.rv)
+    rw_src = np.where(edit, np.nan, merged.rw)
 
     nse = len(groups)
     ru = np.full((nbin, nse), np.nan); rv = np.full((nbin, nse), np.nan)
@@ -362,7 +457,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
         warnings.simplefilter("ignore", RuntimeWarning)
         for im, g in enumerate(groups):
             for src, out in ((ru_src, ru), (rv_src, rv), (rw_src, rw)):
-                ref = np.nanmedian(src[np.ix_(izr, g)], axis=0)   # [n_g]
+                # legacy per-ping reference ur=medianan(d.ru(izr,i1)) (na=0; prepinv.m:524) -- a
+                # single sorted order statistic, NOT numpy's mean-of-two-centre median.
+                ref = _medianan_na0(src[np.ix_(izr, g)])   # [n_g] per-ping reference
                 av = np.nanmean(ref)
                 r = np.where(np.isfinite(ref), ref, 0.0)
                 out[:, im] = np.nanmean(src[:, g] - r[None, :], axis=1) + av
@@ -374,7 +471,8 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
             z_se[im] = np.nanmean(z[g])
             dtiv[im] = g.size
 
-    counts = _outlier(ru, rv, rw, weight, izd, izu, nblock=max(1, int(np.ceil(nse / 12))))
+    counts = _outlier(ru, rv, rw, weight, izd, izu, nblock=_SE_OUTLIER_NBLOCK)
+    counts["edit_removed"] = n_edit
 
     with _quiet_nan():
         warnings.simplefilter("ignore", RuntimeWarning)

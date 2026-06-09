@@ -37,7 +37,7 @@ log = logging.getLogger("ladcp.qa")
 
 
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
-             solver="shear", sadcp_opts=None, cruise="MORIA", formats=None):
+             solver="shear", sadcp_opts=None, cruise="MORIA", formats=None, ctd_utc=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
     Returns ``(status, export)``: ``status`` is the QA verdict string (``"ok"``/``"warn"``/
@@ -48,6 +48,8 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
     ctd = read_ctd_cnv(ctd_path, params=params) if ctd_path else None
+    if ctd is not None and ctd_utc and "utc_start" not in ctd.meta:
+        ctd.meta["utc_start"] = ctd_utc         # index cast-start UTC -> sync prior
     qc = assess(dh, ctd=ctd)
 
     st_dir = Path(outdir) / "stations" / station
@@ -312,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in plan:
             label = item
             bar.start(label)
+            ctd_utc = None
             try:
                 if explicit:
                     down, up, ctd_path = args.down, args.up, args.ctd
@@ -322,11 +325,12 @@ def main(argv: list[str] | None = None) -> int:
                     down = str(sf.down)
                     up = str(sf.up) if sf.up else None
                     ctd_path = str(sf.ctd) if sf.ctd else None
+                    ctd_utc = sf.ctd_utc
                 bar.start(label)
                 status, export = _run_one(down, up, ctd_path, label, args.outdir,
                                           not args.no_plots, drot=args.drot,
                                           solver=args.solver, sadcp_opts=sadcp_opts,
-                                          cruise=args.cruise, formats=formats)
+                                          cruise=args.cruise, formats=formats, ctd_utc=ctd_utc)
                 if export is not None:
                     exports.append(export)
             except (Exception, SystemExit) as e:       # one bad cast must not abort the batch

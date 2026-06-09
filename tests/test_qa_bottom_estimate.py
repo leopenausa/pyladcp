@@ -18,6 +18,7 @@ from ladcp.qa.bottom import (
     _SEABED_STACK_MIN,
     _STACK_COVER_MIN,
     BottomResult,
+    _pick_seabed_peak,
     _stack_seabed,
     _support_cover,
     bottom_metric,
@@ -91,6 +92,31 @@ def test_stack_fallback_when_no_return():
     zb, is_echo = _stack_seabed(z, ea, zd, np.ones_like(z))
     assert not is_echo
     assert zb == pytest.approx(np.nanmax(z), abs=1.0)
+
+
+def test_pick_seabed_peak_rejects_bottom_multiple():
+    # MORIA-89 case: the deepest strong peak (170 m) is a ~2x harmonic of a stronger shallower
+    # peak (86 m, the true bed; echo-sounder 83 m). The guard must pick the bed, not the multiple.
+    grid = np.arange(0.0, 400.0, 1.0)
+    filled = np.zeros_like(grid)
+    filled[86], filled[170] = 46.0, 24.0
+    assert grid[_pick_seabed_peak(grid, filled, [86, 170])] == pytest.approx(86.0)
+
+    # a 3x multiple is likewise rejected in favour of the stronger fundamental
+    f3 = np.zeros_like(grid); f3[60], f3[180] = 40.0, 18.0
+    assert grid[_pick_seabed_peak(grid, f3, [60, 180])] == pytest.approx(60.0)
+
+    # a genuine deeper bed that is NOT a 2x/3x harmonic of a shallower peak is kept
+    f2 = np.zeros_like(grid); f2[120], f2[300] = 20.0, 40.0
+    assert grid[_pick_seabed_peak(grid, f2, [120, 300])] == pytest.approx(300.0)
+
+    # a deeper peak at ~2x but STRONGER than the shallow one is a real bed (not a multiple) -> keep
+    f4 = np.zeros_like(grid); f4[90], f4[180] = 20.0, 40.0
+    assert grid[_pick_seabed_peak(grid, f4, [90, 180])] == pytest.approx(180.0)
+
+    # single strong peak: always returned unchanged
+    f5 = np.zeros_like(grid); f5[250] = 30.0
+    assert grid[_pick_seabed_peak(grid, f5, [250])] == pytest.approx(250.0)
 
 
 def test_support_cover_wide_vs_narrow():

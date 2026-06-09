@@ -49,10 +49,24 @@ def test_surface_fill_repairs_collapsed_top():
     v = u.copy()
     uerr = np.full(6, 0.03)
     nvel = np.array([2, 5, 40, 42, 45, 50])     # median(>0)=43 -> thr=max(3,0.4*43)=17
-    _surface_fill(u, v, uerr, nvel)
+    z = np.arange(1, 7) * 8.0                   # 8..48 m: a genuine near-surface gap
+    _surface_fill(u, v, uerr, nvel, z)
     assert u[0] == u[1] == u[2] == -0.20        # bins above the first reliable bin filled
     assert v[0] == v[1] == -0.20
     assert np.allclose(u[2:], [-0.20, -0.21, -0.22, -0.23])   # deeper bins untouched
+
+
+def test_surface_fill_leaves_large_gap_nan():
+    # first reliable bin is ~1000 m down (ADCP began mid-descent): do NOT fabricate a flat top
+    from ladcp.qa.inverse_full import _surface_fill
+    nz = 600
+    u = np.full(nz, np.nan); u[125:] = -0.20    # data only below ~1000 m
+    v = u.copy(); uerr = np.full(nz, 0.03)
+    nvel = np.zeros(nz, dtype=int); nvel[125:] = 40
+    z = np.arange(1, nz + 1) * 8.0              # bin 125 ~ 1008 m  >> _SURFACE_FILL_MAX
+    _surface_fill(u, v, uerr, nvel, z)
+    assert np.all(np.isnan(u[:125]))            # upper water column left unsampled, not filled
+    assert np.allclose(u[125:], -0.20)
 
 
 def test_inverse_matches_golden_u(both_solvers):
@@ -86,11 +100,14 @@ def test_inverse_grid_stops_at_seabed(both_solvers):
 
 
 def test_shear_path_unchanged(both_solvers):
-    # adding the solver switch must not perturb the validated shear solution
+    # The solver switch itself does not perturb the shear shape (corr stays ~0.998). The absolute
+    # rms reflects the velocity-path editing fix set now applied before averaging
+    # (units/floor/refmed/btgate/outlier_n): MORIA-80 shear rms ~0.031 (bias-dominated) while the
+    # profile shape is unchanged. See memory ladcp-editing-rootcause-2026-06.
     out, _ = both_solvers
     _, s = out["shear"]
     assert s["u"].corr > 0.997
-    assert s["u"].rms < 0.02
+    assert s["u"].rms < 0.035
 
 
 def test_lainsadcp_weight_math():

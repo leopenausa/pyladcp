@@ -124,6 +124,13 @@ class VelocityProfile:
     n: np.ndarray               # [nz] shear samples per bin
 
 
+# max near-surface gap (m) the profile may bridge by filling from the shallowest reliable bin.
+# A genuine surface gap (up-looker can't quite reach the surface) is small; a larger gap means
+# the upper water column was never sampled (ADCP began mid-descent on a fragmented cast) and
+# must stay NaN rather than be padded with a fake constant velocity.
+_SURFACE_FILL_MAX = 250.0
+
+
 def velocity_profile(se: SuperEns, *, dz: float = 8.0, drot: float = 0.0,
                      z: np.ndarray | None = None, uship: float = 0.0,
                      vship: float = 0.0, weightmin: float = 0.1, velerr: float = 0.03,
@@ -185,14 +192,22 @@ def velocity_profile(se: SuperEns, *, dz: float = 8.0, drot: float = 0.0,
     uerr = velerr * np.sqrt(nmed / np.clip(nvel, 1, None))
     uerr = np.where(nvel > 0, np.clip(uerr, velerr * 0.6, None), np.nan)
 
-    # fill only the sparsely-sampled SURFACE bins (no data above the shallowest bin) with
-    # the nearest reliable value, as the golden .lad does. The seabed is NOT filled: the
-    # down-looker samples to the bottom, so a flat near-bottom tail would be an artefact.
+    # fill only a genuine near-SURFACE gap (no data above the shallowest bin) with the nearest
+    # reliable value, as the golden .lad does. A gap larger than _SURFACE_FILL_MAX means the
+    # upper water column was never sampled (e.g. an ADCP file that began mid-descent on a
+    # fragmented cast) -- leave it NaN rather than fabricate a flat profile. The seabed is NOT
+    # filled: the down-looker samples to the bottom, so a flat near-bottom tail would be wrong.
     good = nvel >= max(2.0, 0.15 * nmed)
     if good.any():
         lo = int(np.argmax(good))
-        for a in (u, v, uerr):
-            a[:lo] = a[lo]
+        if zg[lo] <= _SURFACE_FILL_MAX:
+            for a in (u, v, uerr):
+                a[:lo] = a[lo]
+        else:                                  # large unsampled surface gap -> honest NaN
+            samp = np.where(nvel > 0)[0]
+            cut = int(samp[0]) if samp.size else lo
+            for a in (u, v, uerr):
+                a[:cut] = np.nan
 
     return VelocityProfile(z=zg, u=u, v=v, uerr=uerr, nvel=nvel,
                            ubar=float(np.nanmean(u)), vbar=float(np.nanmean(v)), n=sp.n)
@@ -213,14 +228,13 @@ class BottomProfile:
         return int(np.isfinite(self.u).sum())
 
 
-def _btrk_cells(merged, bt, sync, *, zbottom: float, dzbelow: float = 16.0,
-                weightmin: float = 0.1):
+def _btrk_cells(merged, bt, sync, *, zbottom: float, weightmin: float = 0.1):
     """Flatten bottom-track cells -> ``(depth, resid_u, resid_v, weight)`` [magnetic].
 
     Every water cell of a bottom-track ping gives an absolute ocean velocity
     ``ru - re(bvel)`` -- the seabed cell measures ``bvel = -u_package`` and ``ru`` is the
     *raw* merged earth-frame velocity (not the super-ensemble's reference-removed ``se.ru``,
-    which cancels the package term). Below-seabed and low-weight cells are dropped.
+    which cancels the package term). Below-seabed, above-surface and low-weight cells are dropped.
     """
     n = merged.ru.shape[1]
     z_on = np.asarray(sync.z_on_ping[:n], float)
@@ -228,9 +242,16 @@ def _btrk_cells(merged, bt, sync, *, zbottom: float, dzbelow: float = 16.0,
     resid_u = merged.ru - np.real(bt.bvel)[None, :]
     resid_v = merged.rv - np.imag(bt.bvel)[None, :]
     mask = (np.isfinite(bt.bvel)[None, :] & np.isfinite(resid_u) & np.isfinite(resid_v)
-            & (merged.weight > weightmin))
+            & (merged.weight > weightmin)
+            & (izm >= 0.0))      # drop above-surface up-looker cells (shallow-cast "atmosphere"
+                                 # bins: izm = package_depth + offset, up-looker offset<0). No-op
+                                 # on deep casts (BT pings only fire when the package is deep).
     if np.isfinite(zbottom):
-        mask &= izm <= (zbottom - dzbelow)
+        # pure legacy side-lobe wedge (no flat floor); cellfac 1.5 == 0.015*cell_cm in metres.
+        d2r = np.pi / 180.0
+        wedge = ((1.0 - np.cos(merged.beam_dn * d2r)) * (zbottom - izm)
+                 + 1.5 * merged.cell_dn)
+        mask &= izm <= (zbottom - wedge)
     return izm[mask], resid_u[mask], resid_v[mask], merged.weight[mask]
 
 
@@ -307,14 +328,22 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     # mid-water false echoes that pass the per-ping target-strength test.
     if np.isfinite(bottom.zbottom):
         hgt = bottom.zbottom - np.asarray(sync.z_on_ping[:bt.bvel.size], float)
-        bad = ~((hgt > 50.0) & (hgt < 300.0) & (np.abs(hgt - bt.hbot) < 100.0))
-        bt.bvel[bad] = np.nan
-        bt.bw[bad] = np.nan
+        # legacy prepinv.m:71-76: the 50-300 m range gate drops bottom-track VELOCITY; the
+        # |hgt-hbot|>100 m echo disagreement NaNs only the (inert) echo distance, not bvel.
+        bad_vel = ~((hgt > 50.0) & (hgt < 300.0))
+        bt.bvel[bad_vel] = np.nan
+        bt.bw[bad_vel] = np.nan
+        bt.hbot[np.abs(hgt - bt.hbot) >= 100.0] = np.nan
     # merge_heads trims to min(down, up) pings; align z_on_ping (built on the master ping
     # series) to that joint length so super-ensembles see matching arrays when the two heads
     # logged unequal counts (e.g. the fragmented MORIA-01..04 casts). No-op when equal.
     zop = sync.z_on_ping[:merged.ru.shape[1]]
-    se = form_superensembles(merged, zop, avdz=dz, zbottom=bottom.zbottom)
+    se = form_superensembles(
+        merged, zop, avdz=dz, zbottom=bottom.zbottom,
+        dzbelow=getattr(params, "dzbelow", 16.0) if params is not None else 16.0,
+        edit_sidelobes=getattr(params, "edit_sidelobes", True) if params is not None else True,
+        mask_dn_bins=getattr(params, "edit_mask_dn_bins", (1,)) if params is not None else (1,),
+        mask_up_bins=getattr(params, "edit_mask_up_bins", (1,)) if params is not None else (1,))
     zmax = sync.maxdepth if np.isfinite(sync.maxdepth) else float(np.nanmax(se.izm))
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom
 
