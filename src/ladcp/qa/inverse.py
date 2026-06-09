@@ -219,7 +219,7 @@ def _btrk_cells(merged, bt, sync, *, zbottom: float, weightmin: float = 0.1):
     Every water cell of a bottom-track ping gives an absolute ocean velocity
     ``ru - re(bvel)`` -- the seabed cell measures ``bvel = -u_package`` and ``ru`` is the
     *raw* merged earth-frame velocity (not the super-ensemble's reference-removed ``se.ru``,
-    which cancels the package term). Below-seabed and low-weight cells are dropped.
+    which cancels the package term). Below-seabed, above-surface and low-weight cells are dropped.
     """
     n = merged.ru.shape[1]
     z_on = np.asarray(sync.z_on_ping[:n], float)
@@ -227,7 +227,10 @@ def _btrk_cells(merged, bt, sync, *, zbottom: float, weightmin: float = 0.1):
     resid_u = merged.ru - np.real(bt.bvel)[None, :]
     resid_v = merged.rv - np.imag(bt.bvel)[None, :]
     mask = (np.isfinite(bt.bvel)[None, :] & np.isfinite(resid_u) & np.isfinite(resid_v)
-            & (merged.weight > weightmin))
+            & (merged.weight > weightmin)
+            & (izm >= 0.0))      # drop above-surface up-looker cells (shallow-cast "atmosphere"
+                                 # bins: izm = package_depth + offset, up-looker offset<0). No-op
+                                 # on deep casts (BT pings only fire when the package is deep).
     if np.isfinite(zbottom):
         # pure legacy side-lobe wedge (no flat floor); cellfac 1.5 == 0.015*cell_cm in metres.
         d2r = np.pi / 180.0
