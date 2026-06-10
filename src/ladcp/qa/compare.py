@@ -37,6 +37,7 @@ class LegacyCast:
     lat: float
     lon: float
     dr: DrTargets
+    tim_span: tuple[np.datetime64, np.datetime64] | None = None   # SE grid span (dr.tim)
 
 
 @dataclass
@@ -61,6 +62,24 @@ def _legacy_time(dr_raw) -> np.datetime64 | None:
                          f"T{d[3]:02d}:{d[4]:02d}:{d[5]:02d}")
 
 
+def _legacy_tim_span(dr_raw):
+    """Super-ensemble time span from ``dr.tim`` (LDEO julian days, midnight-based)."""
+    tim = getattr(dr_raw, "tim", None)
+    if tim is None:
+        return None
+    t = np.asarray(tim, float).ravel()
+    t = t[np.isfinite(t)]
+    if t.size < 2:
+        return None
+    # LDEO julian.m counts from noon (astronomical JD); decoding against midnight
+    # removes the 12 h: verified on FDCCC1_001 (cast 01:36 UTC, tim decodes 13:36
+    # under the astronomical epoch)
+    epoch = np.datetime64("2000-01-01T00:00:00")
+    def conv(jd):
+        return epoch + np.timedelta64(round((jd - 2451545.0) * 86400 * 1000), "ms")
+    return conv(float(t.min())), conv(float(t.max()))
+
+
 def scan_legacy(folder: str | Path) -> list[LegacyCast]:
     """Load every legacy result ``*.mat`` (skipping ``*.ladcp.mat`` companions)."""
     import scipy.io as sio
@@ -79,6 +98,7 @@ def scan_legacy(folder: str | Path) -> list[LegacyCast]:
             lat=float(getattr(raw, "lat", np.nan)),
             lon=float(getattr(raw, "lon", np.nan)),
             dr=load_dr_mat(p),
+            tim_span=_legacy_tim_span(raw),
         ))
     return out
 
@@ -172,7 +192,27 @@ class PairResult:
     variant: str = ""           # alternate-run label ("" = the main run)
 
 
-def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
+def _own_sadcp_profile(sadcp_ds, lc: LegacyCast, oc: OurCast):
+    """Ship-ADCP profile from our (clock-corrected) dataset over this cast's window.
+
+    The window comes from the legacy super-ensemble time span (``dr.tim``, exact)
+    when available, else +-30 min around our cast start. Returns an ``[nz, 4]``
+    ``(z, u, v, verr)`` array or ``None``.
+    """
+    from ..io.sadcp_vmdas import extract_profile
+
+    if lc.tim_span is not None:
+        t0, t1 = lc.tim_span
+    elif oc.time is not None:
+        t0, t1 = oc.time - np.timedelta64(30, "m"), oc.time + np.timedelta64(30, "m")
+    else:
+        return None
+    return extract_profile(sadcp_ds, time_start=t0, time_end=t1,
+                           lat=oc.lat, lon=oc.lon)
+
+
+def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float,
+                 sadcp_ds=None) -> PairResult:
     """Score one station: ours interpolated onto the legacy depth grid."""
     import xarray as xr
 
@@ -197,6 +237,8 @@ def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
         ubi = np.full(dr.zbot.shape, np.nan)
         vbi = np.full(dr.zbot.shape, np.nan)
 
+    own_sadcp = _own_sadcp_profile(sadcp_ds, lc, oc) if sadcp_ds is not None else None
+
     lbar_u = dr.ubar if np.isfinite(dr.ubar) else np.nan
     lbar_v = dr.vbar if np.isfinite(dr.vbar) else np.nan
     return PairResult(
@@ -209,7 +251,13 @@ def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
         profile={"z": z, "u": u, "v": v, "uerr": uerr,
                  "lz": dr.z, "lu": dr.u, "lv": dr.v,
                  "luerr": dr.uerr if dr.uerr.size == dr.z.size
-                 else np.full(dr.z.shape, np.nan)},
+                 else np.full(dr.z.shape, np.nan),
+                 # ship-ADCP: the constraint profile legacy actually used (dr) and,
+                 # when a dataset is supplied, our own extraction over the cast window
+                 "lsz": dr.z_sadcp if dr.has_sadcp else np.array([]),
+                 "lsu": dr.u_sadcp if dr.has_sadcp else np.array([]),
+                 "lsv": dr.v_sadcp if dr.has_sadcp else np.array([]),
+                 "sadcp": own_sadcp},
         variant=oc.variant,
     )
 
@@ -248,6 +296,15 @@ def _profile_pages(pdf, results: list[PairResult], per_page: int = 10):
                         label="legacy ±1σ")
                 ax.plot(p[comp], p["z"], "-", color="tab:red", lw=1.0,
                         label="pyladcp ±1σ")
+                ci = 1 if comp == "u" else 2
+                if p["sadcp"] is not None and p["sadcp"].shape[0]:
+                    s = p["sadcp"]
+                    ax.plot(s[:, ci], s[:, 0], "o-", color="tab:green", ms=2.5,
+                            lw=0.8, alpha=0.85, label="ship ADCP")
+                if p["lsz"].size > 1:
+                    ax.plot(p["lsu"] if comp == "u" else p["lsv"], p["lsz"], "s",
+                            color="tab:olive", ms=2.5, alpha=0.8, mfc="none",
+                            label="ship ADCP (legacy constraint)")
                 ax.invert_yaxis()
                 ax.grid(alpha=0.3)
                 s = getattr(r, comp)
@@ -257,11 +314,22 @@ def _profile_pages(pdf, results: list[PairResult], per_page: int = 10):
                              color="tab:blue" if r.variant else "black")
                 if col == 0:
                     ax.set_ylabel("depth [m]")
-                if k == 0 and off == 0:
-                    ax.legend(fontsize=7)
         for k in range(len(chunk), ncol * (nrow // 2)):
             axes[(k // ncol) * 2, k % ncol].axis("off")
             axes[(k // ncol) * 2 + 1, k % ncol].axis("off")
+        from matplotlib.lines import Line2D
+        handles = [Line2D([], [], color="0.3", lw=1.4, label="legacy ±1σ"),
+                   Line2D([], [], color="tab:red", lw=1.0, label="pyladcp ±1σ")]
+        if any(r.profile["sadcp"] is not None and r.profile["sadcp"].shape[0]
+               for r in chunk):
+            handles.append(Line2D([], [], color="tab:green", marker="o", ms=3,
+                                  lw=0.8, label="ship ADCP"))
+        if any(r.profile["lsz"].size > 1 for r in chunk):
+            handles.append(Line2D([], [], color="tab:olive", marker="s", ms=3,
+                                  lw=0, mfc="none",
+                                  label="ship ADCP (legacy constraint)"))
+        fig.legend(handles=handles, loc="upper left", fontsize=7, ncol=len(handles),
+                   frameon=False)
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -382,6 +450,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--alt-label", default="alternate",
                     help="label stamped on substituted stations in the report "
                          "(default: 'alternate')")
+    ap.add_argument("--sadcp", metavar="PATH", default=None,
+                    help="ship-ADCP VmDAS folder (STA/LTA; cached): overlay the "
+                         "ship-ADCP profile over each cast window on the report")
+    ap.add_argument("--sadcp-timeoff", type=float, default=None, metavar="SECONDS",
+                    help="clock correction added to the ship-ADCP timestamps "
+                         "(the value ladcp-qa --sadcp-timeoff auto reported)")
+    ap.add_argument("--sadcp-filetype", choices=("STA", "LTA"), default="STA")
+    ap.add_argument("--sadcp-xducer", type=float, default=5.0,
+                    help="ship-ADCP transducer depth below waterline [m] (default 5)")
     ap.add_argument("--title", default="pyladcp vs legacy LDEO_IX")
     ap.add_argument("-o", "--out", default=None,
                     help="report dir (default <ours>/legacy_compare)")
@@ -399,9 +476,18 @@ def main(argv: list[str] | None = None) -> int:
     if not legacy:
         ap.error(f"no legacy dr .mat files under {args.legacy}")
 
+    sadcp_ds = None
+    if args.sadcp:
+        from ..io.sadcp_vmdas import load_or_ingest
+        sadcp_ds = load_or_ingest(args.sadcp, file_type=args.sadcp_filetype,
+                                  transducer_depth=args.sadcp_xducer)
+        if args.sadcp_timeoff:
+            from ..io.nav import shift_time
+            sadcp_ds = shift_time(sadcp_ds, args.sadcp_timeoff)
+
     pairs, ours_only, legacy_only = pair_by_time(ours, legacy,
                                                  tol_h=args.tol_hours)
-    results = [compare_pair(oc, lc, dt) for oc, lc, dt in pairs]
+    results = [compare_pair(oc, lc, dt, sadcp_ds=sadcp_ds) for oc, lc, dt in pairs]
     out_dir = args.out or str(Path(args.ours) / "legacy_compare")
     csv_path, pdf_path = write_report(results, ours_only, legacy_only,
                                       out_dir, args.title)
