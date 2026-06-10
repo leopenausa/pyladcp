@@ -220,12 +220,15 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
     ``u1uc = exp(-i(hdg_up - hoff))``. ``hoff`` defaults to :func:`compass_offset`.
     Screening edits (:func:`screen`) NaN bad cells; the weight is the beam-median
     correlation normalised by the median of its per-ping maximum.
+
+    With no up-looker (``dh.up is None``) the stack is the down head alone in its own
+    compass frame: no rotation (legacy single-head processing), ``izu`` empty, the depth
+    offsets purely below the package.
     """
-    if not dh.has_up:
-        raise ValueError("merge_heads requires both heads")
-    hoff = compass_offset(dh) if rot_deg is None else rot_deg
     d, u = dh.down, dh.up
-    n = min(d.n_ens, u.n_ens)                          # joint ensembles (shift 0)
+    single = u is None
+    hoff = 0.0 if single else (compass_offset(dh) if rot_deg is None else rot_deg)
+    n = d.n_ens if single else min(d.n_ens, u.n_ens)   # joint ensembles (shift 0)
     sr = screen(dh, params)
 
     def head_fields(head, good, ne):
@@ -243,33 +246,42 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
         return uu, vv, ww, ee, corr
 
     ud, vd, wd, ed, cd = head_fields(d, sr.good_down, n)
-    uu, vu, wu, eu, cu = head_fields(u, sr.good_up, n)
 
-    # per-ping rotation hrot (deg), rotup2down==1 (golden)
-    hdg_d = np.asarray(d.heading[:n], float)
-    hdg_u = np.asarray(u.heading[:n], float)
-    u1d = np.exp(-1j * np.radians(hdg_d))
-    u1uc = np.exp(-1j * np.radians(hdg_u - hoff))
-    hrot = np.angle(u1uc / u1d) * 180 / np.pi
-    hrm = np.where(np.isfinite(hrot), hrot, np.nanmean(hrot))
-    ud, vd = _uvrot(ud, vd, -hrm / 2.0)                # rotate down by -hrot/2
-    uu, vu = _uvrot(uu, vu, hrm / 2.0)                 # rotate up   by +hrot/2
+    if single:
+        ru, rv, rw, re = ud, vd, wd, ed                # down head alone, own compass frame
+        corr = cd
+        hrot = np.zeros(n)
+        nbin_u = 0
+        offset = dh.bin_depth(d)                       # +down depth offset from package
+    else:
+        uu, vu, wu, eu, cu = head_fields(u, sr.good_up, n)
 
-    # stack [flipud(up); down]
-    def stack(a_up, a_dn):
-        return np.vstack([np.flipud(a_up), a_dn])
-    ru = stack(uu, ud); rv = stack(vu, vd); rw = stack(wu, wd); re = stack(eu, ed)
-    corr = stack(cu, cd)
+        # per-ping rotation hrot (deg), rotup2down==1 (golden)
+        hdg_d = np.asarray(d.heading[:n], float)
+        hdg_u = np.asarray(u.heading[:n], float)
+        u1d = np.exp(-1j * np.radians(hdg_d))
+        u1uc = np.exp(-1j * np.radians(hdg_u - hoff))
+        hrot = np.angle(u1uc / u1d) * 180 / np.pi
+        hrm = np.where(np.isfinite(hrot), hrot, np.nanmean(hrot))
+        ud, vd = _uvrot(ud, vd, -hrm / 2.0)            # rotate down by -hrot/2
+        uu, vu = _uvrot(uu, vu, hrm / 2.0)             # rotate up   by +hrot/2
+
+        # stack [flipud(up); down]
+        def stack(a_up, a_dn):
+            return np.vstack([np.flipud(a_up), a_dn])
+        ru = stack(uu, ud); rv = stack(vu, vd); rw = stack(wu, wd); re = stack(eu, ed)
+        corr = stack(cu, cd)
+        nbin_u = u.n_cells
+        zu = dh.bin_depth(u)                           # up bin distance from transducer
+        offset = np.concatenate([-zu[::-1], dh.bin_depth(d)])   # +down offset from package
+
     with _quiet_nan():
         warnings.simplefilter("ignore", RuntimeWarning)
         weight = corr / np.nanmedian(np.nanmax(corr, axis=0))
 
-    nbin_u, nbin_d = u.n_cells, d.n_cells
-    izu = np.flip(np.arange(nbin_u))                   # near->far up rows
+    nbin_d = d.n_cells
+    izu = np.flip(np.arange(nbin_u))                   # near->far up rows (empty if single)
     izd = np.arange(nbin_d) + nbin_u                   # near->far down rows
-    zu = dh.bin_depth(u)                               # up bin distance from transducer
-    zd = dh.bin_depth(d)
-    offset = np.concatenate([-zu[::-1], zd])           # +down depth offset from package
 
     # single-ping scatter floor from edited down-W, bins 2..6 (loadrdi.m l.207)
     beam = d.meta.get("beam_angle_deg", 20.0)
@@ -281,11 +293,12 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
         sw = float(np.nanmedian(sw[sw > 0]))
     std_min = sw / np.tan(np.radians(beam)) / ppe
 
-    beam_up = float(u.meta.get("beam_angle_deg", beam))
+    beam_up = float(u.meta.get("beam_angle_deg", beam)) if not single else float(beam)
     return MergedHeads(ru=ru, rv=rv, rw=rw, re=re, weight=weight, offset=offset,
                        izd=izd, izu=izu, hrot=hrot, std_min=std_min,
                        beam_dn=float(beam), beam_up=beam_up,
-                       cell_dn=float(d.cell_m), cell_up=float(u.cell_m))
+                       cell_dn=float(d.cell_m),
+                       cell_up=float(u.cell_m) if not single else float(d.cell_m))
 
 
 @dataclass
@@ -436,7 +449,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
     groups = group_ensembles(z, avdz=avdz)
     izd, izu = merged.izd, merged.izu
     nbin = merged.ru.shape[0]
-    izr = np.array([izd[1], izd[2], izu[1], izu[2]], dtype=int)   # reference bins
+    # reference bins: bins 2-3 of each head (down only when there is no up-looker)
+    izr = np.array(([izd[1], izd[2]] + ([izu[1], izu[2]] if izu.size >= 3 else [])),
+                   dtype=int)
     izm_full = z[None, :] + merged.offset[:, None]
 
     edit = _edit_velocity_mask(izm_full, z, merged, zbottom=zbottom,

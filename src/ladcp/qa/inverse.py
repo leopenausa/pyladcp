@@ -31,6 +31,7 @@ from .superens import SuperEns, _uvrot, form_superensembles, merge_heads
 
 if TYPE_CHECKING:
     from .bottom import BtrkDiagnostics
+    from .inverse_full import ConstraintWeights
 
 
 @dataclass
@@ -384,6 +385,7 @@ class VelocityResult:
     btrk: BtrkDiagnostics | None = None  # own-vs-RDI bottom-track check -- Figure 13
     err: ErrField | None = None     # per-cell misfit / velocity field -- Figure 3
     drift: DriftTrack | None = None  # ship + package horizontal tracks -- drift map
+    weights: ConstraintWeights | None = None  # inverse constraint weights -- Figure 12
 
     @property
     def resid_rms(self) -> float:
@@ -556,21 +558,27 @@ def _ping_dt(dh: DualHead) -> float:
 
 def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0,
                           dz: float = 8.0, params=None, weightmin: float = 0.1,
-                          solver: str = "shear", sadcp: np.ndarray | None = None,
-                          sadcpfac: float = 3.0) -> VelocityResult:
+                          solver: str = "inverse", sadcp: np.ndarray | None = None,
+                          sadcpfac: float = 3.0, botfac: float = 1.0,
+                          barofac: float = 1.0, smoofac: float = 0.0) -> VelocityResult:
     """End-to-end solve returning every product the velocity figures need.
 
     ``solver`` selects the velocity (``.lad``) solution, naming the legacy ``ps.shear``
-    choice explicitly: ``"shear"`` (default, ``ps.shear==1``) takes the shear method's
-    baroclinic shape plus a barotropic reference; ``"inverse"`` (``ps.shear==0``) forms the
-    full constrained least-squares inverse (:func:`ladcp.qa.inverse_full.invert`) with
-    bottom-track + navigation constraints. The bottom-track ``.bot`` profile, shear figure
-    and residuals are produced the same way for both.
+    choice explicitly: ``"inverse"`` (default, ``ps.shear==0``) forms the full constrained
+    least-squares inverse (:func:`ladcp.qa.inverse_full.invert`) with bottom-track +
+    navigation (+ optional ship-ADCP) constraints; ``"shear"`` (``ps.shear==1``) takes the
+    shear method's baroclinic shape plus a barotropic reference. The bottom-track ``.bot``
+    profile, shear figure and residuals are produced the same way for both.
 
     ``sadcp`` is an optional ship-ADCP profile ``(z, u, v, verr)`` in the true frame
     (``solver="inverse"`` only); it adds the ``lainsadcp`` ocean constraint with weight
     ``sadcpfac`` (golden default 3). Build it from a raw VmDAS folder with
     :func:`ladcp.io.sadcp_vmdas.extract_profile`; it is carried on the result for Figure 9.
+
+    ``botfac``/``barofac``/``smoofac`` are the legacy ``ps.botfac``/``ps.barofac``/
+    ``ps.smoofac`` constraint weights (inverse only): how strongly the bottom track and
+    the GPS barotropic row pull the solution, and the curvature-smoothing strength
+    (legacy defaults 1/1/0).
     """
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
@@ -595,13 +603,18 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
         # inverse keeps its own legacy default rather than the shear-oriented argument.
         aux = inverse_inputs(se, bt=bt, sync=sync, ctd=ctd, ping_dt=_ping_dt(dh),
                              zbottom=bottom.zbottom)
+        inv_diag: dict = {}
         vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom,
-                    svel=sadcp, sadcpfac=sadcpfac if sadcp is not None else 0.0)
+                    botfac=botfac, barofac=barofac, smoofac=smoofac,
+                    svel=sadcp, sadcpfac=sadcpfac if sadcp is not None else 0.0,
+                    diag=inv_diag)
+        weights = inv_diag.get("weights")
     else:
         ref = _btrk_reference(bp_mag, sp_mag)
         uref, vref = ref if ref is not None else (None, None)
         vp = velocity_profile(se, dz=dz, drot=drot, z=z, uref=uref, vref=vref,
                               weightmin=weightmin)
+        weights = None
     bp = _rotate_bottom(bp_mag, drot) if bp_mag is not None else None
     shear = shear_method(se, dz=dz, drot=drot, z=z)        # true-frame baroclinic (Fig 3)
     rz, ru, rv = _solution_residuals(se, sp_mag, drot=drot, weightmin=weightmin)
@@ -613,7 +626,7 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     drift = _drift_track(se, ctd, vp, drot=drot, ping_dt=_ping_dt(dh))
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
                           resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used,
-                          btrk=btrk, err=err, drift=drift)
+                          btrk=btrk, err=err, drift=drift, weights=weights)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:

@@ -37,7 +37,8 @@ log = logging.getLogger("ladcp.qa")
 
 
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
-             solver="shear", sadcp_opts=None, cruise="MORIA", formats=None, ctd_utc=None):
+             solver="inverse", sadcp_opts=None, cruise="MORIA", formats=None, ctd_utc=None,
+             inv_opts=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
     Returns ``(status, export)``: ``status`` is the QA verdict string (``"ok"``/``"warn"``/
@@ -59,17 +60,34 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
     log.info("[%-5s] %s  ->  %s/", qc.overall_status.value.upper(), station, st_dir)
 
-    # velocity solve (requires both heads + CTD + earth-frame data): .lad + .bot text, figures
+    # velocity solve (requires CTD + earth-frame data): .lad + .bot text, figures
     from ..models import CoordFrame
     earth = all(h.coord_frame == CoordFrame.EARTH for h in (dh.down, dh.up) if h is not None)
     result = None
     export = None
-    if dh.has_up and ctd is not None and not earth:
+    down_only = bool(inv_opts and inv_opts.get("down_only"))
+    if ctd is not None and not earth:
         log.warning("        velocity skipped: %s-coordinate data is unsupported (beam frames are "
                     "auto-rotated to earth at ingest; only earth/beam are handled); QA metrics "
                     "still written", dh.down.coord_frame.value)
-    if dh.has_up and ctd is not None and earth:
-        result, meta = _velocity_outputs(dh, ctd, station, st_dir, drot, solver, sadcp_opts)
+    if ctd is not None and earth and not dh.has_up and not down_only:
+        log.warning("        velocity skipped: no up-looker (pass --down-only to solve from "
+                    "the down-looker alone); QA metrics still written")
+    if ctd is not None and earth and (dh.has_up or down_only):
+        dh_solve = dh
+        if down_only and dh.has_up:
+            from dataclasses import replace
+            dh_solve = replace(dh, up=None)
+            log.warning("        velocity: --down-only -- up-looker EXCLUDED from the solve "
+                        "(acquisition QA above still covers both heads)")
+        if not dh_solve.has_up:
+            from ..models import Metric, Status
+            qc.add(Metric("single_head_solve", "down-only", "", Status.WARN,
+                          source_stage="qa.cli",
+                          note="velocity solved from the down-looker alone: reduced "
+                               "near-surface coverage, reference layer from down bins only"))
+        result, meta = _velocity_outputs(dh_solve, ctd, station, st_dir, drot, solver,
+                                         sadcp_opts, inv_opts)
         from ..qa.checks import consistency_checks
         for m in consistency_checks(result):       # checkinv -> scorecard
             qc.add(m)
@@ -95,7 +113,8 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     return qc.overall_status.value, export
 
 
-def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=None):
+def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=None,
+                      inv_opts=None):
     import numpy as np
 
     from ..qa.export import write_bot, write_lad
@@ -124,9 +143,13 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="shear", sadcp_opts=No
     t_lad = dh.down.time
     sadcp = (_sadcp_profile(sadcp_opts, t_lad.min(), t_lad.max(), lat, lon, solver)
              if sadcp_opts else None)
+    io = inv_opts or {}
     result = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver,
                                    sadcp=sadcp,
-                                   sadcpfac=(sadcp_opts or {}).get("fac", 3.0))
+                                   sadcpfac=(sadcp_opts or {}).get("fac", 3.0),
+                                   botfac=io.get("botfac", 1.0),
+                                   barofac=io.get("barofac", 1.0),
+                                   smoofac=io.get("smoofac", 0.0))
     vp, bp = result.vp, result.bp
     lad = out / f"{station}.lad"
     write_lad(vp, str(lad), station=station, lat=lat, lon=lon, drot=drot, time=when)
@@ -252,8 +275,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-plots", action="store_true", help="skip figures/PDF")
     ap.add_argument("--drot", type=float, default=None,
                     help="magnetic declination [deg] for velocity (default: IGRF from position)")
-    ap.add_argument("--solver", choices=("shear", "inverse"), default="shear",
-                    help="velocity solver: shear shape+reference (default) or full inverse")
+    ap.add_argument("--solver", choices=("shear", "inverse"), default="inverse",
+                    help="velocity solver: full constrained inverse (default) or shear "
+                         "shape+reference")
+    ap.add_argument("--botfac", type=float, default=1.0,
+                    help="bottom-track constraint weight, legacy ps.botfac "
+                         "(inverse only; default: 1)")
+    ap.add_argument("--barofac", type=float, default=1.0,
+                    help="GPS barotropic constraint weight, legacy ps.barofac "
+                         "(inverse only; default: 1)")
+    ap.add_argument("--smoofac", type=float, default=0.0,
+                    help="curvature-smoothing weight, legacy ps.smoofac "
+                         "(inverse only; default: 0, golden value)")
+    ap.add_argument("--down-only", action="store_true",
+                    help="solve velocity from the down-looker alone, ignoring any up-looker "
+                         "(cross-check / single-instrument casts); acquisition QA still "
+                         "covers both heads")
     # ship-ADCP (SADCP) constraint (inverse solver only)
     ap.add_argument("--sadcp", metavar="DIR",
                     help="VmDAS shipboard-ADCP folder (STA/LTA) for the inverse constraint; "
@@ -310,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
         sadcp_opts = {"folder": args.sadcp, "fac": args.sadcpfac,
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
                       "reingest": args.sadcp_reingest}
+    inv_opts = {"botfac": args.botfac, "barofac": args.barofac, "smoofac": args.smoofac,
+                "down_only": args.down_only}
 
     # resolve the work list: explicit single file set, or a batch of station ids
     explicit = bool(args.down)
@@ -356,7 +395,8 @@ def main(argv: list[str] | None = None) -> int:
                 status, export = _run_one(down, up, ctd_path, label, args.outdir,
                                           not args.no_plots, drot=args.drot,
                                           solver=args.solver, sadcp_opts=sadcp_opts,
-                                          cruise=args.cruise, formats=formats, ctd_utc=ctd_utc)
+                                          cruise=args.cruise, formats=formats, ctd_utc=ctd_utc,
+                                          inv_opts=inv_opts)
                 if export is not None:
                     exports.append(export)
             except (Exception, SystemExit) as e:       # one bad cast must not abort the batch

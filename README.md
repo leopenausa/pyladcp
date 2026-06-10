@@ -62,9 +62,10 @@ res = compute_velocity_full(dh, ctd, drot=-5.4)   # res.vp (.lad), res.bp (.bot)
 ## Status
 
 Validated end-to-end against the MORIA-80 golden: velocity `u` corr 0.998, bottom-track
-profile corr 0.991. Two solvers ship: the default **shear method + reference** (the LDEO_IX
-`ps.shear==1` path) and the full sparse **inverse** (`--solver inverse`, `getinv`/`lain*`)
-with an optional ship-ADCP (SADCP) constraint.
+profile corr 0.991. Two solvers ship: the default full sparse **inverse** (`getinv`/`lain*`,
+bottom-track + GPS-barotropic + optional ship-ADCP constraints, tunable via
+`--botfac`/`--barofac`/`--sadcpfac`) and the **shear method + reference**
+(`--solver shear`, the LDEO_IX `ps.shear==1` path).
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next (single-head/beam-frame robustness,
 release hardening) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the data interfaces.

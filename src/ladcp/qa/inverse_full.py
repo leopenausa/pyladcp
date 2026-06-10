@@ -205,6 +205,21 @@ def _lainsadcp(svel: np.ndarray, nz: int, dz: float, sadcpfac: float, velerr: fl
 # one weighted L2 solve
 # --------------------------------------------------------------------------- #
 @dataclass
+class ConstraintWeights:
+    """Per-constraint accumulated weights of the inverse (legacy Figure 12).
+
+    For each constraint block the column sums ``sum|w|`` over the ocean unknowns
+    (``ocean[name][nz]``, vs depth ``z``) and the reference/CTD unknowns
+    (``ctd[name][nt]``, vs super-ensemble index) — the stacked bars of the legacy
+    "ocean / CTD velocity constraints" panels.
+    """
+
+    z: np.ndarray                       # [nz] ocean-bin depth [m, +down]
+    ocean: dict[str, np.ndarray]        # constraint name -> [nz] sum of |weights|
+    ctd: dict[str, np.ndarray]          # constraint name -> [nt] sum of |weights|
+
+
+@dataclass
 class _Solution:
     uocean: np.ndarray          # complex [nz] ocean velocity (magnetic frame)
     uctd: np.ndarray            # complex [nt] reference (-package) velocity
@@ -219,6 +234,7 @@ class _Solution:
     iens: np.ndarray            # [ndata] super-ensemble index
     ibin: np.ndarray            # [ndata] super-ensemble bin (row) index
     n_sadcp: int = 0            # SADCP constraint rows applied
+    weights: ConstraintWeights | None = None
 
 
 def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
@@ -277,20 +293,22 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
     range_ctd = np.asarray(np.abs(A1).sum(axis=0)).ravel()
 
     blocks_o, blocks_c, rhs_parts = [A2], [A1], [rhs]
+    block_names = ["velocity"]
 
-    def add_block(o_block, c_block, r_vals):
+    def add_block(o_block, c_block, r_vals, name):
         blocks_o.append(o_block)
         blocks_c.append(c_block)
         rhs_parts.append(np.asarray(r_vals, dtype=complex))
+        block_names.append(name)
 
     srows = _lainsmoo(range_ocean, smoofac)
     if srows:
         ob, cb = _smooth_block(srows, nz, nt, on_ocean=True)
-        add_block(ob, cb, np.zeros(len(srows)))
+        add_block(ob, cb, np.zeros(len(srows)), "smoothing")
     crows = _lainsmoo(range_ctd, smoofac)
     if crows:
         ob, cb = _smooth_block(crows, nz, nt, on_ocean=False)
-        add_block(ob, cb, np.zeros(len(crows)))
+        add_block(ob, cb, np.zeros(len(crows)), "smoothing")
 
     # --- bottom-track constraint (legacy lainbott) ----------------------------- #
     n_bt = 0
@@ -306,7 +324,7 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
             btw = (velerr / aux.bvels[idx]) * botfac * np.sqrt(range_ctd[idx])
             n_bt = idx.size
             cb = sp.coo_matrix((btw, (np.arange(n_bt), idx)), shape=(n_bt, nt)).tocsr()
-            add_block(sp.csr_matrix((n_bt, nz)), cb, aux.bvel[idx] * btw)
+            add_block(sp.csr_matrix((n_bt, nz)), cb, aux.bvel[idx] * btw, "bottom track")
 
     # --- barotropic navigation constraint (legacy lainbaro) -------------------- #
     have_baro = barofac > 0 and np.isfinite(aux.uship) and aux.dt_profile > 0
@@ -325,7 +343,8 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
         # uctd is the reference (-package) velocity, so the depth-mean is pinned to -uship
         # (legacy lainbaro RHS is -1*uship). The earlier +uship was silent on station-kept casts
         # (uship~0) but flipped the barotropic by 2*uship on a steaming ship (MORIA-20).
-        add_block(sp.csr_matrix((1, nz)), sp.csr_matrix(crow), [-aux.uship * w * fac])
+        add_block(sp.csr_matrix((1, nz)), sp.csr_matrix(crow), [-aux.uship * w * fac],
+                  "GPS navigation")
 
     # --- ship-ADCP constraint (legacy lainsadcp) ------------------------------- #
     n_sadcp = 0
@@ -335,12 +354,22 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
             n_sadcp = jzs.size
             ob = sp.coo_matrix((ws, (np.arange(n_sadcp), jzs)),
                                shape=(n_sadcp, nz)).tocsr()
-            add_block(ob, sp.csr_matrix((n_sadcp, nt)), rhss)
+            add_block(ob, sp.csr_matrix((n_sadcp, nt)), rhss, "ship ADCP")
 
     # --- zero-mean fallback (legacy lainocean) --------------------------------- #
     if n_bt == 0 and not have_baro and n_sadcp == 0:
         fac = float(np.mean(range_ocean))
-        add_block(sp.csr_matrix(np.ones((1, nz)) * fac), sp.csr_matrix((1, nt)), [0.0])
+        add_block(sp.csr_matrix(np.ones((1, nz)) * fac), sp.csr_matrix((1, nt)), [0.0],
+                  "zero-mean")
+
+    wsum_o: dict[str, np.ndarray] = {}
+    wsum_c: dict[str, np.ndarray] = {}
+    for name, ob, cb in zip(block_names, blocks_o, blocks_c, strict=True):
+        so = np.asarray(np.abs(ob).sum(axis=0)).ravel()
+        sc = np.asarray(np.abs(cb).sum(axis=0)).ravel()
+        wsum_o[name] = wsum_o.get(name, 0.0) + so
+        wsum_c[name] = wsum_c.get(name, 0.0) + sc
+    weights = ConstraintWeights(z=z, ocean=wsum_o, ctd=wsum_c)
 
     G = sp.hstack([sp.vstack(blocks_o), sp.vstack(blocks_c)]).tocsr()
     rhs_full = np.concatenate(rhs_parts)
@@ -352,7 +381,7 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
 
     return _Solution(uocean=uocean, uctd=uctd, velerr=velerr, z=z, nz=nz, nt=nt,
                      n_bt=n_bt, nvel=nvel, d=d, jz=jz, iens=jprof, ibin=ibin,
-                     n_sadcp=n_sadcp)
+                     n_sadcp=n_sadcp, weights=weights)
 
 
 def _ocean_error(sol: _Solution) -> np.ndarray:
@@ -424,7 +453,8 @@ def _surface_fill(u: np.ndarray, v: np.ndarray, uerr: np.ndarray, nvel: np.ndarr
 def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
            zbottom: float = np.nan, weightmin: float = 0.05, smoofac: float = 0.0,
            botfac: float = 1.0, barofac: float = 1.0, outlier: float = 1.0,
-           svel: np.ndarray | None = None, sadcpfac: float = 0.0) -> VelocityProfile:
+           svel: np.ndarray | None = None, sadcpfac: float = 0.0,
+           diag: dict | None = None) -> VelocityProfile:
     """Two-pass constrained inverse (process_cast STEP 11 + STEP 14) -> profile.
 
     Pass 1 uses the super-ensemble-scatter velocity error. Its residuals drive both the
@@ -434,6 +464,9 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
     ``(z, u, v, verr)`` in the **true** frame; it is rotated into the magnetic solve frame
     and added as the ``lainsadcp`` ocean constraint with weight ``sadcpfac``. The ocean
     velocity is rotated magnetic->true by ``drot``.
+
+    ``diag``, if a dict is passed, receives ``weights``: the final pass's
+    :class:`ConstraintWeights` (legacy Figure 12 stacked-bar data).
     """
     if se.ru.shape[1] == 0:                              # no super-ensembles (degenerate cast)
         z = np.arange(1, 2) * dz                         # -> empty NaN profile, not a crash
@@ -462,6 +495,8 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
             reject = rj if reject is None else (reject | rj)
             sol = solve(velerr_override=velerr2, reject=reject)
 
+    if diag is not None:
+        diag["weights"] = sol.weights
     uerr = _ocean_error(sol)
     uerr = np.where(np.isfinite(uerr), uerr, sol.velerr)
     u, v = _uvrot(np.real(sol.uocean), np.imag(sol.uocean), drot)   # magnetic -> true
