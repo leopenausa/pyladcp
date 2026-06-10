@@ -10,6 +10,7 @@ from ladcp.io.sadcp_vmdas import SadcpDataset, save_cache
 from ladcp.plots.sadcp_section import (
     _station_marks,
     along_track_km,
+    depth_mean_anomaly,
     main,
     sadcp_section_figure,
 )
@@ -69,6 +70,35 @@ def test_section_figure_builds(tmp_path, by):
     out = tmp_path / f"sec_{by}.png"
     fig = sadcp_section_figure(ds, by=by, stations=[("ST-01", "2025-10-03T01:00:00")],
                                title="synthetic", savepath=str(out))
+    assert out.exists() and out.stat().st_size > 10_000
+    plt.close(fig)
+
+
+def test_depth_mean_anomaly_removes_barotropic():
+    ds = _synthetic_ds()
+    zmask = np.ones(ds.depth.size, dtype=bool)
+    ua = depth_mean_anomaly(ds.u, zmask)
+    # per-ensemble depth means are ~0 after removal
+    col = np.nanmean(ua, axis=0)
+    assert np.nanmax(np.abs(col)) < 1e-12
+    # the 0.2 m/s barotropic offset is gone, only the 0.02 noise remains
+    assert np.nanstd(ua) < 0.05
+
+
+def test_depth_mean_anomaly_blanks_sparse_columns():
+    ds = _synthetic_ds()
+    u = ds.u.copy()
+    u[3:, 0] = np.nan                                    # 3 finite bins < min 5
+    ua = depth_mean_anomaly(u, np.ones(ds.depth.size, dtype=bool))
+    assert np.all(~np.isfinite(ua[:, 0]))
+    assert np.any(np.isfinite(ua[:, 1]))
+
+
+def test_section_figure_anomaly_builds(tmp_path):
+    import matplotlib.pyplot as plt
+    ds = _synthetic_ds()
+    out = tmp_path / "sec_anom.png"
+    fig = sadcp_section_figure(ds, anomaly=True, title="anom", savepath=str(out))
     assert out.exists() and out.stat().st_size > 10_000
     plt.close(fig)
 
