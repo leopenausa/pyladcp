@@ -97,4 +97,6 @@ ladcp-sadcp-section --sadcp <workdir>/os150nb_sta/contour/os150nb.nc --source co
 
 `--by time|distance` picks the x-axis (ship clock vs along-track distance); `--index`
 draws LADCP station ticks; `--max-depth`/`--clim`/`--start`/`--end` crop and scale.
-`--speed-max` only affects raw VmDAS input.
+`--speed-max` (median-speed blanking, default 1.5 m/s) runs on either source — it
+exists for raw VmDAS GPS leaks but also drops residual bad ensembles in CODAS
+products; `--speed-max 0` disables it.
