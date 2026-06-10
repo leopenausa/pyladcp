@@ -74,6 +74,10 @@ ladcp-compare --ours <out> --legacy <legacy_processed_dir> -o <out>/legacy_compa
 * `--alt-dir DIR --alt-stations a,b --alt-label "botfac=0"` substitutes named
   stations from an alternate run — explicitly labelled in the CSV, profile
   titles and summary page, never silently mixed.
+* `--sadcp <STA dir> --sadcp-timeoff <seconds>` overlays the ship-ADCP profile
+  over each cast window (green) next to the constraint profile the legacy run
+  actually used (olive squares, from `dr.z_sadcp`) — an independent third
+  opinion on the upper ocean.
 
 ## Reference results
 

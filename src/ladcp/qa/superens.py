@@ -61,17 +61,46 @@ def _uvrot(u: np.ndarray, v: np.ndarray, rot_deg: float) -> tuple[np.ndarray, np
     return u * cr - v * sr, u * sr + v * cr
 
 
-def compass_offset(dh: DualHead) -> float:
+_COMPOFF_DECK_TOL = 5.0      # full-record vs in-water disagreement [deg] -> deck corruption
+
+
+def compass_offset(dh: DualHead, window: tuple[int, int] | None = None) -> float:
     """Dual-head compass offset [deg] from heading comparison (legacy ``compoff``).
 
     Bins the cast by down-looker heading (36 bins, +/-5 deg), averages each head's unit
     heading-vector per bin, and returns the angle of the binned cross-product. NaN
     headings fall outside every bin and are excluded automatically.
+
+    ``window`` is the in-water ping span ``(i0, i1)`` when known. The estimate runs
+    over the full record (most heading coverage) and is cross-checked against the
+    in-water-only estimate: when the two disagree by more than ~5 deg the deck
+    segment is corrupting the comparison (the up-looker compass can read garbage on
+    deck -- FDCCC1 t2-02's full-record estimate was 17 deg off, rotating the merged
+    up-looker velocities and putting ~6 cm/s of cross-component error on the cast)
+    and the in-water value -- the span the solution actually uses -- wins.
     """
+    full = _compass_offset_span(dh, None)
+    if not np.isfinite(full):
+        full = 0.0                                  # legacy compoff fallback
+    if window is None:
+        return full
+    inw = _compass_offset_span(dh, window)
+    if not np.isfinite(inw):
+        return full
+    diff = abs((inw - full + 180.0) % 360.0 - 180.0)
+    return inw if diff > _COMPOFF_DECK_TOL else full
+
+
+def _compass_offset_span(dh: DualHead, window: tuple[int, int] | None) -> float:
     hd = np.asarray(dh.down.heading, dtype=float)
     hu = np.asarray(dh.up.heading, dtype=float)
     n = min(hd.size, hu.size)
     hd, hu = hd[:n], hu[:n]
+    if window is not None:
+        i0, i1 = max(0, window[0]), min(n - 1, window[1])
+        if i1 - i0 < 10:
+            return float("nan")
+        hd, hu = hd[i0:i1 + 1], hu[i0:i1 + 1]
 
     u1 = np.exp(-1j * np.radians(hd))            # down unit heading-vector
     u2 = np.exp(-1j * np.radians(hu))            # up   unit heading-vector
@@ -90,7 +119,7 @@ def compass_offset(dh: DualHead) -> float:
             u2a[i] = u2[ii].mean()
     ii = np.where(np.isfinite(u1a + u2a))[0]
     if ii.size == 0:
-        return 0.0
+        return float("nan")
     # MATLAB mrdivide of two row vectors: scalar least-squares u1a/u2a
     num = np.sum(u1a[ii] * np.conj(u2a[ii]))
     den = np.sum(np.abs(u2a[ii]) ** 2)
@@ -211,7 +240,7 @@ class MergedHeads:
 
 
 def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
-                params=None) -> MergedHeads:
+                params=None, window: tuple[int, int] | None = None) -> MergedHeads:
     """Stack + rotate the two heads into the down-looker frame (loadrdi + prepinv STEP 10).
 
     Earth-frame data only (no beam transform). The up-looker (u, v) is rotated to the down
@@ -227,7 +256,8 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
     """
     d, u = dh.down, dh.up
     single = u is None
-    hoff = 0.0 if single else (compass_offset(dh) if rot_deg is None else rot_deg)
+    hoff = 0.0 if single else (compass_offset(dh, window=window)
+                               if rot_deg is None else rot_deg)
     n = d.n_ens if single else min(d.n_ens, u.n_ens)   # joint ensembles (shift 0)
     sr = screen(dh, params)
 

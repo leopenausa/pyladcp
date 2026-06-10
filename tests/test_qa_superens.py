@@ -130,3 +130,42 @@ def test_superens_velocities_sensible(merged, dh_sync):
     assert np.nanmax(np.abs(se.ru[fin])) < 3.0      # ocean+package speeds, m/s
     # scatter is floored at the single-ping accuracy
     assert np.nanmin(se.ruvs) >= merged.std_min - 1e-9
+
+
+# --- compass_offset: in-water window vs deck corruption (FDCCC1 t2-02) ---------------
+def _heads(hd, hu):
+    from types import SimpleNamespace
+    return SimpleNamespace(down=SimpleNamespace(heading=hd),
+                           up=SimpleNamespace(heading=hu))
+
+
+def test_compass_offset_clean_record_uses_full():
+    import numpy as np
+
+    from ladcp.qa.superens import compass_offset
+    rng = np.random.default_rng(1)
+    hd = rng.uniform(0, 360, 4000)
+    hu = (hd - 168.0) % 360.0                      # constant true offset
+    dh = _heads(hd, hu)
+    full = compass_offset(dh)
+    windowed = compass_offset(dh, window=(1000, 3000))
+    assert full == pytest.approx(-168.0, abs=0.5)
+    assert windowed == full                        # agreement -> full-record kept
+
+
+def test_compass_offset_deck_garbage_falls_back_to_inwater():
+    import numpy as np
+
+    from ladcp.qa.superens import compass_offset
+    rng = np.random.default_rng(2)
+    hd = rng.uniform(0, 360, 4000)
+    hu = (hd - 168.0) % 360.0
+    # on deck the package lies differently, so the up-looker compass tracks the
+    # down heading at the WRONG relative angle -- correlated corruption that
+    # drags the binned cross-product (the FDCCC1 t2-02 signature: 17 deg off)
+    hu[:1500] = (hd[:1500] - 30.0) % 360.0
+    dh = _heads(hd, hu)
+    full = compass_offset(dh)
+    windowed = compass_offset(dh, window=(1500, 3999))
+    assert abs(full + 168.0) > 5.0                 # deck segment corrupts the full estimate
+    assert windowed == pytest.approx(-168.0, abs=0.5)

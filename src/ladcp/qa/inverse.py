@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..models import CTDTimeSeries
-from .depth import synchronize
+from .depth import synchronize, water_window
 from .ingest import DualHead
 from .superens import SuperEns, _uvrot, form_superensembles, merge_heads
 
@@ -322,7 +322,8 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
 
     sync = synchronize(dh, ctd)
     bottom = detect_bottom(dh, sync, ctd=ctd)
-    merged = merge_heads(dh, params=params)
+    merged = merge_heads(dh, params=params,
+                         window=water_window(sync.z_on_ping))
     bt = bottom_track_velocity(
         dh, merged,
         btrk_mode=getattr(params, "btrk_mode", 3) if params is not None else 3)
