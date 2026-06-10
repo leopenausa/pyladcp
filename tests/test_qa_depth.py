@@ -77,3 +77,73 @@ def test_sync_correlation(sync):
 def test_maxdepth_matches_golden(sync):
     golden = load_p_struct(str(MAT))
     assert sync.maxdepth == pytest.approx(golden["maxdepth"], abs=1.0)
+
+
+# --- water_window: deep-segment semantics (FDCCC1 t99-03 / t1-01) --------------------
+def test_water_window_normal_cast_unchanged():
+    import numpy as np
+
+    from ladcp.qa.depth import water_window
+    z = np.concatenate([np.linspace(0, 500, 100), np.linspace(500, 0, 100)])
+    i0, i1 = water_window(z)
+    assert z[i0 - 1] <= 10.0 < z[i0] and z[i1 + 1] <= 10.0 < z[i1]
+
+
+def test_water_window_excludes_pre_cast_soak():
+    import numpy as np
+
+    from ladcp.qa.depth import water_window
+    # 200-ping soak at 12-15 m, a 90-ping near-surface gap, then the real cast
+    soak = np.full(200, 13.0)
+    gap = np.full(90, 6.0)
+    cast = np.concatenate([np.linspace(6, 400, 150), np.linspace(400, 6, 150)])
+    z = np.concatenate([soak, gap, cast])
+    i0, i1 = water_window(z)
+    assert i0 >= 290                                  # the soak + gap are excluded
+    assert z[i0] > 10.0
+
+
+def test_water_window_bridges_threshold_flicker():
+    import numpy as np
+
+    from ladcp.qa.depth import water_window
+    # the package hangs right at the threshold near the end (t1-01): single-ping
+    # dips to 10.0 must not cut the window short
+    cast = np.concatenate([np.linspace(8, 120, 80), np.linspace(120, 11, 80)])
+    hover = np.full(120, 10.4)
+    hover[::7] = 10.0                                 # flicker below the threshold
+    z = np.concatenate([cast, hover])
+    i0, i1 = water_window(z)
+    assert i1 >= z.size - 8                           # hover retained
+
+
+def test_extend_z_by_w_fills_truncated_ctd_tail():
+    import numpy as np
+
+    from ladcp.qa.depth import _extend_z_by_w
+    # CTD record stops mid-ascent (FDCCC1 t1-01); ADCP w keeps going
+    tad = np.arange(300, dtype=float)
+    z = np.full(300, np.nan)
+    z[:200] = np.concatenate([np.linspace(5, 100, 100), np.linspace(100, 52, 100)])
+    w_true = np.gradient(z[:200], tad[:200])          # dz/dt over the known part
+    w_ad = np.full(300, np.nan)
+    w_ad[:200] = w_true
+    w_ad[200:] = -0.48                                # keeps ascending at ~0.5 m/s
+    out = _extend_z_by_w(z, w_ad, tad)
+    assert np.isfinite(out[200:300]).sum() > 80       # tail filled...
+    assert out[250] == pytest.approx(52 - 0.48 * 51, abs=2.0)
+    fin = np.where(np.isfinite(out))[0]
+    assert (out[fin] >= 2.0 - 1e-9).all()             # ...and stops at the surface
+
+
+def test_extend_z_by_w_skips_when_sign_uncertain():
+    import numpy as np
+
+    from ladcp.qa.depth import _extend_z_by_w
+    tad = np.arange(100, dtype=float)
+    z = np.full(100, np.nan)
+    z[:50] = np.linspace(5, 50, 50)
+    rng = np.random.default_rng(0)
+    w_ad = rng.normal(0, 0.1, 100)                    # uncorrelated noise -> no sign
+    out = _extend_z_by_w(z, w_ad, tad)
+    assert not np.isfinite(out[50:]).any()

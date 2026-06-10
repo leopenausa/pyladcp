@@ -70,10 +70,21 @@ ladcp-compare --ours <out> --legacy <legacy_processed_dir> -o <out>/legacy_compa
   `unpaired.txt`, never silently dropped.
 * Emits `comparison.csv` (corr/rms/bias for u, v, bottom track; barotropic
   offsets; depth coverage) and `comparison_report.pdf` (summary page + per-
-  station u/v profile overlays).
+  station u/v profile overlays with ±1σ solution-uncertainty bands).
+* `--alt-dir DIR --alt-stations a,b --alt-label "botfac=0"` substitutes named
+  stations from an alternate run — explicitly labelled in the CSV, profile
+  titles and summary page, never silently mixed.
 
 ## Reference results
 
 | cruise | stations | median u rms vs legacy | notes |
 |--------|----------|------------------------|-------|
-| FDCCC1 | 30/31    | 1.5 cm/s (corr 0.97)   | 31st has no CTD raw; 2 shallow casts need `--botfac 0` (bad near-bottom BT); 3 strong-flow shelf casts carry a ~5 cm/s reference offset (open) |
+| FDCCC1 | 30/31    | ~1.4 cm/s (corr 0.97)  | 31st has no CTD raw; 2 shallow casts reported with `--botfac 0` (bad near-bottom firmware BT samples, labelled in the report) |
+
+Three FDCCC1-discovered fixes are now defaults: the bottom track prefers the
+RDI firmware track when the PD0 carries one (legacy `btrk_mode=3`; the own
+water-track BT inherits boundary-layer flow and biased strong-drift casts by
+~10–15 % of the current), the in-water window is the deep segment containing
+the deepest ping (pre-cast surface soaks no longer leak drift into the
+barotropic reference), and package depth is W-integrated past the end of a
+prematurely-stopped CTD record.

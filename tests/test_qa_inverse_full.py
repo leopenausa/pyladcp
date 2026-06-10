@@ -102,12 +102,17 @@ def test_inverse_grid_stops_at_seabed(both_solvers):
 def test_shear_path_unchanged(both_solvers):
     # The solver switch itself does not perturb the shear shape (corr stays ~0.998). The absolute
     # rms reflects the velocity-path editing fix set now applied before averaging
-    # (units/floor/refmed/btgate/outlier_n): MORIA-80 shear rms ~0.031 (bias-dominated) while the
+    # (units/floor/refmed/btgate/outlier_n): MORIA-80 shear rms is bias-dominated while the
     # profile shape is unchanged. See memory ladcp-editing-rootcause-2026-06.
+    # 2026-06-10 (FDCCC1 reference-offset root-cause): the bottom track now prefers the RDI
+    # firmware track when the PD0 carries one -- legacy btrk_mode=3 semantics (legacy used it
+    # on MORIA too, btrk_used=1). MORIA-80's RDI and own tracks differ ~1 cm/s, moving the
+    # BT-referenced shear bias 0.031 -> 0.0397; the inverse (the product path) is golden-
+    # validated unchanged by the tighter tests above.
     out, _ = both_solvers
     _, s = out["shear"]
     assert s["u"].corr > 0.997
-    assert s["u"].rms < 0.035
+    assert s["u"].rms < 0.045
 
 
 def test_lainsadcp_weight_math():
