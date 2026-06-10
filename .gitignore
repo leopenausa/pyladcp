@@ -51,3 +51,8 @@ guide/
 *.zip
 *.mat
 !tests/fixtures/**/*.mat
+
+# raw cruise test datasets dropped into the workspace (never committed)
+CCC_ladcp_test/
+quick_run.log
+wetransfer_*/

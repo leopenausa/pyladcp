@@ -154,11 +154,21 @@ def _arr(obj, field: str) -> np.ndarray:
 @lru_cache(maxsize=8)
 def load_dr(station: str) -> DrTargets:
     """Load the golden ``dr`` velocity targets for ``station`` from its ``.mat``."""
+    return load_dr_mat(STATIONS[station].mat, station)
+
+
+def load_dr_mat(path: str | Path, name: str = "") -> DrTargets:
+    """Load ``dr`` velocity targets from any legacy LDEO result ``.mat``.
+
+    The registry-free entry point: :func:`load_dr` serves the golden-ladder
+    stations; this serves arbitrary legacy cruise products (e.g. a whole
+    ``LADCP_processed/`` directory being compared by ``ladcp-compare``).
+    """
     import scipy.io as sio
 
-    st = STATIONS[station]
-    dr = sio.loadmat(str(st.mat), squeeze_me=True, struct_as_record=False,
+    dr = sio.loadmat(str(path), squeeze_me=True, struct_as_record=False,
                      variable_names=["dr"])["dr"]
+    station = name or Path(path).stem
 
     def scalar(f: str) -> float:
         return float(getattr(dr, f)) if f in dr._fieldnames else float("nan")

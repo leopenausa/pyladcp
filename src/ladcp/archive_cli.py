@@ -54,7 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     b = sub.add_parser("build", help="scan the archive and (re)write the index")
-    b.add_argument("--ladcp", required=True, help="LADCP archive dir (holds MASTER/ + SLAVE/)")
+    b.add_argument("--ladcp", required=True,
+                   help="LADCP archive dir: MASTER/ + SLAVE/ subdirs when present, else "
+                        "all *.000 in the tree (heads classified by name or PD0 facing bit)")
     b.add_argument("--ctd", required=True, help="dir of Seabird CTD .hex/.hdr files (anchor)")
     b.add_argument("--master-subdir", default="MASTER")
     b.add_argument("--slave-subdir", default="SLAVE")

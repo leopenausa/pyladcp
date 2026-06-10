@@ -197,7 +197,10 @@ def ingest_dir(folder: str | Path, *, file_type: str = "STA",
     if not times:
         raise ValueError(f"no ensembles parsed from {folder}")
     time = np.concatenate(times)
-    order = np.argsort(time)
+    # an acquisition folder can hold the same ensembles twice (e.g. a compiled
+    # whole-cruise STA next to the per-deployment files it was built from, as on
+    # FDCCC1) -- identical timestamps are the same ping average, keep one
+    _, order = np.unique(time, return_index=True)   # time-sorted, first occurrence wins
     return SadcpDataset(
         time=time[order],
         lat=np.concatenate(lats)[order],

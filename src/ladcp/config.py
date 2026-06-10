@@ -155,6 +155,35 @@ def moria05_params() -> CastParams:
 # Header-derived geometry is applied separately by ``ingest.apply_header_config`` once the
 # PD0 files are open; CLI/`overrides` (e.g. an operator-supplied ``drot``) win last.
 
+def _generic_params(station: str, cruise_id: str) -> CastParams:
+    """Operator-community defaults for a cruise without a dedicated preset.
+
+    These are the ``set_cast_params.m`` values shared verbatim by every cruise
+    seen so far (MORIA, FDCCC1): dual-head, bin-1 masked both heads, dz=8,
+    cut=7, pglim=50, elim=0.2, vlim=1, wlim=0.08, tilt 22/4, btrk_mode=3.
+    Cruise-specific layers (e.g. MORIA's monocorer near-field mask) belong in
+    a dedicated preset; nothing cruise-specific is applied here.
+    """
+    return CastParams(
+        station=station,
+        cruise_id=cruise_id,
+        up_dn_looker=1,
+        dz=8.0,
+        edit_mask_dn_bins=(1,),
+        edit_mask_up_bins=(1,),
+        cut=7.0,
+        pglim=50.0,
+        elim=0.2,
+        vlim=1.0,
+        wlim=0.08,
+        tiltmax=(22.0, 4.0),
+        btrk_mode=3,
+        timoff=0.0,
+        drot=None,            # IGRF-computed from the cast position
+        getdepth=2,
+    )
+
+
 CRUISES: dict[str, Callable[[str], CastParams]] = {  # cruise_id -> base-params factory
     "MORIA": _moria_params,
 }
@@ -173,11 +202,16 @@ def resolve_params(
     (CLI flags such as an explicit ``drot``) are applied last. Instrument geometry is *not*
     set here -- it is reconciled from the PD0 headers by ``ingest.apply_header_config`` once
     the files are open, so geometry always reflects the actual data.
+
+    A cruise without a registered preset resolves to :func:`_generic_params` with its
+    name stamped as ``cruise_id`` -- so a new cruise processes (and labels its exports)
+    correctly out of the box, and a preset is only needed for cruise-specific layers.
     """
     key = cruise.upper()
-    if key not in CRUISES:
-        raise KeyError(f"unknown cruise {cruise!r}; known: {sorted(CRUISES)}")
-    params = CRUISES[key](station)
+    if key in CRUISES:
+        params = CRUISES[key](station)
+    else:
+        params = _generic_params(station, key)
     for name, value in (overrides or {}).items():
         if not hasattr(params, name):
             raise AttributeError(f"CastParams has no field {name!r}")

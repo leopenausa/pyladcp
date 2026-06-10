@@ -158,6 +158,17 @@ def test_ingest_adds_ship_velocity_to_get_absolute(tmp_path):
     np.testing.assert_allclose(np.nanmean(ds.v), -0.20, atol=2e-3)
 
 
+def test_ingest_dedups_compiled_plus_parts(tmp_path):
+    # a compiled whole-cruise STA next to the per-deployment files it was built
+    # from (FDCCC1) repeats every ensemble -- identical timestamps must collapse
+    import shutil
+    _write_sta(tmp_path / "part.STA")
+    shutil.copy(tmp_path / "part.STA", tmp_path / "compiled.STA")
+    ds = ingest_dir(tmp_path, file_type="STA", transducer_depth=XDUCER)
+    assert ds.n_ens == 3                                # not 6
+    assert np.unique(ds.time).size == ds.n_ens
+
+
 def test_extract_profile_window_and_average(tmp_path):
     f = tmp_path / "syn.STA"
     t0, t1 = _write_sta(f, ship_east=1.0)

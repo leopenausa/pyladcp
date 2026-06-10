@@ -96,6 +96,19 @@ def test_match_master_picks_cast_over_stub_starting_nearer():
     assert rel == "cast" and prov == "ctd-utc-nearest-cast-start"
 
 
+def test_match_master_earliest_cast_wins_on_back_to_back_stations():
+    # the FDCCC1 t3-01..03 pattern: consecutive ~1 h shelf stations all start inside
+    # the 2 h tolerance of the previous anchor -- the *first* genuine cast after the
+    # on-station time belongs to this station, even when a later one is bigger.
+    utc = np.datetime64("2022-03-04T02:16:45")
+    spans = {
+        "MA015": _span("2022-03-04T02:17:29", "2022-03-04T02:48:53", n=1813),
+        "MA016": _span("2022-03-04T03:12:03", "2022-03-04T04:18:34", n=3839),  # bigger, later
+    }
+    rel, prov = A._match_master(utc, spans)
+    assert rel == "MA015" and prov == "ctd-utc-nearest-cast-start"
+
+
 def test_match_master_shallow_single_cast_still_resolves():
     # a genuinely small (shallow-shelf) cast that contains the utc must still match even
     # though it is below the stub threshold -- the size-blind safety net handles it.
@@ -136,6 +149,43 @@ def test_index_station_roundtrip():
     e = A.index_station(idx, "MORIA-80")
     assert e is not None and e.master == "m" and e.slave == "s"
     assert A.index_station(idx, "MORIA-99") is None
+
+
+# --- flat-layout build (no MASTER/SLAVE subdirs) -------------------------------------
+_FIX_LADCP = _REPO / "tests" / "fixtures" / "New_golden" / "Good" / "LADCP"
+
+
+def test_build_index_flat_layout_classifies_by_facing(tmp_path):
+    # one dir, opaque names with no master/slave signal -> the PD0 facing bit
+    # must classify the heads and the pairing must still work
+    import shutil
+    flat = tmp_path / "LADCP"
+    flat.mkdir()
+    shutil.copy(_FIX_LADCP / "MORIA-80-LADCP-M.000", flat / "AAA0.000")
+    shutil.copy(_FIX_LADCP / "MORIA-80-LADCP-S.000", flat / "BBB0.000")
+    from ladcp.io.pd0 import read_pd0
+    r = read_pd0(str(flat / "AAA0.000"), head="down", facing_hint="down")
+    utc = str(r.time[min(10, r.n_ens - 1)].astype("datetime64[s]"))
+
+    ctd = tmp_path / "CTD"
+    ctd.mkdir()
+    (ctd / "tx-01.hex").write_text(
+        "* Sea-Bird SBE 9 Data File:\n"
+        f"* NMEA UTC (Time) = "
+        f"{np.datetime64(utc).item().strftime('%b %d %Y %H:%M:%S')}\n"
+        "* NMEA Latitude = 62 09.68 N\n"
+        "* NMEA Longitude = 011 31.85 W\n"
+        "** Station: TX-01\n"
+        "*END*\n")
+
+    idx = A.build_index(flat, ctd, root=tmp_path, out=tmp_path / "idx.json")
+    casts = idx["casts"]
+    assert set(casts) == {"tx-01"}
+    assert casts["tx-01"]["master"].endswith("AAA0.000")
+    assert casts["tx-01"]["slave"].endswith("BBB0.000")
+    facings = {pathlib.Path(rel).name: e["facing"]
+               for rel, e in idx["scan_cache"].items()}
+    assert facings == {"AAA0.000": "down", "BBB0.000": "up"}
 
 
 # --- end-to-end build over the real archive -----------------------------------------

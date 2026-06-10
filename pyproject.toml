@@ -48,6 +48,7 @@ Issues = "https://github.com/leopenausa/pyladcp/issues"
 ladcp-qa = "ladcp.qa.cli:main"
 ladcp-index = "ladcp.archive_cli:main"
 ladcp-sadcp-section = "ladcp.plots.sadcp_section:main"
+ladcp-compare = "ladcp.qa.compare:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
