@@ -27,7 +27,7 @@ from .ingest import DualHead
 from .screen import tilt_series
 
 _BATTERY_FACTOR = 0.33          # legacy default guess (unknown CPU board)
-_BATTERY_LOW, _BATTERY_CRIT = 40.0, 37.0
+_BATTERY_LOW = 40.0
 
 
 @dataclass
@@ -97,17 +97,21 @@ def attitude_summary(dh: DualHead) -> AttitudeSummary:
 
 
 def attitude_metrics(a: AttitudeSummary) -> list[Metric]:
-    bat_status = (Status.OK if a.battery_v > _BATTERY_LOW
-                  else Status.WARN if a.battery_v > _BATTERY_CRIT else Status.FAIL)
+    # WARN at most: the V estimate is 0.33*xmv with a board-dependent factor legacy
+    # battery.m only guesses at, and pack nominal voltage varies by cruise -- a low
+    # *estimate* is an engineering heads-up, not grounds to FAIL an otherwise good cast
+    # (it failed 17/40 MORIA stations whose data were fine).
+    bat_status = Status.OK if a.battery_v > _BATTERY_LOW else Status.WARN
     tilt_status = Status.OK if a.tilt_pct_over < 1 else Status.WARN
     out = [
         Metric("tilt_max", round(a.tilt_max, 2), "deg", tilt_status,
                source_stage="qa.attitude",
                note=f"mean {a.tilt_mean:.1f} deg, {a.tilt_pct_over:.1f}% over limit"),
         Metric("battery", round(a.battery_v, 1), "V", bat_status,
-               threshold={"low": _BATTERY_LOW, "critical": _BATTERY_CRIT},
+               threshold={"low": _BATTERY_LOW},
                source_stage="qa.attitude",
-               note="0.33*median(xmv) (matches golden p.xmv to 0.02 V)"),
+               note="0.33*median(xmv) (matches golden p.xmv to 0.02 V); conversion "
+                    "factor is board-dependent, so this can WARN but never FAIL"),
         Metric("heading_rotation", round(a.heading_span, 0), "deg", Status.OK,
                source_stage="qa.attitude"),
     ]
