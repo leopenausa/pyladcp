@@ -21,6 +21,13 @@ A condensed record of how the package evolved. Full detail lives in git history.
   inverse (`getinv`/`lain*`) as `--solver inverse` alongside the shear solve, with bottom-track
   and barotropic-nav constraints and an optional VmDAS ship-ADCP (`lainsadcp`) constraint.
   Validated on MORIA 79/80/82: SADCP vs LADCP-inverse agree 0.015–0.05 m/s over the upper 300 m.
+- **Inverse becomes the default solver (2026-06-10).** After the trust audit showed
+  shear ≈ inverse to 1–2 cm/s cruise-wide and the inverse matched golden MORIA-80 at
+  0.999, `--solver inverse` became the default. The constraint weights were exposed
+  (`--botfac`/`--barofac`/`--smoofac`, joining `--sadcpfac`) and the legacy Figure 12
+  constraint-weights plot added to the report. The battery metric was capped at WARN
+  (the 0.33×xmv conversion is board-dependent; it had FAILed 17/40 healthy MORIA casts),
+  and a `--down-only` solve path added (single-head `merge_heads`, down-bin reference).
 - **Magnetic declination finding.** Our IGRF-13 (`ppigrf`) declination is correct; the
   golden `p.drot = -9.878°` is a legacy IGRF-2000 + hardcoded-fudge bug (~4.4° off). The
   product default is per-station IGRF-13; `--drot` reproduces the golden for validation.
