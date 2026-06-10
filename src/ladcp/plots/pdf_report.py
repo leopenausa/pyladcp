@@ -12,6 +12,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import numpy as np
+
 from ..models import CTDTimeSeries, QCMetrics, Status
 from ..qa.ingest import DualHead
 from ..qa.inverse import VelocityResult
@@ -21,7 +23,7 @@ from .depth_figure import depth_figure
 from .drift_figure import drift_figure
 from .edit_figure import edit_figure
 from .error_figure import error_figure
-from .inverse_figure import inverse_diagnostics_figure
+from .inverse_figure import constraint_weights_figure, inverse_diagnostics_figure
 from .raw_dashboard import raw_dashboard
 from .sadcp_figure import sadcp_figure, sadcp_rms_discrepancy
 from .shear_figure import shear_figure
@@ -81,6 +83,10 @@ def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,
         pages.append((lambda f: inverse_diagnostics_figure(v, fig=f),
                       f"{station}_inverse.png",
                       "Figure 12 — Inversion diagnostics", _caption_inverse(v)))
+        if v.weights is not None:
+            pages.append((lambda f: constraint_weights_figure(v.weights, fig=f),
+                          f"{station}_weights.png",
+                          "Figure 12b — Inverse constraint weights", _caption_weights(v)))
         if v.err is not None:
             pages.append((lambda f: error_figure(v, fig=f), f"{station}_error.png",
                           "Figure 3 — Super-ensemble error", _caption_error(v)))
@@ -133,6 +139,10 @@ def _save_pngs(dh, ctd, velocity, out, station, paths):
         emit(inverse_diagnostics_figure(v, station=station,
                                         savepath=str(out / f"{station}_inverse.png")),
              f"{station}_inverse.png")
+        if v.weights is not None:
+            emit(constraint_weights_figure(v.weights, station=station,
+                                           savepath=str(out / f"{station}_weights.png")),
+                 f"{station}_weights.png")
         if v.err is not None:
             emit(error_figure(v, station=station,
                               savepath=str(out / f"{station}_error.png")),
@@ -339,7 +349,8 @@ def _caption_shear(v: VelocityResult):
 def _caption_inverse(v: VelocityResult):
     return (
         "What this shows and what to expect:\n"
-        "Diagnostics for the reduced shear + reference solution (ps.shear = 1).\n"
+        "Solution diagnostics: the velocity decomposition and how well one shared "
+        "baroclinic profile explains the data.\n"
         "• Left: the decomposition — dashed = baroclinic shape, solid = absolute solution; "
         "the gap between them is the barotropic reference that the bottom track pins.\n"
         f"• Middle: per-cell fit residual (data minus the shared shear profile), rms "
@@ -347,6 +358,23 @@ def _caption_inverse(v: VelocityResult):
         "trend.\n"
         "• Right: the residual distribution — a tight, zero-centred peak means the single "
         "baroclinic profile explains the super-ensembles well.")
+
+
+def _caption_weights(v: VelocityResult):
+    w = v.weights
+    n_bt = int(np.sum(w.ctd.get("bottom track", np.zeros(1)) > 0)) if w else 0
+    n_sad = int(np.sum(w.ocean.get("ship ADCP", np.zeros(1)) > 0)) if w else 0
+    return (
+        "What this shows and what to expect:\n"
+        "Accumulated constraint weights of the full inverse (legacy Figure 12) — how "
+        "strongly each information source pins the solution. Tune with --botfac / "
+        "--sadcpfac / --barofac.\n"
+        "• Top: ocean velocity unknowns vs depth. Blue (data) should dominate everywhere; "
+        f"ship-ADCP rows ({n_sad} bins) add weight near the surface, smoothing only fills "
+        "ill-constrained bins.\n"
+        "• Bottom: reference/CTD unknowns vs super-ensemble. Bottom-track bars "
+        f"({n_bt} super-ensembles) concentrate near the seabed approach; the GPS "
+        "barotropic row spreads over all super-ensembles.")
 
 
 def _caption_error(v: VelocityResult):

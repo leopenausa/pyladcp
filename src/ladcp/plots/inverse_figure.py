@@ -1,13 +1,14 @@
-"""Inversion-diagnostics figure — modern equivalent of LDEO_IX Figure 12.
+"""Inversion-diagnostics figures (LDEO_IX Figure 12).
 
-Legacy Figure 12 plots the constraint weights of the full sparse inverse. We use the
-reduced shear + reference solution (``ps.shear==1``), so the honest diagnostics are:
+Two figures share this module:
 
-  * the **decomposition** — baroclinic shear shape vs the absolute solution after the
-    barotropic (depth-mean) reference is added;
-  * the **fit residual** — how well the shared baroclinic profile explains each
-    super-ensemble cell (data minus shear fit), versus depth;
-  * the **residual distribution** — should be tight and centred on zero.
+* :func:`inverse_diagnostics_figure` — solver-agnostic solution diagnostics:
+  the **decomposition** (baroclinic shape vs absolute solution), the **fit residual**
+  (data minus the shared baroclinic profile, vs depth), and the **residual
+  distribution** (should be tight and centred on zero).
+* :func:`constraint_weights_figure` — the literal legacy Figure 12: per-constraint
+  accumulated weights of the full inverse (data / smoothing / bottom track /
+  ship ADCP / GPS), stacked over the ocean bins and the CTD super-ensembles.
 """
 
 from __future__ import annotations
@@ -64,6 +65,61 @@ def inverse_diagnostics_figure(r: VelocityResult, *, station: str = "",
 
     if own:
         fig.suptitle(f"{station} — inversion diagnostics", fontsize=12)
+    if savepath:
+        fig.savefig(savepath, dpi=200)
+    return fig
+
+
+# stable colour per constraint (legacy Figure 12 palette order)
+_CONSTRAINT_COLORS = {
+    "velocity": "#1f77b4",
+    "smoothing": "#d62728",
+    "bottom track": "#e8b33a",
+    "ship ADCP": "#7b2d8b",
+    "GPS navigation": "#2ca02c",
+    "zero-mean": "#7f7f7f",
+}
+
+
+def constraint_weights_figure(w, *, station: str = "", fig=None,
+                              savepath: str | None = None):
+    """Constraint-weights stacked bars (legacy LDEO_IX Figure 12, full inverse only).
+
+    Top: per-ocean-bin accumulated weight ``sum|w|`` vs depth — how strongly each
+    constraint (data, smoothing, bottom track, ship ADCP, GPS) pins the ocean velocity.
+    Bottom: the same over the reference/CTD unknowns vs super-ensemble index. ``w`` is the
+    :class:`~ladcp.qa.inverse_full.ConstraintWeights` carried on a ``VelocityResult``.
+    """
+    import matplotlib.pyplot as plt
+
+    own = fig is None
+    if fig is None:
+        fig = plt.figure(figsize=(9, 8), constrained_layout=True)
+    ax_o, ax_c = fig.subplots(2, 1)
+
+    def stacked(ax, x, sums: dict, width):
+        bottom = np.zeros_like(x, dtype=float)
+        for name, vals in sums.items():
+            vals = np.asarray(vals, dtype=float)
+            if not np.any(vals > 0):
+                continue
+            ax.bar(x, vals, width=width, bottom=bottom, label=name,
+                   color=_CONSTRAINT_COLORS.get(name, "0.5"))
+            bottom += vals
+        ax.legend(fontsize=8)
+
+    dz = float(np.median(np.diff(w.z))) if w.z.size > 1 else 8.0
+    stacked(ax_o, w.z, w.ocean, width=0.9 * dz)
+    ax_o.set(xlabel="depth [m]", ylabel="sum of weights")
+    ax_o.set_title("ocean velocity constraints", fontsize=9)
+
+    nt = next(iter(w.ctd.values())).size if w.ctd else 0
+    stacked(ax_c, np.arange(1, nt + 1), w.ctd, width=0.9)
+    ax_c.set(xlabel="super ensemble", ylabel="sum of weights")
+    ax_c.set_title("CTD velocity constraints", fontsize=9)
+
+    if own:
+        fig.suptitle(f"{station} — inverse constraint weights", fontsize=12)
     if savepath:
         fig.savefig(savepath, dpi=200)
     return fig
