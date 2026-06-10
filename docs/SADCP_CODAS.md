@@ -29,14 +29,20 @@ position by 682 ensembles and silently poisoned all absolute velocities (the wat
 cal *still looked fine*; only checking positions against a known cast caught it);
 (3) writes the control file; (4) runs `quick_adcp.py --auto`.
 
-**Single-ping route** (best product): `scripts/codas_moria_os150_enr.sh` processes the
-raw beam pings (`.ENR` + `.N1R`/`.N2R` NMEA) through the full UHDAS chain — per-ping
-editing *before* averaging, beam→earth with gyro heading + attitude correction, and a
-working bottom-track cal. On MORIA it lowered the apparent amplitude error from +2.1%
-(STA) to +0.9%. It needs three MORIA-earned workarounds, already in the script: prefix
-staged copies per *deployment* (ENR and N?R parts roll at different moments — never per
-file part), match nav to ping blocks by *ping number* (the VmDAS PC clock drifts 0–13 s
-against GPS), and `--update_gbin`.
+**Single-ping route** (best product — use it for sections/underway work): the STA
+averages are formed onboard from raw *unedited* pings, so underway the bins beyond the
+bubble/noise-limited range are garbage that survives CODAS's average-level editing
+(they keep pg ≥ 50) — on MORIA, deep (>300 m) underway cells had rms u 0.68 m/s in the
+STA product vs 0.13 m/s after per-ping editing (on station both routes are clean).
+`scripts/codas_moria_os150_enr.sh` processes the raw beam pings (`.ENR` +
+`.N1R`/`.N2R` NMEA) through the full UHDAS chain — per-ping editing *before*
+averaging, beam→earth with gyro heading + attitude correction, and a working
+bottom-track cal; it also lowered the apparent amplitude error from +2.1% (STA) to
++0.9%. Env overrides serve other instruments (see the script header; `ENR_GYRO_NR`
+handles swapped serial feeds like MORIA's OS75). Its three workarounds are already in
+the script: prefix staged copies per *deployment* (ENR and N?R parts roll at different
+moments — never per file part), match nav to ping blocks by *ping number* (the VmDAS
+PC clock drifts 0–13 s against GPS), and `--update_gbin`.
 
 Control-file parameters that matter (`q_py.cnt`):
 
