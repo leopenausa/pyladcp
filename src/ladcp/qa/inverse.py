@@ -339,11 +339,15 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     # series) to that joint length so super-ensembles see matching arrays when the two heads
     # logged unequal counts (e.g. the fragmented MORIA-01..04 casts). No-op when equal.
     zop = sync.z_on_ping[:merged.ru.shape[1]]
+    # near-field device mask (e.g. MORIA monocorer) joins the ringing-bin mask
+    mask_dn = (tuple(getattr(params, "edit_mask_dn_bins", (1,)))
+               + tuple(getattr(params, "edit_nearfield_dn_bins", ()))) if params is not None \
+        else (1,)
     se = form_superensembles(
         merged, zop, avdz=dz, zbottom=bottom.zbottom,
         dzbelow=getattr(params, "dzbelow", 16.0) if params is not None else 16.0,
         edit_sidelobes=getattr(params, "edit_sidelobes", True) if params is not None else True,
-        mask_dn_bins=getattr(params, "edit_mask_dn_bins", (1,)) if params is not None else (1,),
+        mask_dn_bins=mask_dn,
         mask_up_bins=getattr(params, "edit_mask_up_bins", (1,)) if params is not None else (1,))
     zmax = sync.maxdepth if np.isfinite(sync.maxdepth) else float(np.nanmax(se.izm))
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom

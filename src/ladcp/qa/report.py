@@ -18,7 +18,7 @@ from .bottom import bottom_metric, detect_bottom
 from .depth import synchronize, water_window
 from .ingest import DualHead
 from .range import profiling_range, range_metric
-from .screen import screen
+from .screen import NEARFIELD_WARN_RATIO, nearfield_errvel_ratio, screen
 
 
 def assess(dh: DualHead, params: CastParams | None = None,
@@ -36,6 +36,19 @@ def assess(dh: DualHead, params: CastParams | None = None,
     qc.warnings.extend(sr.warnings)
     for k, v in sr.counts.items():
         qc.add(Metric(f"edit_{k}", v, "cells/ensembles", Status.OK, source_stage="qa.screen"))
+
+    # --- hung-device detector (near-field vs far-field down-looker error velocity) ---
+    nf = nearfield_errvel_ratio(dh)
+    if np.isfinite(nf):
+        masked = bool(getattr(p, "edit_nearfield_dn_bins", ()) if p is not None else ())
+        nf_status = Status.WARN if (nf > NEARFIELD_WARN_RATIO and not masked) else Status.OK
+        qc.add(Metric("nearfield_errvel_ratio", round(nf, 2), "", nf_status,
+                      threshold={"warn": NEARFIELD_WARN_RATIO},
+                      source_stage="qa.screen",
+                      note=("near (18-42 m) / far (>50 m) down-looker |errvel|; >1.7 = a "
+                            "rigid target hung below the package"
+                            + ("; near-field bins masked via edit_nearfield_dn_bins"
+                               if masked else ""))))
 
     # --- per-head beam + range health ---
     for head in (dh.down, dh.up):
