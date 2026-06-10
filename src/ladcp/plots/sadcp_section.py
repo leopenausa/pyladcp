@@ -43,6 +43,25 @@ def along_track_km(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     return np.concatenate([[0.0], np.cumsum(step)]) / 1000.0
 
 
+_ANOM_MIN_BINS = 5
+
+
+def depth_mean_anomaly(comp: np.ndarray, zmask: np.ndarray) -> np.ndarray:
+    """``comp`` minus its per-ensemble depth mean over the ``zmask`` bins.
+
+    Columns with fewer than ``_ANOM_MIN_BINS`` finite bins in the window go
+    all-NaN (a mean of 1-2 cells is not a barotropic estimate).
+    """
+    import warnings
+    sub = comp[zmask]
+    nfin = np.sum(np.isfinite(sub), axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
+        cmean = np.nanmean(sub, axis=0)
+    cmean[nfin < _ANOM_MIN_BINS] = np.nan
+    return comp - cmean[None, :]
+
+
 def _station_marks(stations, ds: SadcpDataset, x: np.ndarray):
     """Map (label, utc) station entries onto the section x-axis.
 
@@ -65,6 +84,7 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
                          max_depth: float | None = None,
                          clim: float | None = None,
                          speed_max: float = 1.5,
+                         anomaly: bool = False,
                          stations=None, title: str = "",
                          fig=None, savepath: str | None = None):
     """u/v section panels vs time or along-track distance.
@@ -72,6 +92,12 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
     ``stations`` is an optional list of ``(label, utc)`` tuples (e.g. LADCP casts
     from the archive index) drawn as ticks along the top of each panel. ``clim``
     fixes the symmetric colour range [m/s]; default is the robust 98th percentile.
+
+    ``anomaly`` subtracts each ensemble's depth-mean velocity (over the plotted
+    depth range) before rendering — a baroclinic "shear section". Use it when a
+    barotropic flow visually swamps the vertical structure: at MORIA the
+    within-column std (~7-8 cm/s) matches the depth-mean signal, invisible at a
+    ±0.3 m/s clim.
 
     ``speed_max`` blanks whole ensembles whose depth-median speed exceeds it
     (default 1.5 m/s): raw VmDAS carries occasional stuck/poor GPS fixes whose
@@ -110,6 +136,10 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
         zmask = sub.depth <= max_depth
     z = sub.depth[zmask]
 
+    if anomaly:
+        sub.u = depth_mean_anomaly(sub.u, zmask)
+        sub.v = depth_mean_anomaly(sub.v, zmask)
+
     if by == "distance":
         x = along_track_km(sub.lat, sub.lon)
         xlabel = "along-track distance [km]"
@@ -143,7 +173,9 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
         fig = plt.figure(figsize=(11, 7), constrained_layout=True)
     axes = fig.subplots(2, 1, sharex=True)
 
-    for ax, comp, name in ((axes[0], sub.u, "u (east)"), (axes[1], sub.v, "v (north)")):
+    names = (("u′ (east, minus depth mean)", "v′ (north, minus depth mean)")
+             if anomaly else ("u (east)", "v (north)"))
+    for ax, comp, name in ((axes[0], sub.u, names[0]), (axes[1], sub.v, names[1])):
         pm = ax.pcolormesh(x, z, comp[zmask], cmap="RdBu_r", vmin=-clim, vmax=clim,
                            shading="nearest")
         ax.invert_yaxis()
@@ -204,6 +236,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--speed-max", type=float, default=1.5,
                     help="blank ensembles whose median speed exceeds this [m/s] "
                          "(GPS-leak screen; 0 disables; default 1.5)")
+    ap.add_argument("--anomaly", action="store_true",
+                    help="subtract each ensemble's depth-mean velocity (baroclinic "
+                         "shear section; reveals vertical structure under a "
+                         "barotropic flow)")
     ap.add_argument("--index", default=None,
                     help="archive index JSON: draw LADCP station ticks")
     ap.add_argument("--title", default="", help="figure title")
@@ -222,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     title = args.title or f"{Path(args.sadcp).resolve().parent.name} ship-ADCP section"
     sadcp_section_figure(ds, by=args.by, time_start=args.start, time_end=args.end,
                          max_depth=args.max_depth, clim=args.clim,
-                         speed_max=args.speed_max,
+                         speed_max=args.speed_max, anomaly=args.anomaly,
                          stations=stations, title=title, savepath=args.out)
     print(f"wrote {args.out}")
     return 0

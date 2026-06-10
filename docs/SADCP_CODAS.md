@@ -106,3 +106,9 @@ draws LADCP station ticks; `--max-depth`/`--clim`/`--start`/`--end` crop and sca
 `--speed-max` (median-speed blanking, default 1.5 m/s) runs on either source — it
 exists for raw VmDAS GPS leaks but also drops residual bad ensembles in CODAS
 products; `--speed-max 0` disables it.
+
+`--anomaly` subtracts each ensemble's depth-mean velocity before rendering (a
+baroclinic "shear section"). Use it when the section looks vertically homogeneous:
+at MORIA the within-column std (~7–8 cm/s) is the same size as the depth-mean flow,
+so at a ±0.3 m/s colour range every column renders as one colour — the anomaly view
+is where the vertical structure lives.
