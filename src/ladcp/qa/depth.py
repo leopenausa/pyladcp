@@ -54,12 +54,86 @@ class SyncResult:
                                   # (low -> the cast could not be confidently located; WARN)
 
 
-def water_window(z_on_ping: np.ndarray, threshold: float = 10.0) -> tuple[int, int]:
-    """First and last ping index with package depth below ``threshold`` (in-water span)."""
+def water_window(z_on_ping: np.ndarray, threshold: float = 10.0,
+                 max_gap: int = 30) -> tuple[int, int]:
+    """In-water ping span: the deep segment containing the deepest ping.
+
+    The window is the run of pings with depth > ``threshold`` that contains the
+    cast's deepest point -- the descent-to-ascent excursion, matching the legacy
+    "continuous profile" semantics -- with below-threshold spells of at most
+    ``max_gap`` pings bridged. A first-to-last-deep-ping rule would also sweep up
+    pre-cast surface soaks: on FDCCC1 t99-03 the package soaked ~3.5 min at
+    10-15 m before the real descent, and including the soak mixes its surface
+    drift into the GPS barotropic reference (-6 cm/s on a 0.12 m/s flow). The gap
+    bridging separates such genuine surfacings (minutes near the surface) from
+    single-ping threshold flicker when the package hovers right at ``threshold``
+    (FDCCC1 t1-01 ends with ~5 min hanging at 10 m). On a normal cast the deep
+    span is one contiguous run and the result is unchanged.
+    """
     inw = np.where(np.isfinite(z_on_ping) & (z_on_ping > threshold))[0]
     if inw.size == 0:
         return 0, z_on_ping.size - 1
-    return int(inw[0]), int(inw[-1])
+    k = int(np.nanargmax(np.where(np.isfinite(z_on_ping), z_on_ping, -np.inf)))
+    pos = int(np.searchsorted(inw, k))
+    pos = min(pos, inw.size - 1)
+    lo = pos
+    while lo > 0 and inw[lo] - inw[lo - 1] <= max_gap:
+        lo -= 1
+    hi = pos
+    while hi < inw.size - 1 and inw[hi + 1] - inw[hi] <= max_gap:
+        hi += 1
+    return int(inw[lo]), int(inw[hi])
+
+
+_SURFACE_Z = 2.0          # integrated depth above this counts as "surfaced": stop the fill
+_MAX_FILL_S = 1800.0      # never extrapolate more than 30 min past the CTD record
+
+
+def _extend_z_by_w(z: np.ndarray, w_ad: np.ndarray, tad: np.ndarray) -> np.ndarray:
+    """Extend the CTD-anchored package depth past the CTD record by integrating ADCP w.
+
+    The CTD deck unit is sometimes stopped while the LADCP is still in the water
+    (FDCCC1 t1-01: recording ends with the package at 107 m, ~6 min before recovery);
+    interpolation alone leaves those pings depth-less and the cast gets truncated --
+    losing upper-ocean data *and* shortening the GPS-displacement window of the
+    barotropic reference. Legacy ``getdpthi`` integrates the ADCP's own vertical
+    velocity instead, so do the same at both record edges: anchor at the first/last
+    CTD-known depth and cumulate ``w*dt``, stopping where the package surfaces
+    (``z < _SURFACE_Z``), where w runs out, or after ``_MAX_FILL_S``.
+
+    The sign of w is calibrated against the CTD descent rate over the overlap (no
+    instrument-convention assumption); if the overlap cannot fix the sign the fill
+    is skipped.
+    """
+    fin = np.where(np.isfinite(z))[0]
+    if fin.size < 10 or np.isfinite(z).all():
+        return z                                # nothing known, or nothing to fill
+    dzdt = np.gradient(z[fin], tad[fin])
+    wf = w_ad[fin]
+    ok = np.isfinite(dzdt) & np.isfinite(wf)
+    if ok.sum() < 10:
+        return z
+    c = np.corrcoef(dzdt[ok], wf[ok])[0, 1]
+    if not np.isfinite(c) or abs(c) < 0.5:
+        return z                                # can't trust the sign -> leave edges alone
+    sgn = np.sign(c)
+
+    out = z.copy()
+    for k0, step in ((fin[-1], 1), (fin[0], -1)):
+        zc = float(z[k0])
+        k = k0 + step
+        while 0 <= k < z.size:
+            if abs(tad[k] - tad[k0]) > _MAX_FILL_S:
+                break
+            w = w_ad[k]
+            if not np.isfinite(w):
+                break
+            zc += sgn * w * abs(tad[k] - tad[k - step])
+            if zc < _SURFACE_Z:
+                break
+            out[k] = zc
+            k += step
+    return out
 
 
 def reference_w(dh: DualHead) -> np.ndarray:
@@ -180,6 +254,7 @@ def synchronize(dh: DualHead, ctd: CTDTimeSeries, *, nlag: int = 600,
 
     # CTD elapsed time corresponding to each ADCP ping is (tad - offset)
     z_on_ping = np.interp(tad - offset, t_ctd, depth, left=np.nan, right=np.nan)
+    z_on_ping = _extend_z_by_w(z_on_ping, w_ad, tad)
     return SyncResult(
         lag=int(round(offset)), corr=corr, z_on_ping=z_on_ping,
         maxdepth=float(np.nanmax(z_on_ping)) if np.isfinite(z_on_ping).any() else np.nan,

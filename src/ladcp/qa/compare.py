@@ -46,6 +46,7 @@ class OurCast:
     time: np.datetime64 | None
     lat: float
     lon: float
+    variant: str = ""           # non-empty when substituted from an alternate run
 
 
 def _legacy_time(dr_raw) -> np.datetime64 | None:
@@ -101,6 +102,31 @@ def scan_ours(folder: str | Path) -> list[OurCast]:
     return out
 
 
+def substitute_alternates(ours: list[OurCast], alt_dir: str | Path,
+                          stations: list[str], label: str) -> list[OurCast]:
+    """Swap selected stations for their version from an alternate run dir.
+
+    Used when specific casts need a different processing choice (e.g. ``--botfac 0``
+    on shallow casts with bad near-bottom BT samples): the report then carries the
+    alternate result, explicitly labelled, instead of silently mixing settings.
+    Raises if a requested station is missing from the alternate run.
+    """
+    alt = {o.station: o for o in scan_ours(alt_dir)}
+    missing = [s for s in stations if s not in alt]
+    if missing:
+        raise FileNotFoundError(
+            f"alternate run {alt_dir} has no station(s): {', '.join(missing)}")
+    out = []
+    for o in ours:
+        if o.station in stations:
+            a = alt[o.station]
+            a.variant = label
+            out.append(a)
+        else:
+            out.append(o)
+    return out
+
+
 def pair_by_time(ours: list[OurCast], legacy: list[LegacyCast],
                  tol_h: float = _PAIR_TOL_H):
     """Greedy nearest-time 1:1 pairing. Returns (pairs, ours_only, legacy_only)."""
@@ -143,6 +169,7 @@ class PairResult:
     zmax_ours: float
     zmax_legacy: float
     profile: dict               # arrays for the overlay figure
+    variant: str = ""           # alternate-run label ("" = the main run)
 
 
 def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
@@ -153,6 +180,7 @@ def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
         z = ds["depth"].values
         u = ds["u"].values
         v = ds["v"].values
+        uerr = ds["uerr"].values if "uerr" in ds else np.full(z.shape, np.nan)
         zb = ds["depth_bt"].values if "depth_bt" in ds else np.array([])
         ub = ds["u_bt"].values if "u_bt" in ds else np.array([])
         vb = ds["v_bt"].values if "v_bt" in ds else np.array([])
@@ -178,8 +206,11 @@ def compare_pair(oc: OurCast, lc: LegacyCast, dt_h: float) -> PairResult:
         dubar=float(ubar - lbar_u), dvbar=float(vbar - lbar_v),
         zmax_ours=float(np.nanmax(z)) if z.size else np.nan,
         zmax_legacy=float(np.nanmax(dr.z)) if dr.z.size else np.nan,
-        profile={"z": z, "u": u, "v": v,
-                 "lz": dr.z, "lu": dr.u, "lv": dr.v},
+        profile={"z": z, "u": u, "v": v, "uerr": uerr,
+                 "lz": dr.z, "lu": dr.u, "lv": dr.v,
+                 "luerr": dr.uerr if dr.uerr.size == dr.z.size
+                 else np.full(dr.z.shape, np.nan)},
+        variant=oc.variant,
     )
 
 
@@ -199,15 +230,31 @@ def _profile_pages(pdf, results: list[PairResult], per_page: int = 10):
             for off, comp in ((0, "u"), (1, "v")):
                 ax = axes[row0 + off, col]
                 p = r.profile
+                # +-1 sigma solution-uncertainty bands (legacy dr.uerr / our nc uerr;
+                # LDEO carries one error profile for both components)
+                lfin = np.isfinite(p["lu"]) & np.isfinite(p["luerr"])
+                if lfin.any():
+                    ax.fill_betweenx(p["lz"][lfin],
+                                     p[f"l{comp}"][lfin] - p["luerr"][lfin],
+                                     p[f"l{comp}"][lfin] + p["luerr"][lfin],
+                                     color="0.3", alpha=0.18, lw=0)
+                ofin = np.isfinite(p[comp]) & np.isfinite(p["uerr"])
+                if ofin.any():
+                    ax.fill_betweenx(p["z"][ofin],
+                                     p[comp][ofin] - p["uerr"][ofin],
+                                     p[comp][ofin] + p["uerr"][ofin],
+                                     color="tab:red", alpha=0.15, lw=0)
                 ax.plot(p[f"l{comp}"], p["lz"], "-", color="0.3", lw=1.4,
-                        label="legacy")
+                        label="legacy ±1σ")
                 ax.plot(p[comp], p["z"], "-", color="tab:red", lw=1.0,
-                        label="pyladcp")
+                        label="pyladcp ±1σ")
                 ax.invert_yaxis()
                 ax.grid(alpha=0.3)
                 s = getattr(r, comp)
-                ax.set_title(f"{r.station} {comp}  r={s.corr:.2f} "
-                             f"rms={100 * s.rms:.1f}cm/s", fontsize=8)
+                tag = f" [{r.variant}]" if r.variant else ""
+                ax.set_title(f"{r.station}{tag} {comp}  r={s.corr:.2f} "
+                             f"rms={100 * s.rms:.1f}cm/s", fontsize=8,
+                             color="tab:blue" if r.variant else "black")
                 if col == 0:
                     ax.set_ylabel("depth [m]")
                 if k == 0 and off == 0:
@@ -222,7 +269,7 @@ def _profile_pages(pdf, results: list[PairResult], per_page: int = 10):
 def _summary_page(pdf, results: list[PairResult], title: str):
     import matplotlib.pyplot as plt
 
-    names = [r.station for r in results]
+    names = [r.station + ("*" if r.variant else "") for r in results]
     x = np.arange(len(results))
     fig, axes = plt.subplots(2, 2, figsize=(13, 9), constrained_layout=True)
 
@@ -269,6 +316,11 @@ def _summary_page(pdf, results: list[PairResult], title: str):
     fig.suptitle(f"{title}\n{len(results)} stations -- median rms "
                  f"u {100 * med_u:.1f} / v {100 * med_v:.1f} cm/s, "
                  f"median corr(u) {med_cu:.2f}", fontsize=12)
+    subs = {r.station: r.variant for r in results if r.variant}
+    if subs:
+        note = "* substituted runs: " + "; ".join(
+            f"{st} = {lab}" for st, lab in subs.items())
+        fig.text(0.01, 0.005, note, fontsize=8, color="tab:blue")
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -286,6 +338,7 @@ def write_report(results: list[PairResult], ours_only, legacy_only,
     for r in results:
         rows.append({
             "station": r.station, "legacy": r.legacy_name,
+            "variant": r.variant or "main",
             "pair_dt_min": round(r.dt_min, 1),
             "u_corr": r.u.corr, "u_rms_ms": r.u.rms, "u_bias_ms": r.u.bias,
             "v_corr": r.v.corr, "v_rms_ms": r.v.rms, "v_bias_ms": r.v.bias,
@@ -321,13 +374,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tol-hours", type=float, default=_PAIR_TOL_H,
                     help="max cast-time difference for a station pair "
                          f"(default {_PAIR_TOL_H} h)")
+    ap.add_argument("--alt-dir", metavar="DIR", default=None,
+                    help="alternate ladcp-qa run dir to substitute --alt-stations from "
+                         "(e.g. a --botfac 0 rerun of shallow casts)")
+    ap.add_argument("--alt-stations", metavar="LIST", default=None,
+                    help="comma-separated stations to take from --alt-dir")
+    ap.add_argument("--alt-label", default="alternate",
+                    help="label stamped on substituted stations in the report "
+                         "(default: 'alternate')")
     ap.add_argument("--title", default="pyladcp vs legacy LDEO_IX")
     ap.add_argument("-o", "--out", default=None,
                     help="report dir (default <ours>/legacy_compare)")
     args = ap.parse_args(argv)
+    if bool(args.alt_dir) != bool(args.alt_stations):
+        ap.error("--alt-dir and --alt-stations go together")
 
     ours = scan_ours(args.ours)
     legacy = scan_legacy(args.legacy)
+    if args.alt_dir:
+        stations = [s.strip() for s in args.alt_stations.split(",") if s.strip()]
+        ours = substitute_alternates(ours, args.alt_dir, stations, args.alt_label)
     if not ours:
         ap.error(f"no station NetCDFs under {args.ours}/stations/")
     if not legacy:

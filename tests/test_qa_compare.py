@@ -84,3 +84,28 @@ def test_write_report_and_cli(tmp_path):
     assert (out / "comparison.csv").exists()
     assert (out / "comparison_report.pdf").stat().st_size > 10_000
     assert "SYN_002" in (out / "unpaired.txt").read_text()
+
+
+def test_alternate_substitution_is_labelled(tmp_path):
+    ours, legacy, z, u, v = _setup(tmp_path, shift_u=0.05)
+    alt = tmp_path / "qa_alt"
+    _write_ours_nc(alt, "t1-01", time_utc="2022-03-02T06:10:00", z=z, u=u, v=v)
+    out = tmp_path / "rep_alt"
+    rc = C.main(["--ours", str(ours), "--legacy", str(legacy),
+                 "--alt-dir", str(alt), "--alt-stations", "t1-01",
+                 "--alt-label", "botfac=0", "-o", str(out)])
+    assert rc == 0
+    txt = (out / "comparison.csv").read_text()
+    assert "botfac=0" in txt
+    # the substituted (bias-free) run is what got scored
+    import pandas as pd
+    df = pd.read_csv(out / "comparison.csv")
+    assert df.loc[0, "u_bias_ms"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_alternate_missing_station_raises(tmp_path):
+    ours, legacy, *_ = _setup(tmp_path)
+    alt = tmp_path / "qa_alt_empty"
+    (alt / "stations").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="t1-01"):
+        C.substitute_alternates(C.scan_ours(ours), alt, ["t1-01"], "x")

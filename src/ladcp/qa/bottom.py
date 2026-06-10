@@ -401,6 +401,9 @@ class BottomTrack:
     bw: np.ndarray              # [nens] vertical bottom-track velocity
     hbot: np.ndarray            # [nens] bottom distance used [m] (NaN where none)
     n_valid: int
+    source: str = "own"         # "rdi" (firmware BT pings) or "own" (water-track at echo)
+    bvel_own: np.ndarray | None = None   # the own-BT series, kept for diagnostics
+    bw_own: np.ndarray | None = None
 
 
 def _boutlier(bvel: np.ndarray, bw: np.ndarray, *, nfac=(4.0, 3.0)) -> None:
@@ -417,17 +420,34 @@ def _boutlier(bvel: np.ndarray, bw: np.ndarray, *, nfac=(4.0, 3.0)) -> None:
             bw[bad] = np.nan
 
 
-def bottom_track_velocity(dh: DualHead, merged, *, btrk_below: float = _BTRK_BELOW,
+# legacy loadrdi screens the RDI firmware bottom track with its own (pre-set_cast_params)
+# defaults -- the diary prints "error velocity > 0.5" / "horizontal speed > 2.5" on FDCCC1
+_RDI_BT_ELIM = 0.5          # |error velocity| limit [m/s]
+_RDI_BT_VLIM = 2.5          # horizontal speed limit [m/s]
+
+
+def bottom_track_velocity(dh: DualHead, merged, *, btrk_mode: int = 3,
+                          btrk_below: float = _BTRK_BELOW,
                           btrk_ts: float = _BTRK_TS, btrk_range=_BTRK_RANGE,
                           btrk_wlim: float = _BTRK_WLIM) -> BottomTrack:
-    """Per-ping bottom-track velocity from the down-looker near-seabed cells.
+    """Per-ping bottom-track velocity (legacy ``getbtrack`` mode semantics).
 
-    Faithful port of the ``getbtrack`` velocity branch: locate the bottom echo by parabola
-    fit (:func:`localmax2`), pick the cell ``btrk_below`` bins past the target-strength
-    maximum, and take the median earth-frame velocity over that cell +/- one neighbour
-    (``merged`` down-looker rows, already rotated into the down frame). Pings whose
-    bottom-cell W differs from the reference-layer W by more than ``btrk_wlim`` are dropped,
-    then a two-pass RMS outlier rejection is applied.
+    ``btrk_mode`` follows legacy: with mode 1/3 (default 3) the RDI *firmware*
+    bottom track is used whenever the PD0 carries one (dedicated long BT pings --
+    the accurate measurement), screened like legacy ``loadrdi`` (error velocity,
+    horizontal speed); the "own" water-track bottom track is still computed and
+    kept on the result for diagnostics, and becomes the velocity source only when
+    no usable RDI track exists (or with mode 2, which forces it). Using own-BT
+    when RDI is available biases the reference on strong-drift casts: the cell
+    ``btrk_below`` bins past the echo maximum still carries boundary-layer water
+    velocity, which leaks ~10-15% of the current into the package velocity
+    (FDCCC1 t1-01/t1-02/t99-03, -4..-6 cm/s whole-profile offsets).
+
+    Own track: locate the bottom echo by parabola fit (:func:`localmax2`), pick
+    the cell ``btrk_below`` bins past the target-strength maximum, median
+    earth-frame velocity over that cell +/- one neighbour, drop pings whose
+    bottom-cell W differs from the reference-layer W by more than ``btrk_wlim``,
+    then two-pass RMS outlier rejection.
     """
     d = dh.down
     n = merged.ru.shape[1]
@@ -466,7 +486,49 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_below: float = _BTRK_BEL
 
     _boutlier(bvel, bw)
     hbot = np.where(np.isfinite(bvel), zpeak, np.nan)
-    return BottomTrack(bvel=bvel, bw=bw, hbot=hbot, n_valid=int(np.isfinite(bvel).sum()))
+
+    rdi = _rdi_bottom_track(dh, n) if btrk_mode in (1, 3) else None
+    if rdi is not None:
+        rvel, rw, rhbot = rdi
+        # legacy keeps RDI's distances and only fills gaps from the echo fit
+        rhbot = np.where(np.isfinite(rhbot), rhbot, np.where(np.isfinite(zpeak), zpeak, np.nan))
+        return BottomTrack(bvel=rvel, bw=rw, hbot=rhbot,
+                           n_valid=int(np.isfinite(rvel).sum()), source="rdi",
+                           bvel_own=bvel, bw_own=bw)
+    return BottomTrack(bvel=bvel, bw=bw, hbot=hbot, n_valid=int(np.isfinite(bvel).sum()),
+                       source="own", bvel_own=bvel, bw_own=bw)
+
+
+def _rdi_bottom_track(dh: DualHead, n: int):
+    """Screened RDI firmware bottom track, or ``None`` when absent/unusable.
+
+    Mirrors the legacy ``loadrdi`` screening: drop samples with |error velocity| >
+    0.5 m/s or horizontal speed > 2.5 m/s (the firmware's -32.768 sentinels decode
+    to < -30 and are dropped by the speed test / non-finite checks).
+    """
+    btv = getattr(dh.down, "bt_vel", None)
+    if btv is None:
+        return None
+    bu, bv2, bw2 = btv[0][:n].copy(), btv[1][:n].copy(), btv[2][:n].copy()
+    be = btv[3][:n] if btv.shape[0] > 3 else np.full(n, np.nan)
+    bad = ~np.isfinite(bu) | ~np.isfinite(bv2)
+    bad |= np.hypot(np.where(bad, 0, bu), np.where(bad, 0, bv2)) > _RDI_BT_VLIM
+    bad |= (bu < -30) | (bv2 < -30)
+    with np.errstate(invalid="ignore"):
+        bad |= np.abs(be) > _RDI_BT_ELIM
+    rvel = np.where(bad, np.nan, bu) + 1j * np.where(bad, np.nan, bv2)
+    rw = np.where(bad | ~np.isfinite(bw2), np.nan, bw2)
+    if np.isfinite(rvel).sum() < 4:
+        return None                                # nothing usable -> fall back to own
+    btr = getattr(dh.down, "bt_range", None)
+    if btr is not None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            rhbot = np.nanmean(np.where(btr[:, :n] > 0, btr[:, :n], np.nan), axis=0)
+    else:
+        rhbot = np.full(n, np.nan)
+    rhbot = np.where(np.isfinite(rvel), rhbot, np.nan)
+    return rvel, rw, rhbot
 
 
 def bottom_metric(b: BottomResult) -> Metric:
@@ -531,9 +593,11 @@ def btrk_diagnostics(bt: BottomTrack, dh) -> BtrkDiagnostics:
     transducer, also ``-u_package``, so the two share a sign and are compared directly.
     Returns the finite velocity samples plus inter-method bias/scatter and roughness.
     """
-    own = bt.bvel[np.isfinite(bt.bvel)]
+    own_src = bt.bvel_own if bt.bvel_own is not None else bt.bvel
+    own_w_src = bt.bw_own if bt.bw_own is not None else bt.bw
+    own = own_src[np.isfinite(own_src)]
     own_u, own_v = np.real(own), np.imag(own)
-    own_w = bt.bw[np.isfinite(bt.bw)]
+    own_w = own_w_src[np.isfinite(own_w_src)]
 
     rdi_u = rdi_v = rdi_w = np.array([])
     btv = getattr(dh.down, "bt_vel", None)

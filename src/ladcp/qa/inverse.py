@@ -323,7 +323,9 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     sync = synchronize(dh, ctd)
     bottom = detect_bottom(dh, sync, ctd=ctd)
     merged = merge_heads(dh, params=params)
-    bt = bottom_track_velocity(dh, merged)
+    bt = bottom_track_velocity(
+        dh, merged,
+        btrk_mode=getattr(params, "btrk_mode", 3) if params is not None else 3)
     # prepinv STEP 10: keep bottom track only where the package is 50-300 m above the
     # known seabed and the echo distance agrees with that geometry (<100 m) -- this drops
     # mid-water false echoes that pass the per-ping target-strength test.
