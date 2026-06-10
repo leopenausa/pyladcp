@@ -16,11 +16,21 @@ set -euo pipefail
 source /home/leo/anaconda3/etc/profile.d/conda.sh
 conda activate pycodas
 
-DATA=/home/leo/Cruises/MORIA/data/pyladcp_data/MORIA/sADCP/sadcp_150/DATA
+# Defaults = MORIA OS150. For the OS75 (serial streams SWAPPED: gyro on N2R,
+# PASHR/GGA on N1R; check with `strings file.N1R | grep -o '^\$[A-Z]*' | sort`):
+#   ENR_DATA=.../sadcp_75/DATA ENR_PROC=os75nb_enr ENR_CRUISE=moria75 \
+#   ENR_DB=aMORIA75e ENR_SONAR=os75nb ENR_INST=os75 ENR_EA=45 ENR_GYRO_NR=2 \
+#   bash scripts/codas_moria_os150_enr.sh
+DATA=${ENR_DATA:-/home/leo/Cruises/MORIA/data/pyladcp_data/MORIA/sADCP/sadcp_150/DATA}
 WORK=${1:-/home/leo/Cruises/MORIA/data/pyladcp_data/MORIA/codas}
-CRUISE=moria150            # uhdas cruisename; config file must be ${CRUISE}_proc.py
-PROC=os150nb_enr           # processing tree (single-ping route)
-EA=45.89                   # onboard beam-3 alignment, from the .VMO (AlignmentOffsetEA)
+CRUISE=${ENR_CRUISE:-moria150}   # uhdas cruisename; config = ${CRUISE}_proc.py
+PROC=${ENR_PROC:-os150nb_enr}    # processing tree (single-ping route)
+DBNAME=${ENR_DB:-aMORIA150e}     # codas database name
+SONAR=${ENR_SONAR:-os150nb}      # instrument + ping type for quick_adcp
+INST=${ENR_INST:-os150}          # short instrument key (FakeUHDAS / proc config)
+EA=${ENR_EA:-45.89}              # onboard beam-3 alignment (.VMO AlignmentOffsetEA)
+GYRO_NR=${ENR_GYRO_NR:-1}        # which N?R stream carries the $INHDT gyro
+NAV_NR=$(( GYRO_NR == 1 ? 2 : 1 ))   # the other one: $PASHR + $GPGGA + $GPHDT
 
 mkdir -p "$WORK"
 cd "$WORK"
@@ -29,7 +39,7 @@ echo "=== [1/5] stage chronological ENR+N1R+N2R copies ==="
 # Same trap as the STA route (see codas_moria_os150.sh): parts of the chain glob
 # by FILENAME, and MORIA's name order is not chronological. Stage NNN_-prefixed
 # copies per basename group, ordered by the first ENR ensemble's RTC time.
-STAGE="$WORK/enr_chrono"
+STAGE="$WORK/enr_chrono_$PROC"
 if [ ! -d "$STAGE" ]; then
     mkdir -p "$STAGE"
     python - "$STAGE" "$DATA"/*.ENR << 'PYEOF'
@@ -82,7 +92,7 @@ fi
 ls "$STAGE"/*.ENR | wc -l
 
 echo "=== [2/5] reform: FakeUHDAS (ENR -> UHDAS-style tree) ==="
-UHDAS_DIR="$WORK/uhdas_style/${CRUISE}_os150"
+UHDAS_DIR="$WORK/uhdas_style/${CRUISE}_${INST}"
 mkdir -p "$WORK/uhdas_style"
 if [ ! -d "$UHDAS_DIR" ]; then
     python - << PYEOF
@@ -107,26 +117,27 @@ class FakeUHDAS_pingmatch(FakeUHDAS):
             return None
         return int(hits[np.argmin(np.abs(bfsa[hits, 0] - dday))])
 
-# (instrument, message, N_R number): N1R = \$INHDT gyro (reliable heading);
-# N2R = \$PASHR POS/MV-style attitude (heading correction), \$GPGGA (positions),
-# \$GPHDT (secondary heading).
+# (instrument, message, N_R number): the GYRO_NR stream carries \$INHDT (the
+# reliable gyro heading); the other carries \$PASHR POS/MV-style attitude
+# (heading correction), \$GPGGA (positions) and \$GPHDT. OS150: gyro on N1R;
+# OS75: SWAPPED (gyro on N2R).
 navinfo = [
-    ("N1R", "hdg", 1),
-    ("N2R", "pmv", 2),
-    ("N2R", "gps", 2),
-    ("N2R", "hdg", 2),
+    ("N${GYRO_NR}R", "hdg", $GYRO_NR),
+    ("N${NAV_NR}R", "pmv", $NAV_NR),
+    ("N${NAV_NR}R", "gps", $NAV_NR),
+    ("N${NAV_NR}R", "hdg", $NAV_NR),
 ]
 F = FakeUHDAS_pingmatch(yearbase=2025,
               sourcedir="$STAGE",
               destdir="$UHDAS_DIR",
-              sonar="os150",
+              sonar="$INST",
               navinfo=navinfo,
               ship="mo",
               dt_factor=3)   # tolerant block-splitting (variable ping rate)
 F()
 PYEOF
 fi
-find "$UHDAS_DIR/raw/os150" -name "*.raw" | wc -l   # (no ls|head: SIGPIPE + pipefail)
+find "$UHDAS_DIR/raw/$INST" -name "*.raw" | wc -l   # (no ls|head: SIGPIPE + pipefail)
 
 echo "=== [3/5] uhdas proc config ==="
 CFG="$WORK/uhdas_config"
@@ -138,36 +149,36 @@ uhdas_dir = "$UHDAS_DIR"
 shipname = "MORIA"
 
 # serial inputs (rbin directories made by the reform step)
-pos_inst = "N2R"
+pos_inst = "N${NAV_NR}R"
 pos_msg = "gps"
 pitch_inst = ""
 pitch_msg = ""
 roll_inst = ""
 roll_msg = ""
-hdg_inst = "N1R"          # \$INHDT gyro: reliable heading for beam->earth
+hdg_inst = "N${GYRO_NR}R"   # \$INHDT gyro: reliable heading for beam->earth
 hdg_msg = "hdg"
 
 hdg_inst_msgs = [
-    ("N1R", "hdg"),
-    ("N2R", "pmv"),
-    ("N2R", "hdg"),
+    ("N${GYRO_NR}R", "hdg"),
+    ("N${NAV_NR}R", "pmv"),
+    ("N${NAV_NR}R", "hdg"),
 ]
-hcorr_inst = "N2R"        # \$PASHR attitude: accurate heading correction
+hcorr_inst = "N${NAV_NR}R"  # \$PASHR attitude: accurate heading correction
 hcorr_msg = "pmv"
 hcorr_gap_fill = 0.0
 acc_heading_cutoff = 0.02
 
 # ADCP transformations
-h_align = dict(os150=$EA)         # onboard EA from the .VMO
-ducer_depth = dict(os150=5)
-scalefactor = dict(os150bb=1.0, os150nb=1.0)
-soundspeed = dict(os150bb=None, os150nb=None)
-salinity = dict(os150bb=None, os150nb=None)
+h_align = dict($INST=$EA)         # onboard EA from the .VMO
+ducer_depth = dict($INST=5)
+scalefactor = dict(${INST}bb=1.0, ${INST}nb=1.0)
+soundspeed = dict(${INST}bb=None, ${INST}nb=None)
+salinity = dict(${INST}bb=None, ${INST}nb=None)
 
 # quick_adcp.py values
-max_search_depth = dict(os150bb=2000, os150nb=2000)
-weakprof_numbins = dict(os150bb=None, os150nb=None)
-enslength = dict(os150bb=120, os150nb=120)    # match the onboard STA interval
+max_search_depth = dict(${INST}bb=2000, ${INST}nb=2000)
+weakprof_numbins = dict(${INST}bb=None, ${INST}nb=None)
+enslength = dict(${INST}bb=120, ${INST}nb=120)    # match the onboard STA interval
 xducer_dx = dict()
 xducer_dy = dict()
 PYEOF
@@ -180,9 +191,9 @@ cd "$PROC"
 cat > q_py.cnt << EOF
  --yearbase 2025              ## year of first data (cruise Sep-Oct 2025)
  --cruisename $CRUISE         ## must match config/${CRUISE}_proc.py
- --dbname aMORIA150e          ## single-ping database (e suffix = ENR route)
+ --dbname $DBNAME             ## single-ping database (e suffix = ENR route)
  --datatype uhdas             ## reformed VmDAS single-ping
- --sonar os150nb              ## OS150 narrowband
+ --sonar $SONAR               ## instrument + ping type
  --ens_len 120                ## our averaging interval [s] (= onboard STA)
  --update_gbin                ## build gbins from the reformed rbins (required)
  --configtype python          ## config/ files are python (*_proc.py)
@@ -200,4 +211,4 @@ echo "=== CALIBRATIONS ==="
 for f in cal/watertrk/adcpcal.out cal/botmtrk/btcaluv.out; do
     if [ -f "$f" ]; then echo "--- $f ---"; tail -20 "$f"; fi
 done
-echo "=== CODAS OS150 SINGLE-PING RUN COMPLETE ==="
+echo "=== CODAS $SONAR SINGLE-PING RUN COMPLETE ==="
