@@ -29,6 +29,15 @@ position by 682 ensembles and silently poisoned all absolute velocities (the wat
 cal *still looked fine*; only checking positions against a known cast caught it);
 (3) writes the control file; (4) runs `quick_adcp.py --auto`.
 
+**Single-ping route** (best product): `scripts/codas_moria_os150_enr.sh` processes the
+raw beam pings (`.ENR` + `.N1R`/`.N2R` NMEA) through the full UHDAS chain — per-ping
+editing *before* averaging, beam→earth with gyro heading + attitude correction, and a
+working bottom-track cal. On MORIA it lowered the apparent amplitude error from +2.1%
+(STA) to +0.9%. It needs three MORIA-earned workarounds, already in the script: prefix
+staged copies per *deployment* (ENR and N?R parts roll at different moments — never per
+file part), match nav to ping blocks by *ping number* (the VmDAS PC clock drifts 0–13 s
+against GPS), and `--update_gbin`.
+
 Control-file parameters that matter (`q_py.cnt`):
 
 | parameter | meaning / how to choose |

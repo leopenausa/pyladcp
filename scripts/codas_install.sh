@@ -39,6 +39,12 @@ cd ~/adcpcode/topog/etopo
 [ -f etopo1_for_pycurrents.zip ] || curl -sO https://currents.soest.hawaii.edu/downloads/etopo1_for_pycurrents.zip
 ls *.zip >/dev/null 2>&1 && unzip -qn etopo1_for_pycurrents.zip || true
 
+# pycurrents.data.topo.find_directory walks UP from the installed package looking
+# for topog/etopo; with a pip install into site-packages it never reaches
+# ~/adcpcode/topog, and single-ping averaging (Pingavg bottom editing) fails every
+# segment with "'Pingavg' object has no attribute 'topo'". Link it into the env.
+ln -sfn ~/adcpcode/topog "$CONDA_PREFIX/topog"
+
 echo "=== smoke test ==="
 python -c "import pycurrents; print('pycurrents OK:', pycurrents.__file__)"
 quick_adcp.py --help > /dev/null && echo "quick_adcp.py OK"
