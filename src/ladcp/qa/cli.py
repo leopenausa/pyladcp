@@ -48,6 +48,8 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     overrides = {}
     if inv_opts and inv_opts.get("nearfield_dn_bins") is not None:
         overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
+    if inv_opts and inv_opts.get("dzbelow") is not None:
+        overrides["dzbelow"] = inv_opts["dzbelow"]
     params = resolve_params(cruise, station, overrides=overrides or None)
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
@@ -263,6 +265,19 @@ def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
                             force=opts.get("reingest", False),
                             file_type=opts.get("file_type", "STA"),
                             transducer_depth=opts.get("xducer", 5.0))
+    toff = opts.get("timeoff")
+    if toff == "auto":
+        from ..io.nav import estimate_time_offset, read_nav
+        nav = read_nav(opts["nav"])
+        est = estimate_time_offset(ds.time, ds.lat, ds.lon, nav)
+        toff = est["offset_s"]
+        opts["timeoff"] = toff          # estimate once, reuse for every station
+        log.info("        sadcp: clock offset %+.2f s estimated from nav track "
+                 "(track residual %.0f m median / %.0f m p90, overlap %.0f%%)",
+                 toff, est["median_m"], est["p90_m"], 100 * est["overlap"])
+    if toff:
+        from ..io.nav import shift_time
+        ds = shift_time(ds, float(toff))
     sv = extract_profile(ds, time_start=time_start, time_end=time_end, lat=lat, lon=lon,
                          dtok_min=opts.get("dtok_min", 0.0))
     if sv is None:
@@ -310,6 +325,11 @@ def main(argv: list[str] | None = None) -> int:
                          "bins (e.g. 3,4) or 'none' to disable; default: the cruise preset "
                          "(MORIA sets 3,4 on the monocorer block 03-28)")
     # ship-ADCP (SADCP) constraint (inverse solver only)
+    ap.add_argument("--dzbelow", type=float, default=None, metavar="METERS",
+                    help="below-/near-seabed cell rejection margin [m] (default: cruise "
+                         "preset, 16 = 2 legacy bins). Raise on shallow shelf casts when "
+                         "a bottom-depth underestimate lets a contaminated near-bottom "
+                         "cell through (e.g. 24-32)")
     ap.add_argument("--sadcp", metavar="PATH",
                     help="shipboard-ADCP data for the inverse constraint: a VmDAS folder "
                          "(STA/LTA; ingested once and cached as sadcp_cache.npz) or, with "
@@ -326,6 +346,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="SADCP transducer depth below waterline [m] (default: 5)")
     ap.add_argument("--sadcp-reingest", action="store_true",
                     help="re-parse the raw SADCP tree, ignoring any existing cache")
+    ap.add_argument("--sadcp-timeoff", default=None, metavar="SECONDS|auto",
+                    help="clock correction added to the SADCP timestamps [s], or 'auto' "
+                         "to estimate it from --sadcp-nav by track matching (for "
+                         "acquisition PCs that were not synchronised to GPS time)")
+    ap.add_argument("--sadcp-nav", metavar="PATH", default=None,
+                    help="independently timestamped navigation track (file or dir; SADO "
+                         "'posicion' exports or time/lat/lon CSV) for --sadcp-timeoff auto")
     # explicit single-station override
     ap.add_argument("--down", help="down-looker (Master) PD0 file")
     ap.add_argument("--up", help="up-looker (Slave) PD0 file")
@@ -367,10 +394,19 @@ def main(argv: list[str] | None = None) -> int:
 
     sadcp_opts = None
     if args.sadcp:
+        timeoff: str | float | None = args.sadcp_timeoff
+        if timeoff is not None and timeoff != "auto":
+            try:
+                timeoff = float(timeoff)
+            except ValueError:
+                ap.error(f"--sadcp-timeoff: expected seconds or 'auto', got {timeoff!r}")
+        if timeoff == "auto" and not args.sadcp_nav:
+            ap.error("--sadcp-timeoff auto needs --sadcp-nav")
         sadcp_opts = {"folder": args.sadcp, "source": args.sadcp_source,
                       "fac": args.sadcpfac,
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
-                      "reingest": args.sadcp_reingest}
+                      "reingest": args.sadcp_reingest,
+                      "timeoff": timeoff, "nav": args.sadcp_nav}
     nearfield = None
     if args.nearfield_dn_bins is not None:
         s = args.nearfield_dn_bins.strip().lower()
@@ -381,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--nearfield-dn-bins: expected comma-separated bin numbers or "
                      f"'none', got {args.nearfield_dn_bins!r}")
     inv_opts = {"botfac": args.botfac, "barofac": args.barofac, "smoofac": args.smoofac,
-                "down_only": args.down_only, "nearfield_dn_bins": nearfield}
+                "down_only": args.down_only, "nearfield_dn_bins": nearfield,
+                "dzbelow": args.dzbelow}
 
     # resolve the work list: explicit single file set, or a batch of station ids
     explicit = bool(args.down)

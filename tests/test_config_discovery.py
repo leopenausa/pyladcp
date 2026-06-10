@@ -42,9 +42,17 @@ def test_resolve_params_applies_overrides_last():
     assert p.drot == -3.5 and p.pglim == 25.0
 
 
-def test_resolve_params_rejects_unknown_cruise_and_field():
-    with pytest.raises(KeyError):
-        resolve_params("NOPE", "X")
+def test_resolve_params_unknown_cruise_falls_back_to_generic():
+    # a cruise without a preset must still process (and label exports) correctly:
+    # generic operator defaults, its own cruise_id, no MORIA-specific layers
+    p = resolve_params("FDCCC1", "t1-05")
+    assert p.cruise_id == "FDCCC1" and p.station == "t1-05"
+    assert p.pglim == 50.0 and p.cut == 7.0 and p.btrk_mode == 3
+    assert p.edit_nearfield_dn_bins == ()        # the monocorer mask is MORIA's, not generic
+    assert p.sadcp == 0 and p.drot is None
+
+
+def test_resolve_params_rejects_unknown_field():
     with pytest.raises(AttributeError):
         resolve_params("MORIA", "X", overrides={"not_a_field": 1})
 
