@@ -68,7 +68,9 @@ bottom-track + GPS-barotropic + optional ship-ADCP constraints, tunable via
 (`--solver shear`, the LDEO_IX `ps.shear==1` path).
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next (single-head/beam-frame robustness,
-release hardening) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the data interfaces.
+release hardening), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the data interfaces,
+and [`docs/SADCP_CODAS.md`](docs/SADCP_CODAS.md) for processing shipboard-ADCP data with
+CODAS and feeding it back in (`--sadcp-source codas`).
 
 ## Acknowledgments
 

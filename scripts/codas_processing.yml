@@ -1,0 +1,42 @@
+# Packages for ADCP processing with codas3 and pycurrents.
+# Some of these are not strict dependencies
+# but are generally useful, or might become dependencies soon.
+#
+# To make a conda environment with the default name, "pycodas":
+#
+#   conda env create -f codas_processing.yml
+#
+# To use a different name, e.g. "pycodas_test":
+#
+#   conda env create -n pycodas_test -f codas_processing.yml
+#
+# (Substitute "mamba" or "micromamba" or your alias for "conda" if you are using
+# one of these alternatives.)
+
+name: pycodas
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13  # includes pip
+  - mercurial
+  - cython
+  - numpy
+  - netcdf4
+  - scipy
+  - matplotlib
+  - ipython
+  - qtconsole-base  # for "dataviewer.py --advanced"
+  - pyside6
+  - pytest-qt
+  - basemap
+  - basemap-data-hires
+  - cartopy  # so we can shift from basemap
+  - ruff
+  - meson-python
+  - setuptools
+  - setuptools-scm  # for version number generation
+  - toml  # needed by uhdas_cfg_api
+  - git
+  - gitpython
+  - pmw
+  
