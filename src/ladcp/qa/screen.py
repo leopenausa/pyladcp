@@ -20,6 +20,7 @@ The bit-exact gate stops at pg/errvel/tilt — the edits that are unambiguous on
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -106,6 +107,40 @@ def screen(dh: DualHead, params: CastParams | None = None) -> ScreenResult:
         res.warnings.append(
             f"**  found  {n_mid}  horizontal velocities > {int(p.vlim)}m/s in middle hour of cast")
     return res
+
+
+# near-field / far-field error-velocity ratio: a rigid target hung below the package
+# (e.g. a corer on a short cable) reads the package's motion, not the water, doubling
+# |errvel| at its fixed range. MORIA scan: contaminated casts 1.69-2.35, clean <= 1.41.
+NEARFIELD_RANGE = (18.0, 42.0)      # m, down-looker ranges a short-cable device occupies
+NEARFIELD_FAR_MIN = 50.0            # m, far-field baseline starts here
+NEARFIELD_WARN_RATIO = 1.7
+
+
+def nearfield_errvel_ratio(dh: DualHead) -> float:
+    """Hottest near-field down-looker bin's median|errvel| over the far field.
+
+    A non-destructive hung-device detector: > ~1.7 means something rigid is reflecting
+    at short range below the package (see the MORIA monocorer block 03-28). The device
+    occupies only one or two bins, so the near-field statistic is the MAX of the
+    per-bin medians (a pooled median would dilute it with clean neighbours). It removes
+    no data -- pair it with ``edit_nearfield_dn_bins`` to actually mask the cells.
+    """
+    d = dh.down
+    ev = np.abs(d.vel[_ERR_COMP].astype(float))
+    rng = dh.bin_depth(d)
+    near = (rng >= NEARFIELD_RANGE[0]) & (rng < NEARFIELD_RANGE[1])
+    far = rng >= NEARFIELD_FAR_MIN
+    if near.sum() < 1 or far.sum() < 2:
+        return float("nan")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)    # all-NaN bins on sparse casts
+        per_bin = np.nanmedian(ev[near], axis=1)
+        m_near = np.nanmax(per_bin) if np.isfinite(per_bin).any() else np.nan
+        m_far = np.nanmedian(ev[far])
+    if not (np.isfinite(m_near) and np.isfinite(m_far)) or m_far <= 0:
+        return float("nan")
+    return float(m_near / m_far)
 
 
 def _hspeed_count(dh: DualHead, vlim: float) -> int:

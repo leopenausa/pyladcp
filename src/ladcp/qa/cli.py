@@ -45,7 +45,10 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     ``"fail"``) and ``export`` is a :class:`~ladcp.export.StationExport` when a velocity
     solution was produced (``None`` for acquisition-only stations).
     """
-    params = resolve_params(cruise, station)
+    overrides = {}
+    if inv_opts and inv_opts.get("nearfield_dn_bins") is not None:
+        overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
+    params = resolve_params(cruise, station, overrides=overrides or None)
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
     ctd = read_ctd_cnv(ctd_path, params=params) if ctd_path else None
@@ -291,6 +294,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="solve velocity from the down-looker alone, ignoring any up-looker "
                          "(cross-check / single-instrument casts); acquisition QA still "
                          "covers both heads")
+    ap.add_argument("--nearfield-dn-bins", metavar="LIST", default=None,
+                    help="override the down-looker near-field device mask: comma 1-based "
+                         "bins (e.g. 3,4) or 'none' to disable; default: the cruise preset "
+                         "(MORIA sets 3,4 on the monocorer block 03-28)")
     # ship-ADCP (SADCP) constraint (inverse solver only)
     ap.add_argument("--sadcp", metavar="DIR",
                     help="VmDAS shipboard-ADCP folder (STA/LTA) for the inverse constraint; "
@@ -347,8 +354,17 @@ def main(argv: list[str] | None = None) -> int:
         sadcp_opts = {"folder": args.sadcp, "fac": args.sadcpfac,
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
                       "reingest": args.sadcp_reingest}
+    nearfield = None
+    if args.nearfield_dn_bins is not None:
+        s = args.nearfield_dn_bins.strip().lower()
+        try:
+            nearfield = () if s in ("none", "") else tuple(
+                int(b) for b in s.split(",") if b.strip())
+        except ValueError:
+            ap.error(f"--nearfield-dn-bins: expected comma-separated bin numbers or "
+                     f"'none', got {args.nearfield_dn_bins!r}")
     inv_opts = {"botfac": args.botfac, "barofac": args.barofac, "smoofac": args.smoofac,
-                "down_only": args.down_only}
+                "down_only": args.down_only, "nearfield_dn_bins": nearfield}
 
     # resolve the work list: explicit single file set, or a batch of station ids
     explicit = bool(args.down)
