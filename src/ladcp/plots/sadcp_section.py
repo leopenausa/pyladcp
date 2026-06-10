@@ -1,9 +1,9 @@
 """Shipboard-ADCP velocity sections — depth vs time or along-track distance.
 
 Renders the absolute ocean velocity carried by a :class:`~ladcp.io.sadcp_vmdas.
-SadcpDataset` (raw VmDAS today; the CODAS-processed reader will produce the same
-dataset, so these sections work for both sources) as u/v pcolormesh panels, with
-optional LADCP station ticks from the cruise archive index.
+SadcpDataset` (raw VmDAS via ``--source vmdas``, CODAS-processed NetCDF via
+``--source codas``) as u/v pcolormesh panels, with optional LADCP station ticks
+from the cruise archive index.
 
 CLI::
 
@@ -185,8 +185,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ladcp-sadcp-section",
         description="Shipboard-ADCP u/v sections (depth vs time or distance)")
-    ap.add_argument("--sadcp", required=True, metavar="DIR",
-                    help="VmDAS folder (STA/LTA; ingested once and cached)")
+    ap.add_argument("--sadcp", required=True, metavar="PATH",
+                    help="VmDAS folder (STA/LTA; ingested once and cached) or, with "
+                         "--source codas, a CODAS contour NetCDF (file or processing dir)")
+    ap.add_argument("--source", choices=("vmdas", "codas"), default="vmdas",
+                    help="what --sadcp points at: raw VmDAS averages (default) or a "
+                         "CODAS-processed NetCDF product")
     ap.add_argument("--by", choices=("time", "distance"), default="time",
                     help="x-axis: ship clock (default) or along-track distance")
     ap.add_argument("--filetype", choices=("STA", "LTA"), default="STA")
@@ -207,9 +211,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="output PNG (default sadcp_section.png)")
     args = ap.parse_args(argv)
 
-    from ..io.sadcp_vmdas import load_or_ingest
-    ds = load_or_ingest(args.sadcp, file_type=args.filetype,
-                        transducer_depth=args.xducer)
+    if args.source == "codas":
+        from ..io.sadcp_codas import read_codas_nc
+        ds = read_codas_nc(args.sadcp)
+    else:
+        from ..io.sadcp_vmdas import load_or_ingest
+        ds = load_or_ingest(args.sadcp, file_type=args.filetype,
+                            transducer_depth=args.xducer)
     stations = _index_stations(args.index) if args.index else None
     title = args.title or f"{Path(args.sadcp).resolve().parent.name} ship-ADCP section"
     sadcp_section_figure(ds, by=args.by, time_start=args.start, time_end=args.end,

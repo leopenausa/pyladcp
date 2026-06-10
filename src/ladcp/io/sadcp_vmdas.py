@@ -65,7 +65,7 @@ class SadcpDataset:
     v: np.ndarray               # [z, t] absolute ocean north, m/s
     freq_khz: int
     transducer_depth: float
-    file_type: str              # "STA" or "LTA"
+    file_type: str              # "STA"/"LTA" (raw VmDAS) or "CODAS" (sadcp_codas)
     source: str                 # ingested folder
     n_files: int
 

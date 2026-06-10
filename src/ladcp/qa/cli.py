@@ -165,9 +165,14 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
                   zbottom=result.zbottom, time=when)
         log.info("        bottom-track: %s  (%d bins)", bot, bp.n_bins)
 
+    if sadcp_opts and sadcp is not None:
+        sadcp_src = sadcp_opts["folder"]
+        if sadcp_opts.get("source") == "codas":
+            sadcp_src = f"codas:{sadcp_src}"        # provenance: CODAS-calibrated product
+    else:
+        sadcp_src = None
     meta = {"lat": lat, "lon": lon, "when": when, "drot": drot, "drot_source": drot_source,
-            "sadcp_source": (sadcp_opts.get("folder") if sadcp_opts and sadcp is not None
-                             else None)}
+            "sadcp_source": sadcp_src}
     return result, meta
 
 
@@ -237,21 +242,27 @@ def _write_cruise_exports(exports, outdir, cruise, formats) -> None:
 
 
 def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
-    """Build the cast's ship-ADCP constraint profile from a VmDAS folder.
+    """Build the cast's ship-ADCP constraint profile from a VmDAS folder or CODAS file.
 
-    Ingests (and caches) the folder once, then windows it to this cast's LADCP time span
-    and position. Only the ``inverse`` solver consumes the constraint; with ``shear`` the
-    folder is ignored with a notice. Returns the ``svel`` array or ``None``.
+    Loads the dataset once (raw VmDAS folder ingested+cached, or a CODAS-processed
+    NetCDF read directly per ``--sadcp-source``), then windows it to this cast's LADCP
+    time span and position. Only the ``inverse`` solver consumes the constraint; with
+    ``shear`` the folder is ignored with a notice. Returns the ``svel`` array or ``None``.
     """
     if solver != "inverse":
         log.info("        sadcp: ignored (constraint applies only to --solver inverse)")
         return None
-    from ..io.sadcp_vmdas import extract_profile, load_or_ingest
+    from ..io.sadcp_vmdas import extract_profile
 
-    ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
-                        force=opts.get("reingest", False),
-                        file_type=opts.get("file_type", "STA"),
-                        transducer_depth=opts.get("xducer", 5.0))
+    if opts.get("source") == "codas":
+        from ..io.sadcp_codas import read_codas_nc
+        ds = read_codas_nc(opts["folder"])
+    else:
+        from ..io.sadcp_vmdas import load_or_ingest
+        ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
+                            force=opts.get("reingest", False),
+                            file_type=opts.get("file_type", "STA"),
+                            transducer_depth=opts.get("xducer", 5.0))
     sv = extract_profile(ds, time_start=time_start, time_end=time_end, lat=lat, lon=lon,
                          dtok_min=opts.get("dtok_min", 0.0))
     if sv is None:
@@ -299,9 +310,14 @@ def main(argv: list[str] | None = None) -> int:
                          "bins (e.g. 3,4) or 'none' to disable; default: the cruise preset "
                          "(MORIA sets 3,4 on the monocorer block 03-28)")
     # ship-ADCP (SADCP) constraint (inverse solver only)
-    ap.add_argument("--sadcp", metavar="DIR",
-                    help="VmDAS shipboard-ADCP folder (STA/LTA) for the inverse constraint; "
-                         "ingested once and cached as sadcp_cache.npz")
+    ap.add_argument("--sadcp", metavar="PATH",
+                    help="shipboard-ADCP data for the inverse constraint: a VmDAS folder "
+                         "(STA/LTA; ingested once and cached as sadcp_cache.npz) or, with "
+                         "--sadcp-source codas, a CODAS contour NetCDF (file or its "
+                         "processing dir)")
+    ap.add_argument("--sadcp-source", choices=("vmdas", "codas"), default="vmdas",
+                    help="what --sadcp points at: raw VmDAS averages (default) or a "
+                         "CODAS-processed (edited+calibrated) NetCDF product")
     ap.add_argument("--sadcpfac", type=float, default=3.0,
                     help="ship-ADCP constraint weight (default: 3, the golden value)")
     ap.add_argument("--sadcp-filetype", choices=("STA", "LTA"), default="STA",
@@ -351,7 +367,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sadcp_opts = None
     if args.sadcp:
-        sadcp_opts = {"folder": args.sadcp, "fac": args.sadcpfac,
+        sadcp_opts = {"folder": args.sadcp, "source": args.sadcp_source,
+                      "fac": args.sadcpfac,
                       "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
                       "reingest": args.sadcp_reingest}
     nearfield = None
