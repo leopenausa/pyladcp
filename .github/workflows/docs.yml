@@ -34,7 +34,7 @@ jobs:
       - name: Build PDF
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q pandoc texlive-xetex texlive-fonts-recommended
+          sudo apt-get install -y -q pandoc texlive-xetex texlive-fonts-recommended fonts-dejavu
           bash scripts/build_guide_pdf.sh site/pyladcp_guide.pdf
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4

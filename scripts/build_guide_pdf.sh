@@ -29,6 +29,8 @@ pandoc "${CHAPTERS[@]}" \
   --from gfm+attributes \
   --resource-path="$G" \
   --pdf-engine=xelatex \
+  -V mainfont="DejaVu Serif" \
+  -V monofont="DejaVu Sans Mono" \
   --toc --toc-depth=2 \
   -V title="Processing LADCP data with pyladcp" \
   -V author="Leopoldo D. Pena — Universitat de Barcelona" \
