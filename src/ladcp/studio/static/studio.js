@@ -406,23 +406,15 @@ function draw(p) {
     }
   }
 
-  // ship-ADCP constraint profile (open squares; faint ±verr whiskers, true frame)
+  // ship-ADCP constraint profile (open squares, true frame; verr stays in the
+  // payload but is not drawn — raw STA error bars are too wide to be useful here)
   if (p.sadcp) {
-    ctx.strokeStyle = "#e8f2fb"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#e8f2fb"; ctx.lineWidth = 1; ctx.globalAlpha = 0.95;
     for (let i = 0; i < p.sadcp.z.length; i++) {
-      const zz = p.sadcp.z[i], verr = p.sadcp.verr[i];
+      const zz = p.sadcp.z[i];
       for (const [comp, pane] of [[p.sadcp.u, panes.u], [p.sadcp.v, panes.v]]) {
         if (comp[i] === null || zz === null) continue;
-        const x = X(comp[i], pane, vmax), y = Y(zz);
-        if (verr !== null) {                     // raw STA verr is wide: keep it subtle
-          ctx.globalAlpha = 0.18;
-          ctx.beginPath();
-          ctx.moveTo(X(comp[i] - verr, pane, vmax), y);
-          ctx.lineTo(X(comp[i] + verr, pane, vmax), y);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 0.95;
-        ctx.strokeRect(x - 2.4, y - 2.4, 4.8, 4.8);
+        ctx.strokeRect(X(comp[i], pane, vmax) - 2.4, Y(zz) - 2.4, 4.8, 4.8);
       }
     }
     ctx.globalAlpha = 1;
