@@ -128,7 +128,7 @@ def _load_index(path: Path) -> dict:
     """Read an archive-index JSON (``{}`` if missing/corrupt). Kept here to avoid a cycle."""
     import json
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 

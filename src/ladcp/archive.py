@@ -167,7 +167,7 @@ def build_index(
         "scan_cache": scan,
         "casts": casts,
     }
-    out_path.write_text(json.dumps(index, indent=2, sort_keys=True))
+    out_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
     return index
 
 
@@ -210,7 +210,7 @@ def _match_master(utc: np.datetime64, m_info: dict) -> tuple[str | None, str]:
 def _load_raw(path: Path) -> dict:
     if Path(path).exists():
         try:
-            return json.loads(Path(path).read_text())
+            return json.loads(Path(path).read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
     return {}

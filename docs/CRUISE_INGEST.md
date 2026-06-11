@@ -26,10 +26,10 @@ ladcp-index --root <work> build --ladcp <raw>/LADCP --ctd <raw>/CTD
 ## 2. Process every station
 
 ```bash
-ladcp-qa $(jq -r '.casts | keys[]' <work>/.ladcp_archive.json) \
+ladcp-qa --all-stations \
     --index <work>/.ladcp_archive.json --root <work> \
     --from-hex --ctd-cache <work>/ctd_from_hex \
-    --cruise <NAME> --out <out> --cruise-export
+    --cruise <NAME> --out <out>
 ```
 
 * `--cruise <NAME>`: any name works — an unregistered cruise gets the shared

@@ -61,8 +61,9 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     st_dir = Path(outdir) / "stations" / station
     fig_dir = st_dir / "figures"
     st_dir.mkdir(parents=True, exist_ok=True)
-    (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n")
-    (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
+    (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n", encoding="utf-8")
+    (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2),
+                                               encoding="utf-8")
     log.info("[%-5s] %s  ->  %s/", qc.overall_status.value.upper(), station, st_dir)
 
     # velocity solve (requires CTD + earth-frame data): .lad + .bot text, figures
@@ -98,8 +99,9 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
             qc.add(m)
         qc.add(_declination_metric(meta["drot"], meta["drot_source"]))
         # refresh the persisted QA text/json now that consistency checks are in
-        (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n")
-        (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2))
+        (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n", encoding="utf-8")
+        (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2),
+                                                   encoding="utf-8")
         from ..export import StationExport
         export = StationExport(station=station, cruise=cruise, lat=meta["lat"],
                                lon=meta["lon"], time=meta["when"], drot=meta["drot"],
@@ -515,7 +517,7 @@ def _all_station_labels(index, root: Path, cruise: str) -> list[str]:
 
     idx_path = Path(index) if index else root / ".ladcp_archive.json"
     try:
-        idx = json.loads(idx_path.read_text())
+        idx = json.loads(idx_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     return sorted((idx.get("casts") or {}).keys())

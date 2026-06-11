@@ -207,7 +207,7 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
 def _index_stations(index_path: str):
     """LADCP casts from an archive index as ``(label, utc)`` (skips undated)."""
     import json
-    d = json.load(open(index_path))
+    d = json.load(open(index_path, encoding="utf-8"))
     casts = d.get("casts", d)
     return sorted(((st, c["utc"]) for st, c in casts.items() if c.get("utc")),
                   key=lambda s: s[1])

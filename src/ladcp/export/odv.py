@@ -61,5 +61,5 @@ def write_odv(exports: list[StationExport], path: str, *, cruise: str = "") -> s
             lines.append("\t".join(meta + data))
 
     text = "\n".join(lines) + "\n"
-    Path(path).write_text(text)
+    Path(path).write_text(text, encoding="utf-8")
     return path
