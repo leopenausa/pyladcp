@@ -120,3 +120,41 @@ def test_index_page_served(client):
 
 def test_config_from_body_defaults_match_sessionconfig():
     assert config_from_body({}, StudioState([])) == SessionConfig()
+
+
+# ---------------------------------------------------------------- QA panels (PR 4)
+
+def test_qa_panel_returns_png(client):
+    r = client.post("/api/station/MORIA-80/qa/velocity",
+                    json={"solve": {"drot": -9.878379}})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(r.content) > 10_000                # a real figure, not a stub
+
+
+def test_qa_panel_cached_second_time(client):
+    body = {"solve": {"drot": -9.878379}}
+    first = client.post("/api/station/MORIA-80/qa/shear", json=body)
+    again = client.post("/api/station/MORIA-80/qa/shear", json=body)
+    assert first.status_code == again.status_code == 200
+    assert first.content == again.content         # byte-identical from the PNG cache
+
+
+def test_qa_unknown_panel_is_404(client):
+    r = client.post("/api/station/MORIA-80/qa/nonsense", json={})
+    assert r.status_code == 404
+    assert "not available" in r.json()["detail"]
+
+
+def test_qa_unavailable_panel_is_404(client):
+    # no --sadcp at launch -> the sadcp panel cannot render
+    r = client.post("/api/station/MORIA-80/qa/sadcp", json={})
+    assert r.status_code == 404
+
+
+def test_solve_lists_available_panels(client):
+    r = client.post("/api/station/MORIA-80/solve", json={"solve": {"drot": -9.878379}})
+    panels = r.json()["panels"]
+    assert "velocity" in panels and "raw" in panels and "weights" in panels
+    assert "sadcp" not in panels                  # no SADCP source at launch

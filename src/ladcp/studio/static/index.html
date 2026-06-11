@@ -14,6 +14,7 @@
     <select id="station" class="station-select" title="station"></select>
     <div id="status" class="solve-state"><span class="dot"></span><span id="status-text">connecting…</span></div>
     <div class="spacer"></div>
+    <button class="btn" id="pinbtn" title="freeze the current solution as a ghost overlay">⊕ pin</button>
     <button class="btn" id="copycli" title="copy the ladcp-qa command reproducing this solution">copy CLI</button>
   </header>
 
@@ -50,6 +51,18 @@
     </div>
 
     <div class="sect">
+      <h3>Editing <span class="rebuild-note">rebuilds ~1.5 s</span></h3>
+      <div class="field">
+        <label for="in-nearfield">near-field bins <small>e.g. 3,4 · none</small></label>
+        <input id="in-nearfield" type="text" placeholder="cruise preset" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="in-dzbelow">dzbelow <small>[m] seabed margin</small></label>
+        <input id="in-dzbelow" type="number" step="8" min="0" placeholder="cruise preset">
+      </div>
+    </div>
+
+    <div class="sect">
       <h3>Solution</h3>
       <div class="readouts">
         <div class="ro"><div class="k">declination</div><div class="v" id="ro-drot">–</div></div>
@@ -68,6 +81,8 @@
         <span class="key"><i class="ln v"></i>v north</span>
         <span class="key"><i class="dot-bt"></i>bottom track</span>
         <span class="key"><i class="band"></i>±1σ</span>
+        <span class="key"><i class="ln ghost"></i>pins</span>
+        <span class="key dim">Δ = live − selected pin</span>
       </div>
     </div>
     <div class="plot-wrap">
@@ -76,6 +91,33 @@
     </div>
     <div class="cli-bar"><span class="cli-label">CLI</span><code id="cli">–</code></div>
   </main>
+
+  <aside class="side">
+    <div class="sect">
+      <h3>Pinned solutions</h3>
+      <div id="pins"></div>
+      <div class="hint" id="pins-hint">⊕ pin freezes the current profile as a dashed
+        overlay; click a pin to make it the Δ reference.</div>
+    </div>
+    <div class="sect">
+      <h3>QA panels</h3>
+      <div id="qa-list" class="qa-list"></div>
+      <div class="hint">rendered for the current configuration (the same matplotlib
+        figures as the ladcp-qa report)</div>
+    </div>
+  </aside>
+
+  <div id="lightbox" class="lightbox hidden">
+    <div class="lightbox-frame">
+      <div class="lightbox-head">
+        <span id="lightbox-title">panel</span>
+        <span class="spacer"></span>
+        <span id="lightbox-state" class="dim"></span>
+        <button class="btn" id="lightbox-close">✕</button>
+      </div>
+      <img id="lightbox-img" alt="QA panel">
+    </div>
+  </div>
 
 </div>
 <script src="./studio.js"></script>
