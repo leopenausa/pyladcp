@@ -1,0 +1,61 @@
+site_name: Processing LADCP data with pyladcp
+site_description: The pyladcp processing guide — from raw PD0 files to quality-assessed ocean velocity profiles
+site_url: https://leopenausa.github.io/pyladcp/
+repo_url: https://github.com/leopenausa/pyladcp
+repo_name: leopenausa/pyladcp
+
+docs_dir: docs/guide
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.footer
+    - content.code.copy
+    - toc.integrate
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - footnotes
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - "1 · LADCP primer": 01-primer.md
+  - "2 · Before you process": 02-before-you-process.md
+  - "3 · Installation": 03-installation.md
+  - "4 · First station in 10 minutes": 04-first-station.md
+  - "5 · Whole-cruise workflow": 05-cruise-workflow.md
+  - "6 · Reading the QA report": 06-qa-report.md
+  - "7 · Solvers & weight tuning": 07-solvers-weights.md
+  - "8 · Ship-ADCP integration": 08-ship-adcp.md
+  - "9 · Troubleshooting": 09-troubleshooting.md
+  - Appendices:
+      - "A · CLI flag reference": appendix-a-flags.md
+      - "B · LDEO_IX ↔ pyladcp mapping": appendix-b-legacy-map.md
+      - "C · File formats": appendix-c-formats.md
+      - "D · Logsheet templates": appendix-d-logsheets.md
+      - "E · Glossary": appendix-e-glossary.md

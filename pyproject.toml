@@ -38,6 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["ruff", "pytest", "pre-commit"]
 export = ["openpyxl"]
+docs = ["mkdocs-material"]
 
 [project.urls]
 Homepage = "https://github.com/leopenausa/pyladcp"
