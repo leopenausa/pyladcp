@@ -159,7 +159,7 @@ def _generic_params(station: str, cruise_id: str) -> CastParams:
     """Operator-community defaults for a cruise without a dedicated preset.
 
     These are the ``set_cast_params.m`` values shared verbatim by every cruise
-    seen so far (MORIA, FDCCC1): dual-head, bin-1 masked both heads, dz=8,
+    seen so far: dual-head, bin-1 masked both heads, dz=8,
     cut=7, pglim=50, elim=0.2, vlim=1, wlim=0.08, tilt 22/4, btrk_mode=3.
     Cruise-specific layers (e.g. MORIA's monocorer near-field mask) belong in
     a dedicated preset; nothing cruise-specific is applied here.

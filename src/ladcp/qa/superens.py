@@ -75,7 +75,7 @@ def compass_offset(dh: DualHead, window: tuple[int, int] | None = None) -> float
     over the full record (most heading coverage) and is cross-checked against the
     in-water-only estimate: when the two disagree by more than ~5 deg the deck
     segment is corrupting the comparison (the up-looker compass can read garbage on
-    deck -- FDCCC1 t2-02's full-record estimate was 17 deg off, rotating the merged
+    deck -- cruise-2 t2-02's full-record estimate was 17 deg off, rotating the merged
     up-looker velocities and putting ~6 cm/s of cross-component error on the cast)
     and the in-water value -- the span the solution actually uses -- wins.
     """

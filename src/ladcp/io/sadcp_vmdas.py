@@ -199,7 +199,7 @@ def ingest_dir(folder: str | Path, *, file_type: str = "STA",
     time = np.concatenate(times)
     # an acquisition folder can hold the same ensembles twice (e.g. a compiled
     # whole-cruise STA next to the per-deployment files it was built from, as on
-    # FDCCC1) -- identical timestamps are the same ping average, keep one
+    # cruise 2) -- identical timestamps are the same ping average, keep one
     _, order = np.unique(time, return_index=True)   # time-sorted, first occurrence wins
     return SadcpDataset(
         time=time[order],

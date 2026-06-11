@@ -132,7 +132,7 @@ def test_superens_velocities_sensible(merged, dh_sync):
     assert np.nanmin(se.ruvs) >= merged.std_min - 1e-9
 
 
-# --- compass_offset: in-water window vs deck corruption (FDCCC1 t2-02) ---------------
+# --- compass_offset: in-water window vs deck corruption (CRUISE2 t2-02) ---------------
 def _heads(hd, hu):
     from types import SimpleNamespace
     return SimpleNamespace(down=SimpleNamespace(heading=hd),
@@ -162,7 +162,7 @@ def test_compass_offset_deck_garbage_falls_back_to_inwater():
     hu = (hd - 168.0) % 360.0
     # on deck the package lies differently, so the up-looker compass tracks the
     # down heading at the WRONG relative angle -- correlated corruption that
-    # drags the binned cross-product (the FDCCC1 t2-02 signature: 17 deg off)
+    # drags the binned cross-product (the CRUISE2 t2-02 signature: 17 deg off)
     hu[:1500] = (hd[:1500] - 30.0) % 360.0
     dh = _heads(hd, hu)
     full = compass_offset(dh)

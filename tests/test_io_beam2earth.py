@@ -102,16 +102,16 @@ def test_up_and_down_differ():
     assert not np.allclose(e_down[:3], e_up[:3])
 
 
-_FDCCC1 = Path("FDCCC1") / "MA001000.000"
+_CRUISE2 = Path("CRUISE2_raw") / "MA001000.000"
 
 
-@pytest.mark.skipif(not _FDCCC1.exists(), reason="FDCCC1 raw not on disk")
+@pytest.mark.skipif(not _CRUISE2.exists(), reason="CRUISE2 raw not on disk")
 def test_read_pd0_flips_beam_to_earth():
     """A real beam-coordinate file ingests as EARTH with finite, physical velocities."""
     from ladcp.io.pd0 import read_pd0
     from ladcp.models import CoordFrame
 
-    d = read_pd0(str(_FDCCC1))
+    d = read_pd0(str(_CRUISE2))
     assert d.coord_frame == CoordFrame.EARTH
     assert d.meta["beam_angle_deg"] == 20
     assert d.meta["beam2earth"]["n_3beam"] > 0

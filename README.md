@@ -201,9 +201,31 @@ distributed here. The method is described in:
 The LDEO_IX software itself is maintained at Lamont-Doherty and distributed at
 <https://www.ldeo.columbia.edu/~ant/LADCP.html>.
 
-If you use pyladcp in your research, please cite both this package (see
-[`CITATION.cff`](CITATION.cff) — GitHub's "Cite this repository" button generates the
-reference) and Visbeck (2002).
+## Citing & acknowledging pyladcp
+
+If pyladcp contributes to your work, please:
+
+1. **Cite this package** — use GitHub's *"Cite this repository"* button (top-right of the
+   repo page; it reads [`CITATION.cff`](CITATION.cff)), or cite:
+
+   > Pena, L. D. (2026). *pyladcp: Pythonic LADCP processing and acquisition-quality
+   > assessment* (v0.2.0) [Computer software]. https://github.com/leopenausa/pyladcp
+
+2. **Cite Visbeck (2002)** for the underlying inverse method (reference above).
+
+3. **Acknowledge the source** in publications that use velocity profiles produced with
+   pyladcp, e.g.: *"LADCP velocity profiles were processed with pyladcp
+   (Pena, 2026), a Python implementation of the LDEO_IX inverse method (Visbeck, 2002)."*
+
+## Contact
+
+**Leopoldo D. Pena** — Universitat de Barcelona —
+[lpena@ub.edu](mailto:lpena@ub.edu) —
+[ORCID 0000-0001-6414-6293](https://orcid.org/0000-0001-6414-6293)
+
+Questions, bug reports and processing problems: please open an
+[issue](https://github.com/leopenausa/pyladcp/issues). For collaboration or cruise-data
+questions, email is best.
 
 ## License
 

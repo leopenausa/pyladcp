@@ -11,20 +11,20 @@ station         depth m   region                reference        SADCP
 ==============  =======  ====================  ===============  =====
 MORIA-80         1073     N Atlantic            Nav + Bottom      no
 MORIA-10          549     Gulf of Biscay        Nav + Bottom      no
-FDCCC1_001        125     W Med (Cap de Creus)  Nav + Bottom      no [1]
-FDCCC1_002        225     W Med                 Nav + Bottom + S  YES
+CRUISE2_001        125     shelf/canyon (cruise 2)  Nav + Bottom      no [1]
+CRUISE2_002        225     cruise 2                 Nav + Bottom + S  YES
 ==============  =======  ====================  ===============  =====
 
-[1] FDCCC1_001 *requested* SADCP (``p.sadcp=75``, ``ps.sadcpfac=3``) but the SADCP file
+[1] CRUISE2_001 *requested* SADCP (``p.sadcp=75``, ``ps.sadcpfac=3``) but the SADCP file
     was missing at runtime -- its log reports "no SADCP data", so only Nav + Bottom were
-    used. FDCCC1_002 is the only golden that truly exercised the SADCP constraint
+    used. CRUISE2_002 is the only golden that truly exercised the SADCP constraint
     (9 profiles survived time/space matching; ``CHECKSADCP rms 0.020``).
 
 This module reads the golden ``dr`` velocity targets straight from each ``.mat`` (the
 single source of truth, never hardcoded) and scores a computed profile against them.
 The SADCP constraint rows the golden actually used are embedded in ``dr.z_sadcp`` /
 ``u_sadcp`` / ``v_sadcp`` / ``uerr_sadcp`` -- so the ``lainsadcp`` block can be validated
-against a real golden even before the raw FDCCC1 inputs are available. The companion
+against a real golden even before the raw cruise-2 inputs are available. The companion
 :data:`STATIONS` registry records, per station, whether the *raw* inputs are on disk
 (only then can the full pipeline run end-to-end).
 """
@@ -69,7 +69,7 @@ class Station:
     raw_down: Path | None = None    # raw down-looker PD0, if local
     raw_up: Path | None = None      # raw up-looker PD0, if local
     ctd: Path | None = None         # cleaned CTD .cnv, if local
-    drot: float | None = None       # golden p.drot, when known (NaN in FDCCC1/MORIA-10)
+    drot: float | None = None       # golden p.drot, when known (NaN in CRUISE2/MORIA-10)
 
     @property
     def has_raw(self) -> bool:
@@ -81,7 +81,7 @@ class Station:
 
 # MORIA-80 raw lives in the committed test fixture; MORIA-10 raw is the VmDAS archive under
 # raw_ladcp_test/ (master MLADC012 + slave SLADC013, paired by time via discovery -- the
-# deployment indices are offset by one); FDCCC1 raw is not on disk (pending). The MORIA-10
+# deployment indices are offset by one); cruise-2 raw is local-only. The MORIA-10
 # golden's p.drot=-3.5687 is the legacy IGRF00 value (true IGRF-13 here is ~-1.25); we score
 # against the golden frame, so we use its drot to isolate solver quality -- see
 # ladcp-magdec-finding.
@@ -106,21 +106,21 @@ STATIONS: dict[str, Station] = {
         ctd=_REPO / "clean_ctd" / "moria-10_clean.cnv",
         drot=-3.568734,
     ),
-    "FDCCC1_001": Station(
-        name="FDCCC1_001",
-        mat=_GOLDEN / "FDCCC1_001_LEO" / "FDCCC1_001.mat",
-        depth_m=125.0, region="W Med (Cap de Creus)", uses_sadcp=False,
-        raw_down=_REPO / "FDCCC1" / "MA001000.000",     # beam coords -> b2earth at ingest
-        raw_up=_REPO / "FDCCC1" / "SL001000.000",
-        ctd=_REPO / "FDCCC1" / "FDCCC1_001.cnv",
+    "CRUISE2_001": Station(
+        name="CRUISE2_001",
+        mat=_GOLDEN / "CRUISE2_001_LEO" / "CRUISE2_001.mat",
+        depth_m=125.0, region="shelf/canyon (cruise 2)", uses_sadcp=False,
+        raw_down=_REPO / "CRUISE2_raw" / "MA001000.000",     # beam coords -> b2earth at ingest
+        raw_up=_REPO / "CRUISE2_raw" / "SL001000.000",
+        ctd=_REPO / "CRUISE2_raw" / "CRUISE2_001.cnv",
     ),
-    "FDCCC1_002": Station(
-        name="FDCCC1_002",
-        mat=_GOLDEN / "FDCCC1_002_LEO" / "FDCCC1_002.mat",
-        depth_m=225.0, region="W Med (Cap de Creus)", uses_sadcp=True,
-        raw_down=_REPO / "FDCCC1" / "MA002000.000",
-        raw_up=_REPO / "FDCCC1" / "SL002000.000",
-        ctd=_REPO / "FDCCC1" / "FDCCC1_002.cnv",
+    "CRUISE2_002": Station(
+        name="CRUISE2_002",
+        mat=_GOLDEN / "CRUISE2_002_LEO" / "CRUISE2_002.mat",
+        depth_m=225.0, region="shelf/canyon (cruise 2)", uses_sadcp=True,
+        raw_down=_REPO / "CRUISE2_raw" / "MA002000.000",
+        raw_up=_REPO / "CRUISE2_raw" / "SL002000.000",
+        ctd=_REPO / "CRUISE2_raw" / "CRUISE2_002.cnv",
     ),
 }
 

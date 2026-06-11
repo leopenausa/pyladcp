@@ -108,7 +108,7 @@ def _coord_frame_metrics(dh: DualHead) -> tuple[list[Metric], bool]:
 def _sync_quality_metrics(dh: DualHead, sync) -> list[Metric]:
     """Fail-loud guards that the CTD<->LADCP synchronization actually landed on the cast.
 
-    The single most dangerous silent failure (FDCCC1_001) was a mis-sync that mapped the CTD
+    The single most dangerous silent failure (CRUISE2_001) was a mis-sync that mapped the CTD
     depth onto the ADCP's on-deck pings: every metric still computed, but the in-water depth
     window contained no valid velocity and the profile collapsed to empty. These two flags make
     that loud. Pure flags -- they change no result.

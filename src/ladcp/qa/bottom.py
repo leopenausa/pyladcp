@@ -207,7 +207,7 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
         # visible span. A constant-*range* artifact (multiple / previous-ping interference) only
         # crosses the constant-depth lock line over a narrow band of package depths, so its
         # support is a thin cluster. Reject a narrow-support lock and fall back to the near-touch
-        # zmax bound rather than report the artifact (FDCCC1_001: 242 m lock, golden 127 m;
+        # zmax bound rather than report the artifact (CRUISE2_001: 242 m lock, golden 127 m;
         # support covers only 26% vs >=61% on every genuine lock across 40 MORIA + FDCCC casts).
         near0 = np.isfinite(botdepth) & (np.abs(botdepth - zstack) < _SEABED_REFINE_WIN)
         is_echo = _support_cover(z[near0], zstack, zmax) >= _STACK_COVER_MIN
@@ -421,7 +421,7 @@ def _boutlier(bvel: np.ndarray, bw: np.ndarray, *, nfac=(4.0, 3.0)) -> None:
 
 
 # legacy loadrdi screens the RDI firmware bottom track with its own (pre-set_cast_params)
-# defaults -- the diary prints "error velocity > 0.5" / "horizontal speed > 2.5" on FDCCC1
+# defaults -- the diary prints "error velocity > 0.5" / "horizontal speed > 2.5" on cruise 2
 _RDI_BT_ELIM = 0.5          # |error velocity| limit [m/s]
 _RDI_BT_VLIM = 2.5          # horizontal speed limit [m/s]
 
@@ -441,7 +441,7 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_mode: int = 3,
     when RDI is available biases the reference on strong-drift casts: the cell
     ``btrk_below`` bins past the echo maximum still carries boundary-layer water
     velocity, which leaks ~10-15% of the current into the package velocity
-    (FDCCC1 t1-01/t1-02/t99-03, -4..-6 cm/s whole-profile offsets).
+    (cruise-2 t1-01/t1-02/t99-03, -4..-6 cm/s whole-profile offsets).
 
     Own track: locate the bottom echo by parabola fit (:func:`localmax2`), pick
     the cell ``btrk_below`` bins past the target-strength maximum, median

@@ -4,7 +4,7 @@ RDI ADCPs can record single-ping velocities along each of the four slanted beams
 in earth coordinates. The LDEO_IX toolbox rotates them to earth at load time (``loadrdi.m``
 calls ``b2earth`` per head for the water velocity and the four bottom-track beam velocities,
 each with that head's own heading/pitch/roll). pyladcp previously had no such transform, so
-beam-coordinate cruises (e.g. FDCCC1) could not be processed. This is a faithful, vectorized
+beam-coordinate cruises could not be processed. This is a faithful, vectorized
 port of ``b2earth`` (``loadrdi.m`` lines 1567-1768).
 
 The resulting earth frame is *magnetic* ``(east, north, up, error)`` -- magnetic declination is

@@ -45,8 +45,8 @@ def test_resolve_params_applies_overrides_last():
 def test_resolve_params_unknown_cruise_falls_back_to_generic():
     # a cruise without a preset must still process (and label exports) correctly:
     # generic operator defaults, its own cruise_id, no MORIA-specific layers
-    p = resolve_params("FDCCC1", "t1-05")
-    assert p.cruise_id == "FDCCC1" and p.station == "t1-05"
+    p = resolve_params("CRUISE2", "t1-05")
+    assert p.cruise_id == "CRUISE2" and p.station == "t1-05"
     assert p.pglim == 50.0 and p.cut == 7.0 and p.btrk_mode == 3
     assert p.edit_nearfield_dn_bins == ()        # the monocorer mask is MORIA's, not generic
     assert p.sadcp == 0 and p.drot is None
@@ -85,7 +85,7 @@ def test_best_overlap_none_when_disjoint():
 def test_normalize_bare_id_to_label():
     assert D._normalize("MORIA", "10") == "MORIA-10"
     assert D._normalize("MORIA", "MORIA-10") == "MORIA-10"      # label passes through
-    assert D._normalize("MORIA", "FDCCC1_002") == "FDCCC1_002"
+    assert D._normalize("MORIA", "CRUISE2_002") == "CRUISE2_002"
 
 
 def test_moria10_in_manifest_with_time_paired_slave():
