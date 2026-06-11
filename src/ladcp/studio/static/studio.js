@@ -96,6 +96,7 @@ async function solve() {
     $("ro-ubar").textContent = fmtVel(p.profile.ubar);
     $("ro-vbar").textContent = fmtVel(p.profile.vbar);
     $("cli").textContent = p.cli;
+    $("key-sadcp").style.display = p.sadcp ? "flex" : "none";
     renderQaList(p.panels);
     draw(p);
   } catch (e) {
@@ -271,6 +272,7 @@ function draw(p) {
   const stretch = a => { for (const x of a) if (x !== null) vmax = Math.max(vmax, Math.abs(x)); };
   stretch(u); stretch(v);
   if (p.bt) { stretch(p.bt.u); stretch(p.bt.v); }
+  if (p.sadcp) { stretch(p.sadcp.u); stretch(p.sadcp.v); }
   for (const pin of pins) { stretch(pin.u); stretch(pin.v); }
   vmax *= 1.12;
 
@@ -402,6 +404,28 @@ function draw(p) {
         ctx.fill();
       }
     }
+  }
+
+  // ship-ADCP constraint profile (open squares; faint ±verr whiskers, true frame)
+  if (p.sadcp) {
+    ctx.strokeStyle = "#e8f2fb"; ctx.lineWidth = 1;
+    for (let i = 0; i < p.sadcp.z.length; i++) {
+      const zz = p.sadcp.z[i], verr = p.sadcp.verr[i];
+      for (const [comp, pane] of [[p.sadcp.u, panes.u], [p.sadcp.v, panes.v]]) {
+        if (comp[i] === null || zz === null) continue;
+        const x = X(comp[i], pane, vmax), y = Y(zz);
+        if (verr !== null) {                     // raw STA verr is wide: keep it subtle
+          ctx.globalAlpha = 0.18;
+          ctx.beginPath();
+          ctx.moveTo(X(comp[i] - verr, pane, vmax), y);
+          ctx.lineTo(X(comp[i] + verr, pane, vmax), y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 0.95;
+        ctx.strokeRect(x - 2.4, y - 2.4, 4.8, 4.8);
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   // live profiles
