@@ -166,3 +166,6 @@ input[type=range]::-moz-range-thumb{width:9px;height:9px;border-radius:50%;
 
 /* ── PR 5: nav buttons ── */
 .btn.nav{padding:7px 9px;font-size:13px;line-height:1}
+
+/* SADCP constraint marker in the legend */
+.legend .sq-sadcp{width:7px;height:7px;border:1.4px solid #e8f2fb;display:inline-block;opacity:.9}

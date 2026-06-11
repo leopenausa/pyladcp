@@ -226,3 +226,24 @@ def test_launch_rejects_sadcp_dir_without_sta(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "no .STA files directly under" in err
     assert "DATA" in err                          # the helpful subfolder hint
+
+
+def test_solve_payload_carries_sadcp_trace(monkeypatch):
+    import ladcp.qa.cli as qacli
+    from ladcp.session import SadcpConfig
+    fake = np.column_stack([np.arange(20.0, 120.0, 20.0), np.full(5, 0.10),
+                            np.full(5, -0.05), np.full(5, 0.02)])
+    monkeypatch.setattr(qacli, "_sadcp_profile", lambda *a, **k: fake)
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    st = StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                     sadcp=SadcpConfig(folder="fake/sadcp"))
+    c = TestClient(create_app(st))
+    p = c.post("/api/station/MORIA-80/solve",
+               json={"solve": {"drot": -9.878379}, "use_sadcp": True}).json()
+    assert p["sadcp_bins"] == 5
+    assert p["sadcp"]["z"] == [20.0, 40.0, 60.0, 80.0, 100.0]
+    assert p["sadcp"]["u"] == [0.10] * 5 and p["sadcp"]["verr"] == [0.02] * 5
+    # constraint off -> no trace in the payload
+    off = c.post("/api/station/MORIA-80/solve",
+                 json={"solve": {"drot": -9.878379}, "use_sadcp": False}).json()
+    assert off["sadcp"] is None and off["sadcp_bins"] == 0

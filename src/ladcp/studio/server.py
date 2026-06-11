@@ -181,6 +181,11 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
     if result.bp is not None and result.bp.n_bins > 0:
         bt = {"z": _arr(result.bp.z), "u": _arr(result.bp.u), "v": _arr(result.bp.v),
               "uerr": _arr(result.bp.uerr)}
+    sadcp = None
+    if result.sadcp is not None and len(result.sadcp):
+        sa = np.asarray(result.sadcp, float)     # [m,4] rows: z, u, v, verr (true frame)
+        sadcp = {"z": _arr(sa[:, 0]), "u": _arr(sa[:, 1]), "v": _arr(sa[:, 2]),
+                 "verr": _arr(sa[:, 3])}
     return {
         "station": label,
         "solver": cfg.solve.solver,
@@ -191,6 +196,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
                     "uerr": _arr(vp.uerr), "nvel": _arr(vp.nvel),
                     "ubar": _num(vp.ubar), "vbar": _num(vp.vbar)},
         "bt": bt,
+        "sadcp": sadcp,
         "sadcp_bins": 0 if result.sadcp is None else int(result.sadcp.shape[0]),
         "panels": _available_panels(result),
         "cli": cfg.to_cli(label, **state.cli_context()),
