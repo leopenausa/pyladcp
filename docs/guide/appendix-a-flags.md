@@ -20,6 +20,7 @@ usage: ladcp-qa [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                 [--from-hex] [--ctd-cache CTD_CACHE] [--station STATION]
                 [--no-export] [--formats FORMATS] [--all-stations]
                 [--cruise-export] [-v] [--log FILE] [--no-log] [--no-progress]
+                [-j N]
                 [stations ...]
 
 LADCP acquisition quality assessment
@@ -108,6 +109,9 @@ options:
   --log FILE            run-log path (default: <outdir>/ladcp-qa.log)
   --no-log              do not write a run-log file
   --no-progress         disable the batch progress bar
+  -j N, --jobs N        process N stations in parallel (default: 1; 0 = one
+                        per CPU). Each worker holds one cast in memory --
+                        reduce N if you swap
 ```
 
 ## `ladcp-index`

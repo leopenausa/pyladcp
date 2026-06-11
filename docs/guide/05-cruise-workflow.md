@@ -103,6 +103,12 @@ Two common additions:
     --sadcp "$B/sADCP/DATA" \                       # ship-ADCP constraint
 ```
 
+And for long batches, **`--jobs N`** processes N stations in parallel (`0` = one per
+CPU). Stations are independent and most of a station's wall time is figure rendering,
+so a 2–4× speedup is typical; outputs are bit-identical to a serial run. Each worker
+holds one cast in memory — reduce `N` if the machine starts swapping; beyond ~4–6
+workers the returns diminish.
+
 - `--from-hex` converts raw Seabird `.hex`/`.XMLCON` into the cleaned 1-s `.cnv` the
   solver needs (requires the companion CTD_pipeline package — see the
   [README](https://github.com/leopenausa/pyladcp#requirements)). A pre-processed

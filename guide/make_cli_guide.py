@@ -346,6 +346,7 @@ def _page2(pdf):
         ("--from-hex", "build CTD from raw .hex if no .cnv"),
         ("--ctd-cache D", "reuse dir for --from-hex"),
         ("--formats L", "xlsx,odv,nc,csv (default: all)"),
+        ("-j/--jobs N", "N stations in parallel (0 = auto)"),
         ("-o D", "output folder (default qa_out)"),
         ("-v / --verbose", "stream detail instead of the bar"),
         ("--root D", "base for cleaned CTD/ + fallback find"),

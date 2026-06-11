@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from pathlib import Path
 
 from ..config import resolve_params
@@ -291,6 +292,96 @@ def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
     return sv
 
 
+# ---------------------------------------------------------------------------
+# --jobs N: parallel batch over stations (one worker process per station).
+# Stations are fully independent; ~80% of a station's wall time is figure
+# rendering, so process-level parallelism scales near-linearly. The worker
+# functions are top-level so they pickle under the spawn start method
+# (Windows/macOS).
+
+def _pool_init() -> None:
+    """Worker initializer: force the headless matplotlib backend."""
+    os.environ["MPLBACKEND"] = "Agg"
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+
+
+def _pool_task(task: dict) -> tuple[int, str, str, object, str]:
+    """Process one station in a worker: returns (index, label, status, export, log_text).
+
+    Per-station log records are captured into a buffer (file-log format) and written
+    sequentially by the parent, so ``ladcp-qa.log`` never interleaves stations.
+    """
+    import io as _io
+
+    buf = _io.StringIO()
+    lg = logging.getLogger("ladcp.qa")
+    lg.setLevel(logging.DEBUG)
+    lg.propagate = False
+    for h in list(lg.handlers):
+        lg.removeHandler(h)
+        h.close()
+    bh = logging.StreamHandler(buf)
+    bh.setLevel(logging.DEBUG)
+    bh.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s",
+                                      "%Y-%m-%d %H:%M:%S"))
+    lg.addHandler(bh)
+
+    label, status, export = task["item"], "error", None
+    try:
+        sf = discover(task["item"], root=Path(task["root"]), cruise=task["cruise"],
+                      index=task["index"], from_hex=task["from_hex"],
+                      ctd_cache=task["ctd_cache"])
+        label = sf.label
+        status, export = _run_one(str(sf.down), str(sf.up) if sf.up else None,
+                                  str(sf.ctd) if sf.ctd else None, label, task["outdir"],
+                                  task["make_plots"], drot=task["drot"],
+                                  solver=task["solver"], sadcp_opts=task["sadcp_opts"],
+                                  cruise=task["cruise"], formats=task["formats"],
+                                  ctd_utc=sf.ctd_utc, inv_opts=task["inv_opts"])
+    except (Exception, SystemExit) as e:           # one bad cast must not abort the batch
+        lg.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
+    bh.flush()
+    return task["_i"], label, status, export, buf.getvalue()
+
+
+def _append_worker_log(text: str) -> None:
+    """Write a worker's captured log block into the parent's run-log file verbatim."""
+    if not text:
+        return
+    for h in logging.getLogger("ladcp.qa").handlers:
+        if isinstance(h, logging.FileHandler):
+            h.stream.write(text)
+            h.flush()
+
+
+def _warm_sadcp(opts: dict) -> None:
+    """Pre-fork SADCP setup: build the ingest cache and resolve ``timeoff='auto'`` once.
+
+    Without this every worker would race to parse the raw VmDAS tree and re-estimate
+    the clock offset against the nav track.
+    """
+    if opts.get("source") == "codas":
+        ds = None                                   # NetCDF read is cheap per worker
+    else:
+        from ..io.sadcp_vmdas import load_or_ingest
+        ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
+                            force=opts.get("reingest", False),
+                            file_type=opts.get("file_type", "STA"),
+                            transducer_depth=opts.get("xducer", 5.0))
+        opts["reingest"] = False                    # workers reuse the cache just built
+    if opts.get("timeoff") == "auto":
+        if ds is None:
+            from ..io.sadcp_codas import read_codas_nc
+            ds = read_codas_nc(opts["folder"])
+        from ..io.nav import estimate_time_offset, read_nav
+        nav = read_nav(opts["nav"])
+        est = estimate_time_offset(ds.time, ds.lat, ds.lon, nav)
+        opts["timeoff"] = est["offset_s"]
+        log.info("sadcp: clock offset %+.2f s estimated from nav track (pre-fork; "
+                 "track residual %.0f m median)", est["offset_s"], est["median_m"])
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ladcp-qa",
                                  description="LADCP acquisition quality assessment")
@@ -382,6 +473,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="run-log path (default: <outdir>/ladcp-qa.log)")
     ap.add_argument("--no-log", action="store_true", help="do not write a run-log file")
     ap.add_argument("--no-progress", action="store_true", help="disable the batch progress bar")
+    ap.add_argument("-j", "--jobs", type=int, default=1, metavar="N",
+                    help="process N stations in parallel (default: 1; 0 = one per CPU). "
+                         "Each worker holds one cast in memory -- reduce N if you swap")
     args = ap.parse_args(argv)
 
     valid_fmts = {"xlsx", "odv", "nc", "csv"}
@@ -445,38 +539,74 @@ def main(argv: list[str] | None = None) -> int:
                                   and not args.no_progress))
 
     root = Path(args.root)
+    jobs = args.jobs if args.jobs > 0 else (os.cpu_count() or 1)
+    jobs = max(1, min(jobs, n))
     results: list[tuple[str, str]] = []                # (label, status)
     exports = []
     try:
-        for item in plan:
-            label = item
-            bar.start(label)
-            ctd_utc = None
-            try:
-                if explicit:
-                    down, up, ctd_path = args.down, args.up, args.ctd
-                else:
-                    sf = discover(item, root=root, cruise=args.cruise, index=args.index,
-                                  from_hex=args.from_hex, ctd_cache=args.ctd_cache)
-                    label = sf.label
-                    down = str(sf.down)
-                    up = str(sf.up) if sf.up else None
-                    ctd_path = str(sf.ctd) if sf.ctd else None
-                    ctd_utc = sf.ctd_utc
-                bar.start(label)
-                status, export = _run_one(down, up, ctd_path, label, args.outdir,
-                                          not args.no_plots, drot=args.drot,
-                                          solver=args.solver, sadcp_opts=sadcp_opts,
-                                          cruise=args.cruise, formats=formats, ctd_utc=ctd_utc,
-                                          inv_opts=inv_opts)
+        if jobs > 1 and not explicit:
+            # one station per worker process: stations are fully independent, and the
+            # bulk of a station's wall time is matplotlib rendering (CPU-bound)
+            if sadcp_opts:
+                _warm_sadcp(sadcp_opts)            # build the cache / resolve 'auto' ONCE
+            log.info("parallel: %d worker processes", jobs)
+            base = dict(root=str(root), cruise=args.cruise, index=args.index,
+                        from_hex=args.from_hex, ctd_cache=args.ctd_cache,
+                        outdir=args.outdir, make_plots=not args.no_plots, drot=args.drot,
+                        solver=args.solver, sadcp_opts=sadcp_opts, formats=formats,
+                        inv_opts=inv_opts)
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            slots: list[tuple[str, str, object] | None] = [None] * n
+            with ProcessPoolExecutor(max_workers=jobs, initializer=_pool_init) as ex:
+                futs = {ex.submit(_pool_task, dict(base, item=item, _i=i)): i
+                        for i, item in enumerate(plan)}
+                for fut in as_completed(futs):
+                    try:
+                        i, label, status, export, text = fut.result()
+                    except Exception as e:         # un-picklable result / dead worker
+                        i = futs[fut]
+                        label, status, export = plan[i], "error", None
+                        text = f"[ERROR] {label}: {type(e).__name__}: {e}\n"
+                    slots[i] = (label, status, export)
+                    _append_worker_log(text)
+                    bar.advance(f"{label} [{status}]")
+            for slot in slots:                     # plan order: deterministic summary/exports
+                if slot is None:
+                    continue
+                label, status, export = slot
+                results.append((label, status))
                 if export is not None:
                     exports.append(export)
-            except (Exception, SystemExit) as e:       # one bad cast must not abort the batch
-                status = "error"
-                bar.clear()
-                log.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
-            results.append((label, status))
-            bar.advance(f"{label} [{status}]")
+        else:
+            for item in plan:
+                label = item
+                bar.start(label)
+                ctd_utc = None
+                try:
+                    if explicit:
+                        down, up, ctd_path = args.down, args.up, args.ctd
+                    else:
+                        sf = discover(item, root=root, cruise=args.cruise, index=args.index,
+                                      from_hex=args.from_hex, ctd_cache=args.ctd_cache)
+                        label = sf.label
+                        down = str(sf.down)
+                        up = str(sf.up) if sf.up else None
+                        ctd_path = str(sf.ctd) if sf.ctd else None
+                        ctd_utc = sf.ctd_utc
+                    bar.start(label)
+                    status, export = _run_one(down, up, ctd_path, label, args.outdir,
+                                              not args.no_plots, drot=args.drot,
+                                              solver=args.solver, sadcp_opts=sadcp_opts,
+                                              cruise=args.cruise, formats=formats,
+                                              ctd_utc=ctd_utc, inv_opts=inv_opts)
+                    if export is not None:
+                        exports.append(export)
+                except (Exception, SystemExit) as e:   # one bad cast must not abort the batch
+                    status = "error"
+                    bar.clear()
+                    log.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
+                results.append((label, status))
+                bar.advance(f"{label} [{status}]")
         bar.close()
 
         # cruise-level aggregate only when explicitly requested (batch / whole index)
