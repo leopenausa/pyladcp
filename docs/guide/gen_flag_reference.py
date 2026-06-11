@@ -36,7 +36,8 @@ you read here is exactly what the installed code accepts.
 
 
 def generate() -> str:
-    env = dict(os.environ, COLUMNS="100", MPLBACKEND="Agg")
+    # 80 columns: the widest monospace line that fits the PDF page (code blocks don't wrap)
+    env = dict(os.environ, COLUMNS="80", MPLBACKEND="Agg")
     parts = [HEADER]
     for title, cmd in COMMANDS:
         res = subprocess.run(cmd, capture_output=True, text=True, env=env, check=True)

@@ -1,0 +1,6 @@
+% LaTeX preamble for the guide PDF (pandoc -H)
+\usepackage{etoolbox}
+% tables: slightly smaller font + allow generous inter-word stretch so long
+% cells with inline code break instead of overflowing the page
+\AtBeginEnvironment{longtable}{\small}
+\setlength{\emergencystretch}{3em}
