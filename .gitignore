@@ -39,8 +39,9 @@ ctd_from_hex/
 *.npz
 
 # --- generated outputs ---
-# mkdocs build output
+# mkdocs build output + locally downloaded guide PDF
 site/
+pyladcp_guide.pdf
 figures/
 qa_out/
 validation_out/

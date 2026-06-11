@@ -118,9 +118,11 @@ Useful extras for step 3:
   dir may be `MASTER/` + `SLAVE/` subdirs **or** one flat directory (heads are told apart
   by the PD0 header); beam-coordinate instruments are rotated to earth automatically.
 
-The full recipe with explanations lives in
-[`docs/CRUISE_INGEST.md`](docs/CRUISE_INGEST.md), and there are two printable PDF
-quick-guides in [`guide/`](guide/):
+**The full processing guide — every command, every report flag, every figure
+explained — lives at <https://leopenausa.github.io/pyladcp/>** (printable PDF attached
+to every [Guide CI run](https://github.com/leopenausa/pyladcp/actions/workflows/docs.yml)).
+The condensed recipe is [`docs/CRUISE_INGEST.md`](docs/CRUISE_INGEST.md), and there are
+two printable PDF quick-guides in [`guide/`](guide/):
 
 - [`guide/ladcp_cli_guide.pdf`](guide/ladcp_cli_guide.pdf) — the two-page CLI recipe +
   full flag reference (good to keep next to the keyboard at sea)
