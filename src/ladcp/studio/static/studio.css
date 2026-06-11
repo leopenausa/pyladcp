@@ -163,3 +163,6 @@ input[type=range]::-moz-range-thumb{width:9px;height:9px;border-radius:50%;
 .lightbox-head .spacer{flex:1}
 .lightbox-frame img{max-width:92vw;max-height:calc(92vh - 46px);object-fit:contain;
   background:#fff}
+
+/* ── PR 5: nav buttons ── */
+.btn.nav{padding:7px 9px;font-size:13px;line-height:1}

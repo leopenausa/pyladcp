@@ -276,6 +276,7 @@ class _Prepared:
     lat: float                      # cast position (CTD medians) + start time, for
     lon: float                      # declination and the SADCP window
     when: object
+    timings: dict = field(default_factory=dict)  # stage wall times [ms]: load/ctd/build
 
 
 class StationSession:
@@ -328,9 +329,18 @@ class StationSession:
         if self.ctd_path is None:
             raise ValueError("StationSession needs a CTD time series to solve "
                              "(pass ctd= when constructing the session)")
+        import time as _time
+
         from .config import resolve_params
         from .io.ctd_cnv import read_ctd_cnv
         from .qa.ingest import apply_header_config, load_dualhead
+        timings: dict = {}
+
+        def tick(name, fn, *a, **kw):
+            t0 = _time.perf_counter()
+            out = fn(*a, **kw)
+            timings[name] = round((_time.perf_counter() - t0) * 1000.0, 1)
+            return out
 
         overrides = {}
         if edit.nearfield_dn_bins is not None:
@@ -338,19 +348,21 @@ class StationSession:
         if edit.dzbelow is not None:
             overrides["dzbelow"] = edit.dzbelow
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)
-        dh = load_dualhead(self.down, self.up, station=self.station, params=params)
+        dh = tick("load_ms", load_dualhead, self.down, self.up,
+                  station=self.station, params=params)
         apply_header_config(params, dh)
-        ctd = read_ctd_cnv(self.ctd_path, params=params)
+        ctd = tick("ctd_ms", read_ctd_cnv, self.ctd_path, params=params)
         if self.ctd_utc and "utc_start" not in ctd.meta:
             ctd.meta["utc_start"] = self.ctd_utc
         if edit.down_only and dh.has_up:
             dh = replace(dh, up=None)
 
         from .qa.inverse import build_solve_context
-        context = build_solve_context(dh, ctd, dz=self.dz, params=params)
+        context = tick("build_ms", build_solve_context, dh, ctd, dz=self.dz, params=params)
         prep = _Prepared(params=params, dh=dh, ctd=ctd, context=context,
                          lat=float(np.nanmedian(ctd.lat)), lon=float(np.nanmedian(ctd.lon)),
-                         when=dh.down.time[0].astype("datetime64[s]").item())
+                         when=dh.down.time[0].astype("datetime64[s]").item(),
+                         timings=timings)
         self._prepared[edit] = prep
         return prep
 

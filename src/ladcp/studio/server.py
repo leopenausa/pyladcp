@@ -171,6 +171,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         t0 = time.perf_counter()
         result = ses.solve(cfg)
         ms = (time.perf_counter() - t0) * 1000.0
+        stages = dict(ses._prepared[cfg.edit].timings)
         if cfg.solve.drot is not None:
             drot, drot_source = cfg.solve.drot, "explicit"
         else:
@@ -184,7 +185,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         "station": label,
         "solver": cfg.solve.solver,
         "drot": _num(drot), "drot_source": drot_source,
-        "solve_ms": round(ms, 1), "prepared": prepared,
+        "solve_ms": round(ms, 1), "prepared": prepared, "stages": stages,
         "zbottom": _num(result.zbottom),
         "profile": {"z": _arr(vp.z), "u": _arr(vp.u), "v": _arr(vp.v),
                     "uerr": _arr(vp.uerr), "nvel": _arr(vp.nvel),
@@ -295,6 +296,20 @@ def create_app(state: StudioState):
             raise HTTPException(404, f"unknown station {label!r} "
                                      f"(launched with: {', '.join(state.labels)})")
 
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _data_errors():
+        """Processing-layer failures (bad paths, unreadable data) -> clean HTTP 400.
+
+        Without this a bad --sadcp folder (e.g. 'no .STA files under ...') surfaces
+        as a raw 500 traceback instead of a message the UI status line can show.
+        """
+        try:
+            yield
+        except (FileNotFoundError, ValueError) as e:
+            raise HTTPException(400, f"{type(e).__name__}: {e}") from None
+
     @app.get("/api/stations")
     def stations() -> dict:
         return {"stations": state.labels, "cruise": state.cruise,
@@ -309,7 +324,7 @@ def create_app(state: StudioState):
             cfg = config_from_body(body, state)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
-        with state.lock_for(label):
+        with _data_errors(), state.lock_for(label):
             ses = state.session(label)
             cached = cfg.edit in ses._prepared
             t0 = time.perf_counter()
@@ -325,7 +340,36 @@ def create_app(state: StudioState):
             cfg = config_from_body(body, state)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
-        return solve_payload(state, label, cfg)
+        with _data_errors():
+            return solve_payload(state, label, cfg)
+
+    @app.post("/api/station/{label}/lad")
+    async def lad(label: str, request: Request) -> Response:
+        """The current solution as an LDEO ``.lad`` text file (download)."""
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        import tempfile
+
+        from ..qa.export import write_lad
+        with _data_errors(), state.lock_for(label):
+            ses = state.session(label)
+            prep = ses.prepare(cfg.edit)
+            result = ses.solve(cfg)
+            drot = cfg.solve.drot
+            if drot is None:
+                drot, _src = ses.declination(cfg.edit)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"{label}.lad"
+            write_lad(result.vp, str(path), station=label, lat=prep.lat, lon=prep.lon,
+                      drot=drot, time=prep.when)
+            text = path.read_text(encoding="utf-8")
+        return Response(content=text, media_type="text/plain",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{label}.lad"'})
 
     @app.post("/api/station/{label}/qa/{panel}")
     async def qa_panel(label: str, panel: str, request: Request) -> Response:
@@ -336,7 +380,8 @@ def create_app(state: StudioState):
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
         try:
-            png = render_panel(state, label, panel, cfg)
+            with _data_errors():
+                png = render_panel(state, label, panel, cfg)
         except KeyError as e:
             raise HTTPException(404, str(e.args[0])) from None
         return Response(content=png, media_type="image/png")
@@ -386,6 +431,20 @@ def main(argv: list[str] | None = None) -> int:
 
     sadcp = None
     if args.sadcp:
+        if args.sadcp_source == "vmdas":     # fail at launch, not at the first solve
+            p = Path(args.sadcp)
+            if not p.is_dir():
+                ap.error(f"--sadcp: {p} is not a directory")
+            ft = args.sadcp_filetype
+            if not list(p.glob(f"*.{ft}")):
+                subs = sorted(str(c.relative_to(p)) for c in p.iterdir()
+                              if c.is_dir() and list(c.glob(f"*.{ft}")))
+                msg = f"--sadcp: no .{ft} files directly under {p} (not searched recursively)"
+                if subs:
+                    msg += (f"; found .{ft} files in: "
+                            + ", ".join(f"{p}/{s}" for s in subs[:4])
+                            + " — point --sadcp there")
+                ap.error(msg)
         try:
             sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
                                 filetype=args.sadcp_filetype, xducer=args.sadcp_xducer,
