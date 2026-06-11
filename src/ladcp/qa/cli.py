@@ -30,7 +30,7 @@ from pathlib import Path
 from ..config import resolve_params
 from ..discovery import discover
 from ..io.ctd_cnv import read_ctd_cnv
-from ..session import SessionConfig
+from ..session import SessionConfig, resolve_declination
 from .ingest import apply_header_config, load_dualhead
 from .report import assess, text_report
 from .runlog import ProgressBar, setup_logging, teardown_logging
@@ -134,20 +134,8 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
     when = dh.down.time[0].astype("datetime64[s]").item()
     if drot is not None:
         drot_source = "explicit"                # user-supplied --drot
-    else:
-        drot_source = "igrf"                    # IGRF-13 from cast position + date
-        try:
-            from ..proc.magdec import magnetic_declination
-            drot = magnetic_declination(lat, lon, when)
-        except Exception as e:                  # ppigrf missing / bad coeffs / bad input
-            log.warning("        declination: IGRF failed (%s: %s) -- velocity LEFT IN "
-                        "MAGNETIC FRAME (drot=0, NOT true north)", type(e).__name__, e)
-            drot, drot_source = 0.0, "fallback-zero"
-        if not np.isfinite(drot):               # NaN position -> NaN declination
-            log.warning("        declination: IGRF non-finite at lat=%.4f lon=%.4f (missing CTD "
-                        "position?) -- velocity LEFT IN MAGNETIC FRAME (drot=0, NOT true north)",
-                        lat, lon)
-            drot, drot_source = 0.0, "fallback-zero"
+    else:                                       # IGRF-13 from cast position + date
+        drot, drot_source = resolve_declination(lat, lon, when, logger=log)
 
     t_lad = dh.down.time
     sadcp = (_sadcp_profile(sadcp_opts, t_lad.min(), t_lad.max(), lat, lon, solver)

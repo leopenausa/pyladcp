@@ -1,4 +1,4 @@
-"""Reproducible per-solve configuration (Studio roadmap, PR 1).
+"""Reproducible per-solve configuration + the cached station solve engine (Studio).
 
 Frozen dataclasses that mirror the ``ladcp-qa`` option surface one-to-one, so a
 configuration can travel between the CLI, the library, and the upcoming interactive
@@ -7,11 +7,14 @@ Studio GUI without drift. The hard contract: **every configuration is expressibl
 back recovers the identical configuration (:meth:`SessionConfig.from_args`) -- the
 round-trip is enforced by ``tests/test_session_config.py``.
 
-The grouping anticipates the staged solve cache (PR 2): :class:`EditConfig` fields
-invalidate the expensive build (sync / editing / bottom detect / super-ensembles,
-~1.2 s), :class:`SadcpConfig` identifies the ship-ADCP product (ingest cached on
-disk), and :class:`SolveConfig` only re-runs the constrained inverse (~30 ms). All
-three are frozen and hashable so they can key those cache tiers directly.
+:class:`StationSession` (PR 2) is the staged solve cache the grouping anticipates:
+:class:`EditConfig` fields invalidate the expensive build (sync / editing / bottom
+detect / super-ensembles, ~1.2 s on MORIA-80), :class:`SadcpConfig` identifies the
+ship-ADCP product (profile cached per session, ingest cached on disk), and
+:class:`SolveConfig` only re-runs the constrained inverse (~30 ms). Results are
+bit-identical to a fresh :func:`~ladcp.qa.inverse.compute_velocity_full` -- enforced
+by ``tests/test_session_solve.py`` -- so anything Studio produces, ``ladcp-qa``
+reproduces.
 
 ``ladcp-qa`` builds its ``inv_opts``/``sadcp_opts`` dicts through this module
 (:meth:`SessionConfig.inv_opts` / :meth:`SessionConfig.sadcp_opts`), keeping a single
@@ -20,11 +23,22 @@ source of truth for option names, defaults, and validation.
 
 from __future__ import annotations
 
+import logging
 import shlex
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
+from typing import TYPE_CHECKING
 
-__all__ = ["EditConfig", "SadcpConfig", "SolveConfig", "SessionConfig",
-           "parse_nearfield", "parse_timeoff"]
+import numpy as np
+
+if TYPE_CHECKING:                                # heavy imports stay call-time
+    from .io.ctd_cnv import CTDTimeSeries
+    from .models import DualHead
+    from .qa.inverse import VelocityResult
+
+__all__ = ["EditConfig", "SadcpConfig", "SolveConfig", "SessionConfig", "StationSession",
+           "parse_nearfield", "parse_timeoff", "resolve_declination"]
+
+log = logging.getLogger("ladcp.session")
 
 
 def parse_nearfield(text: str) -> tuple[int, ...]:
@@ -221,6 +235,161 @@ def _fmt(value) -> str:
     if isinstance(value, float) and value == int(value):
         return str(int(value))
     return str(value)
+
+
+def resolve_declination(lat: float, lon: float, when, *, logger=None) -> tuple[float, str]:
+    """IGRF-13 declination for a cast, with the ``ladcp-qa`` fallbacks -> ``(drot, source)``.
+
+    ``source`` is ``"igrf"``, or ``"fallback-zero"`` when the lookup failed or the
+    position is non-finite: the velocity then stays in the magnetic frame (drot=0) and
+    the caller's declination QA metric WARNs. ``logger`` lets ``ladcp-qa`` keep the
+    warnings in its own run log.
+    """
+    lg = logger if logger is not None else log
+    try:
+        from .proc.magdec import magnetic_declination
+        drot = magnetic_declination(lat, lon, when)
+    except Exception as e:                      # ppigrf missing / bad coeffs / bad input
+        lg.warning("        declination: IGRF failed (%s: %s) -- velocity LEFT IN "
+                   "MAGNETIC FRAME (drot=0, NOT true north)", type(e).__name__, e)
+        return 0.0, "fallback-zero"
+    if not np.isfinite(drot):                   # NaN position -> NaN declination
+        lg.warning("        declination: IGRF non-finite at lat=%.4f lon=%.4f (missing CTD "
+                   "position?) -- velocity LEFT IN MAGNETIC FRAME (drot=0, NOT true north)",
+                   lat, lon)
+        return 0.0, "fallback-zero"
+    return drot, "igrf"
+
+
+# ---------------------------------------------------------------------------
+# StationSession: the staged solve cache (Studio PR 2)
+
+
+@dataclass
+class _Prepared:
+    """One :class:`EditConfig`'s cached solve inputs (the expensive, weight-free part)."""
+
+    params: object                  # resolved CastParams (with the edit overrides)
+    dh: DualHead                    # ingested heads (up dropped when down_only)
+    ctd: CTDTimeSeries
+    context: tuple                  # build_solve_context output (se, z, merged, bt, sync, bottom)
+    lat: float                      # cast position (CTD medians) + start time, for
+    lon: float                      # declination and the SADCP window
+    when: object
+
+
+class StationSession:
+    """Cached single-station solve engine: re-solve in ~30 ms, rebuild only on edits.
+
+    Holds one station's ingested data and the expensive solve context per
+    :class:`EditConfig`, so sweeping :class:`SolveConfig` knobs (weights, solver,
+    declination) costs only the inverse. This is the backend of the Studio GUI and a
+    convenient library front door::
+
+        ses = StationSession(down, up, ctd, station="MORIA-80")
+        base = ses.solve(SessionConfig())                                  # ~1.5 s
+        nobt = ses.solve(SessionConfig(solve=SolveConfig(botfac=0.0)))     # ~30 ms
+
+    Results are bit-identical to a fresh
+    :func:`~ladcp.qa.inverse.compute_velocity_full` with the same options (enforced by
+    ``tests/test_session_solve.py``), and every configuration is reproducible on the
+    command line via :meth:`SessionConfig.to_cli`.
+
+    A session is single-station and not thread-safe; guard concurrent ``solve`` calls
+    with a lock (the Studio server does).
+    """
+
+    def __init__(self, down, up=None, ctd=None, *, station: str = "",
+                 cruise: str = "MORIA", ctd_utc=None, dz: float = 8.0):
+        from pathlib import Path
+        self.down = str(down)
+        self.up = str(up) if up else None
+        self.ctd_path = str(ctd) if ctd else None
+        self.station = station or Path(self.down).stem
+        self.cruise = cruise
+        self.ctd_utc = ctd_utc                  # index cast-start UTC -> sync prior
+        self.dz = float(dz)
+        self._prepared: dict[EditConfig, _Prepared] = {}
+        self._sadcp_profiles: dict[SadcpConfig, np.ndarray | None] = {}
+        self._declination: tuple[float, str] | None = None
+
+    # -- warm tier -------------------------------------------------------------------
+    def prepare(self, edit: EditConfig | None = None) -> _Prepared:
+        """Ingest + build the solve context for ``edit`` (cached; ~1.5 s first time).
+
+        Mirrors the ``ladcp-qa`` per-station recipe exactly: resolve the cruise params
+        with the edit overrides, load both heads, apply the header geometry, read the
+        CTD, then drop the up-looker if ``down_only``.
+        """
+        edit = edit if edit is not None else EditConfig()
+        prep = self._prepared.get(edit)
+        if prep is not None:
+            return prep
+        if self.ctd_path is None:
+            raise ValueError("StationSession needs a CTD time series to solve "
+                             "(pass ctd= when constructing the session)")
+        from .config import resolve_params
+        from .io.ctd_cnv import read_ctd_cnv
+        from .qa.ingest import apply_header_config, load_dualhead
+
+        overrides = {}
+        if edit.nearfield_dn_bins is not None:
+            overrides["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
+        if edit.dzbelow is not None:
+            overrides["dzbelow"] = edit.dzbelow
+        params = resolve_params(self.cruise, self.station, overrides=overrides or None)
+        dh = load_dualhead(self.down, self.up, station=self.station, params=params)
+        apply_header_config(params, dh)
+        ctd = read_ctd_cnv(self.ctd_path, params=params)
+        if self.ctd_utc and "utc_start" not in ctd.meta:
+            ctd.meta["utc_start"] = self.ctd_utc
+        if edit.down_only and dh.has_up:
+            dh = replace(dh, up=None)
+
+        from .qa.inverse import build_solve_context
+        context = build_solve_context(dh, ctd, dz=self.dz, params=params)
+        prep = _Prepared(params=params, dh=dh, ctd=ctd, context=context,
+                         lat=float(np.nanmedian(ctd.lat)), lon=float(np.nanmedian(ctd.lon)),
+                         when=dh.down.time[0].astype("datetime64[s]").item())
+        self._prepared[edit] = prep
+        return prep
+
+    # -- hot tier --------------------------------------------------------------------
+    def solve(self, cfg: SessionConfig | None = None) -> VelocityResult:
+        """Solve ``cfg`` on the cached context (~30 ms once prepared)."""
+        cfg = cfg if cfg is not None else SessionConfig()
+        prep = self.prepare(cfg.edit)
+        drot = cfg.solve.drot
+        if drot is None:
+            drot, _ = self.declination(cfg.edit)
+        sadcp = self._sadcp(cfg, prep)
+        from .qa.inverse import compute_velocity_full
+        return compute_velocity_full(prep.dh, prep.ctd, drot=drot, dz=self.dz,
+                                     params=prep.params, solver=cfg.solve.solver,
+                                     sadcp=sadcp, sadcpfac=cfg.solve.sadcpfac,
+                                     botfac=cfg.solve.botfac, barofac=cfg.solve.barofac,
+                                     smoofac=cfg.solve.smoofac, context=prep.context)
+
+    def declination(self, edit: EditConfig | None = None) -> tuple[float, str]:
+        """The station's IGRF declination ``(drot, source)`` (cached; edit-independent)."""
+        if self._declination is None:
+            prep = self.prepare(edit)
+            self._declination = resolve_declination(prep.lat, prep.lon, prep.when)
+        return self._declination
+
+    def _sadcp(self, cfg: SessionConfig, prep: _Prepared) -> np.ndarray | None:
+        """The cast-windowed ship-ADCP constraint profile, cached per :class:`SadcpConfig`."""
+        if cfg.sadcp is None:
+            return None
+        from .qa.cli import _sadcp_profile  # call-time: qa.cli imports this module
+        t = prep.dh.down.time
+        if cfg.solve.solver != "inverse":       # constraint ignored (with the CLI's notice)
+            return _sadcp_profile(cfg.sadcp_opts(), t.min(), t.max(),
+                                  prep.lat, prep.lon, cfg.solve.solver)
+        if cfg.sadcp not in self._sadcp_profiles:
+            self._sadcp_profiles[cfg.sadcp] = _sadcp_profile(
+                cfg.sadcp_opts(), t.min(), t.max(), prep.lat, prep.lon, "inverse")
+        return self._sadcp_profiles[cfg.sadcp]
 
 
 def _check_field_coverage() -> None:   # pragma: no cover - import-time self-check
