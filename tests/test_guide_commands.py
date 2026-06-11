@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,10 @@ def test_guide_has_marked_blocks():
     assert len(_BLOCKS) >= 2
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="guide commands are bash-flavored; inside Git Bash the console "
+                           "scripts resolve to the MS-Store python stub. The Windows CLI "
+                           "itself is covered by the rest of the suite.")
 @pytest.mark.parametrize("name,script", _BLOCKS, ids=[n for n, _ in _BLOCKS])
 def test_guide_command_runs(name, script, tmp_path):
     # sandbox: the guide's relative fixture paths resolve, outputs land in tmp
