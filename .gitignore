@@ -39,7 +39,8 @@ ctd_from_hex/
 *.npz
 
 # --- generated outputs ---
-site/            # mkdocs build output
+# mkdocs build output
+site/
 figures/
 qa_out/
 validation_out/
