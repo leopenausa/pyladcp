@@ -30,6 +30,7 @@ from pathlib import Path
 from ..config import resolve_params
 from ..discovery import discover
 from ..io.ctd_cnv import read_ctd_cnv
+from ..session import SessionConfig
 from .ingest import apply_header_config, load_dualhead
 from .report import assess, text_report
 from .runlog import ProgressBar, setup_logging, teardown_logging
@@ -382,7 +383,8 @@ def _warm_sadcp(opts: dict) -> None:
                  "track residual %.0f m median)", est["offset_s"], est["median_m"])
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The ``ladcp-qa`` argument parser (separate so tests can parse command strings)."""
     ap = argparse.ArgumentParser(prog="ladcp-qa",
                                  description="LADCP acquisition quality assessment")
     ap.add_argument("stations", nargs="*", help="station id(s), e.g. 80 or 79 80 82")
@@ -476,6 +478,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-j", "--jobs", type=int, default=1, metavar="N",
                     help="process N stations in parallel (default: 1; 0 = one per CPU). "
                          "Each worker holds one cast in memory -- reduce N if you swap")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = build_parser()
     args = ap.parse_args(argv)
 
     valid_fmts = {"xlsx", "odv", "nc", "csv"}
@@ -488,33 +495,12 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"unknown --formats value(s): {', '.join(sorted(bad))} "
                      f"(choose from {', '.join(sorted(valid_fmts))})")
 
-    sadcp_opts = None
-    if args.sadcp:
-        timeoff: str | float | None = args.sadcp_timeoff
-        if timeoff is not None and timeoff != "auto":
-            try:
-                timeoff = float(timeoff)
-            except ValueError:
-                ap.error(f"--sadcp-timeoff: expected seconds or 'auto', got {timeoff!r}")
-        if timeoff == "auto" and not args.sadcp_nav:
-            ap.error("--sadcp-timeoff auto needs --sadcp-nav")
-        sadcp_opts = {"folder": args.sadcp, "source": args.sadcp_source,
-                      "fac": args.sadcpfac,
-                      "file_type": args.sadcp_filetype, "xducer": args.sadcp_xducer,
-                      "reingest": args.sadcp_reingest,
-                      "timeoff": timeoff, "nav": args.sadcp_nav}
-    nearfield = None
-    if args.nearfield_dn_bins is not None:
-        s = args.nearfield_dn_bins.strip().lower()
-        try:
-            nearfield = () if s in ("none", "") else tuple(
-                int(b) for b in s.split(",") if b.strip())
-        except ValueError:
-            ap.error(f"--nearfield-dn-bins: expected comma-separated bin numbers or "
-                     f"'none', got {args.nearfield_dn_bins!r}")
-    inv_opts = {"botfac": args.botfac, "barofac": args.barofac, "smoofac": args.smoofac,
-                "down_only": args.down_only, "nearfield_dn_bins": nearfield,
-                "dzbelow": args.dzbelow}
+    try:
+        cfg = SessionConfig.from_args(args)
+    except ValueError as e:           # same messages the inline checks used to emit
+        ap.error(str(e))
+    sadcp_opts = cfg.sadcp_opts()
+    inv_opts = cfg.inv_opts()
 
     # resolve the work list: explicit single file set, or a batch of station ids
     explicit = bool(args.down)
