@@ -5,9 +5,10 @@
 **pyladcp turns raw lowered-ADCP (LADCP) casts into ocean velocity profiles, with a
 quality report for every station.**
 
-It is a clean-room Python re-implementation of the LDEO_IX (Visbeck) inverse method —
-the standard LADCP processing workflow — validated cast-by-cast against legacy LDEO_IX
-results on two full cruises (MORIA 2025, N Atlantic; FAR-DWO/FDCCC1, W Mediterranean).
+It is a clean-room Python re-implementation of the LDEO_IX
+([Visbeck, 2002](https://doi.org/10.1175/1520-0426(2002)019%3C0794:DVPULA%3E2.0.CO;2))
+inverse method — the standard LADCP processing workflow — validated cast-by-cast against
+legacy LDEO_IX results on two full cruises.
 You give it the raw RDI PD0 files from a dual-head (down + up looker) LADCP system and a
 CTD cast; it gives you `u`/`v` vs depth, a bottom-track-referenced profile, a QA
 scorecard, and a multi-page PDF report per station.
@@ -167,7 +168,7 @@ Validation against legacy LDEO_IX processings of the same raw data:
 | cruise | scope | result |
 |---|---|---|
 | MORIA 2025 (N Atlantic, 1000+ m casts) | golden station MORIA-80 | `u` corr 0.998 vs legacy; bottom track corr 0.991 |
-| FAR-DWO / FDCCC1 (W Med shelf+canyon) | 30 stations, zero manual steps | median rms 1.3 cm/s (u), corr 0.97; worst station 3.4 cm/s |
+| a second full cruise (shelf + canyon, beam-coordinate instruments) | 30 stations, zero manual steps | median rms 1.3 cm/s (u), corr 0.97; worst station 3.4 cm/s |
 
 The comparison machinery itself is part of the package (`ladcp-compare`), so you can
 reproduce this check on your own cruises.
@@ -190,8 +191,19 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next,
 
 pyladcp re-implements the algorithms of the **LDEO_IX** LADCP package by Martin Visbeck
 and colleagues (Lamont-Doherty Earth Observatory). The original MATLAB code is not
-distributed here. If you use pyladcp, please cite it (see
-[`CITATION.cff`](CITATION.cff)) and acknowledge LDEO_IX.
+distributed here. The method is described in:
+
+> Visbeck, M. (2002). Deep velocity profiling using Lowered Acoustic Doppler Current
+> Profilers: Bottom track and inverse solutions. *Journal of Atmospheric and Oceanic
+> Technology*, 19(5), 794–807.
+> [doi:10.1175/1520-0426(2002)019<0794:DVPULA>2.0.CO;2](https://doi.org/10.1175/1520-0426(2002)019%3C0794:DVPULA%3E2.0.CO;2)
+
+The LDEO_IX software itself is maintained at Lamont-Doherty and distributed at
+<https://www.ldeo.columbia.edu/~ant/LADCP.html>.
+
+If you use pyladcp in your research, please cite both this package (see
+[`CITATION.cff`](CITATION.cff) — GitHub's "Cite this repository" button generates the
+reference) and Visbeck (2002).
 
 ## License
 
