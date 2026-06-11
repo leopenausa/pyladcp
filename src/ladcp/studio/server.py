@@ -6,8 +6,10 @@ Endpoints (all JSON; profile arrays are NaN-sanitised to ``null`` for the browse
 * ``POST /api/station/{label}/prepare`` -- warm the edit-tier cache (~1.5 s cold).
 * ``POST /api/station/{label}/solve`` -- solve a :class:`~ladcp.session.SessionConfig`
   on the cached context (~30 ms warm); the response carries the solved profile, the
-  resolved declination, timings, and the exact ``ladcp-qa`` command line that
-  reproduces it.
+  resolved declination, timings, the available QA panels, and the exact ``ladcp-qa``
+  command line that reproduces it.
+* ``POST /api/station/{label}/qa/{panel}`` -- one QA figure (the existing matplotlib
+  panels: raw/depth/edit/velocity/weights/...) rendered as PNG for the posted config.
 
 The static single-page UI (no build step) is served from ``static/`` at ``/``.
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -25,10 +28,10 @@ from pathlib import Path
 import numpy as np
 
 try:                                  # optional extra: pip install 'pyladcp[gui]'
-    from fastapi import FastAPI, HTTPException, Request
+    from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.staticfiles import StaticFiles
 except ImportError:                   # core install: module imports, create_app refuses
-    FastAPI = HTTPException = Request = StaticFiles = None
+    FastAPI = HTTPException = Request = Response = StaticFiles = None
 
 from ..session import (
     EditConfig,
@@ -188,8 +191,91 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
                     "ubar": _num(vp.ubar), "vbar": _num(vp.vbar)},
         "bt": bt,
         "sadcp_bins": 0 if result.sadcp is None else int(result.sadcp.shape[0]),
+        "panels": _available_panels(result),
         "cli": cfg.to_cli(label, **state.cli_context()),
     }
+
+
+# ---------------------------------------------------------------------------
+# QA panels: the existing matplotlib figures, rendered on demand for one config
+
+
+_MPL_LOCK = threading.Lock()          # matplotlib is not thread-safe
+_PNG_CACHE: OrderedDict[tuple, bytes] = OrderedDict()
+_PNG_CACHE_MAX = 48
+
+
+def _available_panels(result) -> list[str]:
+    """Panel names renderable for this solve (acquisition panels are always on)."""
+    names = ["raw", "alignment", "depth", "edit",
+             "velocity", "shear", "inverse", "error", "drift"]
+    if result.weights is not None:
+        names.append("weights")
+    if result.btrk is not None and result.btrk.n_own:
+        names.append("btrack")
+    if result.sadcp is not None and len(result.sadcp):
+        names.append("sadcp")
+    return names
+
+
+def render_panel(state: StudioState, label: str, panel: str,
+                 cfg: SessionConfig) -> bytes:
+    """One QA panel as PNG bytes for ``cfg`` (solve is ~30 ms warm; render dominates)."""
+    key = (label, cfg, panel)
+    cached = _PNG_CACHE.get(key)
+    if cached is not None:
+        _PNG_CACHE.move_to_end(key)
+        return cached
+
+    with state.lock_for(label):
+        ses = state.session(label)
+        prep = ses.prepare(cfg.edit)
+        result = ses.solve(cfg)
+
+    import matplotlib
+    matplotlib.use("Agg", force=False)
+    import io as _io
+
+    from ..plots.alignment import alignment_figure
+    from ..plots.btrack_figure import btrack_figure
+    from ..plots.depth_figure import depth_figure
+    from ..plots.drift_figure import drift_figure
+    from ..plots.edit_figure import edit_figure
+    from ..plots.error_figure import error_figure
+    from ..plots.inverse_figure import constraint_weights_figure, inverse_diagnostics_figure
+    from ..plots.raw_dashboard import raw_dashboard
+    from ..plots.sadcp_figure import sadcp_figure
+    from ..plots.shear_figure import shear_figure
+    from ..plots.velocity_figure import velocity_figure
+
+    if panel not in _available_panels(result):
+        raise KeyError(f"panel {panel!r} not available for this configuration "
+                       f"(have: {', '.join(_available_panels(result))})")
+    makers = {
+        "raw": lambda: raw_dashboard(prep.dh),
+        "alignment": lambda: alignment_figure(prep.dh),
+        "depth": lambda: depth_figure(prep.dh, prep.ctd),
+        "edit": lambda: edit_figure(prep.dh, prep.ctd),
+        "velocity": lambda: velocity_figure(result.vp, bottom=result.bp, station=label),
+        "shear": lambda: shear_figure(result.shear, station=label),
+        "inverse": lambda: inverse_diagnostics_figure(result, station=label),
+        "weights": lambda: constraint_weights_figure(result.weights, station=label),
+        "error": lambda: error_figure(result, station=label),
+        "drift": lambda: drift_figure(result, station=label),
+        "btrack": lambda: btrack_figure(result, station=label),
+        "sadcp": lambda: sadcp_figure(result, station=label),
+    }
+    with _MPL_LOCK:
+        import matplotlib.pyplot as plt
+        fig = makers[panel]()
+        buf = _io.BytesIO()
+        fig.savefig(buf, format="png", dpi=110, facecolor=fig.get_facecolor())
+        plt.close(fig)
+    png = buf.getvalue()
+    _PNG_CACHE[key] = png
+    while len(_PNG_CACHE) > _PNG_CACHE_MAX:
+        _PNG_CACHE.popitem(last=False)
+    return png
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +327,20 @@ def create_app(state: StudioState):
             raise HTTPException(400, str(e)) from None
         return solve_payload(state, label, cfg)
 
+    @app.post("/api/station/{label}/qa/{panel}")
+    async def qa_panel(label: str, panel: str, request: Request) -> Response:
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        try:
+            png = render_panel(state, label, panel, cfg)
+        except KeyError as e:
+            raise HTTPException(404, str(e.args[0])) from None
+        return Response(content=png, media_type="image/png")
+
     static = Path(__file__).parent / "static"
     app.mount("/", StaticFiles(directory=str(static), html=True), name="static")
     return app
@@ -275,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=8642, help="port (default: 8642)")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
     args = ap.parse_args(argv)
+    os.environ.setdefault("MPLBACKEND", "Agg")   # QA panels render headless
 
     labels = list(args.stations)
     if not labels and args.index:
