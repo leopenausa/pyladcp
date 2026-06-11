@@ -103,6 +103,14 @@ Two common additions:
     --sadcp "$B/sADCP/DATA" \                       # ship-ADCP constraint
 ```
 
+And for long batches, **`--jobs N`** processes N stations in parallel (`0` = one per
+CPU). Stations are independent and most of a station's wall time is figure rendering,
+so the gain is large: a full 40-cast cruise measured **698 s serially vs 146 s with
+`--jobs 6`** (4.8×). Results are bit-identical to a serial run (`.lad`, `.bot`, QA);
+full-precision exports agree to machine precision (~10⁻¹⁰ m/s — BLAS summation order),
+which can also shift a handful of anti-aliased figure pixels by one colour step.
+Each worker holds one cast in memory — reduce `N` if the machine starts swapping.
+
 - `--from-hex` converts raw Seabird `.hex`/`.XMLCON` into the cleaned 1-s `.cnv` the
   solver needs (requires the companion CTD_pipeline package — see the
   [README](https://github.com/leopenausa/pyladcp#requirements)). A pre-processed
