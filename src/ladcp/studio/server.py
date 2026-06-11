@@ -1,0 +1,307 @@
+"""The ``ladcp-studio`` server: session state, JSON bridge, FastAPI app, entry point.
+
+Endpoints (all JSON; profile arrays are NaN-sanitised to ``null`` for the browser):
+
+* ``GET  /api/stations`` -- the launch work-list + whether a SADCP source is loaded.
+* ``POST /api/station/{label}/prepare`` -- warm the edit-tier cache (~1.5 s cold).
+* ``POST /api/station/{label}/solve`` -- solve a :class:`~ladcp.session.SessionConfig`
+  on the cached context (~30 ms warm); the response carries the solved profile, the
+  resolved declination, timings, and the exact ``ladcp-qa`` command line that
+  reproduces it.
+
+The static single-page UI (no build step) is served from ``static/`` at ``/``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+try:                                  # optional extra: pip install 'pyladcp[gui]'
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.staticfiles import StaticFiles
+except ImportError:                   # core install: module imports, create_app refuses
+    FastAPI = HTTPException = Request = StaticFiles = None
+
+from ..session import (
+    EditConfig,
+    SadcpConfig,
+    SessionConfig,
+    SolveConfig,
+    StationSession,
+    parse_timeoff,
+)
+
+log = logging.getLogger("ladcp.studio")
+
+MAX_SESSIONS = 3                      # LRU cap: a prepared session is order-100 MB
+_QA_ROOT_DEFAULT = "New_golden/Good"  # ladcp-qa --root default (for minimal cli strings)
+_QA_CRUISE_DEFAULT = "MORIA"
+
+
+@dataclass
+class StationEntry:
+    """Explicit per-station files (tests / non-discovery launches)."""
+
+    label: str
+    down: str
+    up: str | None = None
+    ctd: str | None = None
+    ctd_utc: object = None
+
+
+class StudioState:
+    """The server's station list, discovery context, and LRU of prepared sessions."""
+
+    def __init__(self, labels: list[str], *, root: str = _QA_ROOT_DEFAULT,
+                 cruise: str = _QA_CRUISE_DEFAULT, index: str | None = None,
+                 from_hex: bool = False, ctd_cache: str | None = None,
+                 sadcp: SadcpConfig | None = None,
+                 explicit: dict[str, StationEntry] | None = None):
+        self.labels = list(labels)
+        self.root = root
+        self.cruise = cruise
+        self.index = index
+        self.from_hex = from_hex
+        self.ctd_cache = ctd_cache
+        self.sadcp = sadcp                       # launch-time SADCP identity (or None)
+        self._explicit = dict(explicit or {})
+        self._sessions: OrderedDict[str, StationSession] = OrderedDict()
+        self._map_lock = threading.Lock()
+        self._station_locks: dict[str, threading.Lock] = {}
+
+    def lock_for(self, label: str) -> threading.Lock:
+        with self._map_lock:
+            return self._station_locks.setdefault(label, threading.Lock())
+
+    def session(self, label: str) -> StationSession:
+        """The (LRU-cached) session for ``label``; discovers files on first use."""
+        with self._map_lock:
+            ses = self._sessions.get(label)
+            if ses is not None:
+                self._sessions.move_to_end(label)
+                return ses
+        entry = self._explicit.get(label)
+        if entry is not None:
+            ses = StationSession(entry.down, entry.up, entry.ctd, station=entry.label,
+                                 cruise=self.cruise, ctd_utc=entry.ctd_utc)
+        else:
+            from ..discovery import discover
+            sf = discover(label, root=Path(self.root), cruise=self.cruise,
+                          index=self.index, from_hex=self.from_hex,
+                          ctd_cache=self.ctd_cache)
+            ses = StationSession(sf.down, sf.up, sf.ctd, station=sf.label,
+                                 cruise=self.cruise, ctd_utc=sf.ctd_utc)
+        with self._map_lock:
+            self._sessions[label] = ses
+            while len(self._sessions) > MAX_SESSIONS:    # evict least-recently used
+                old, _ = self._sessions.popitem(last=False)
+                log.info("studio: evicted session %s (LRU cap %d)", old, MAX_SESSIONS)
+        return ses
+
+    def cli_context(self) -> dict:
+        """Non-default discovery args for :meth:`SessionConfig.to_cli` (minimal commands)."""
+        ctx: dict = {}
+        if self._explicit:                       # explicit files: no discovery context
+            return ctx
+        if self.root != _QA_ROOT_DEFAULT:
+            ctx["root"] = self.root
+        if self.cruise != _QA_CRUISE_DEFAULT:
+            ctx["cruise"] = self.cruise
+        if self.index is not None:
+            ctx["index"] = self.index
+        return ctx
+
+
+# ---------------------------------------------------------------------------
+# JSON bridge
+
+
+def config_from_body(body: dict, state: StudioState) -> SessionConfig:
+    """Request JSON -> :class:`SessionConfig` (ValueError on malformed values).
+
+    The SADCP *identity* is fixed at launch (``--sadcp`` on ``ladcp-studio``, exactly
+    like ``ladcp-qa``); the request only toggles it via ``use_sadcp`` and weights it
+    via ``solve.sadcpfac``.
+    """
+    e = dict(body.get("edit") or {})
+    s = dict(body.get("solve") or {})
+    nearfield = e.get("nearfield_dn_bins")
+    edit = EditConfig(
+        down_only=bool(e.get("down_only", False)),
+        nearfield_dn_bins=None if nearfield is None else tuple(int(b) for b in nearfield),
+        dzbelow=None if e.get("dzbelow") is None else float(e["dzbelow"]))
+    solver = s.get("solver", "inverse")
+    if solver not in ("shear", "inverse"):
+        raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
+    solve = SolveConfig(
+        solver=solver,
+        drot=None if s.get("drot") is None else float(s["drot"]),
+        botfac=float(s.get("botfac", 1.0)), barofac=float(s.get("barofac", 1.0)),
+        smoofac=float(s.get("smoofac", 0.0)), sadcpfac=float(s.get("sadcpfac", 3.0)))
+    use_sadcp = bool(body.get("use_sadcp", state.sadcp is not None))
+    return SessionConfig(edit=edit, sadcp=state.sadcp if use_sadcp else None, solve=solve)
+
+
+def _arr(x) -> list:
+    """1-D array -> JSON-safe list (NaN/inf -> null; browsers reject NaN literals)."""
+    a = np.asarray(x, float)
+    return [float(v) if np.isfinite(v) else None for v in a]
+
+
+def _num(x) -> float | None:
+    return float(x) if x is not None and np.isfinite(x) else None
+
+
+def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
+    """Run one solve on the station's (locked) session and shape the JSON response."""
+    with state.lock_for(label):
+        ses = state.session(label)
+        prepared = cfg.edit in ses._prepared
+        t0 = time.perf_counter()
+        result = ses.solve(cfg)
+        ms = (time.perf_counter() - t0) * 1000.0
+        if cfg.solve.drot is not None:
+            drot, drot_source = cfg.solve.drot, "explicit"
+        else:
+            drot, drot_source = ses.declination(cfg.edit)
+    vp = result.vp
+    bt = None
+    if result.bp is not None and result.bp.n_bins > 0:
+        bt = {"z": _arr(result.bp.z), "u": _arr(result.bp.u), "v": _arr(result.bp.v),
+              "uerr": _arr(result.bp.uerr)}
+    return {
+        "station": label,
+        "solver": cfg.solve.solver,
+        "drot": _num(drot), "drot_source": drot_source,
+        "solve_ms": round(ms, 1), "prepared": prepared,
+        "zbottom": _num(result.zbottom),
+        "profile": {"z": _arr(vp.z), "u": _arr(vp.u), "v": _arr(vp.v),
+                    "uerr": _arr(vp.uerr), "nvel": _arr(vp.nvel),
+                    "ubar": _num(vp.ubar), "vbar": _num(vp.vbar)},
+        "bt": bt,
+        "sadcp_bins": 0 if result.sadcp is None else int(result.sadcp.shape[0]),
+        "cli": cfg.to_cli(label, **state.cli_context()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# app factory + entry point
+
+
+def create_app(state: StudioState):
+    """Build the FastAPI app over ``state`` (missing extra -> install hint)."""
+    if FastAPI is None:                          # pragma: no cover - exercised manually
+        raise SystemExit("ladcp-studio needs the GUI extra: "
+                         "pip install 'pyladcp[gui]'")
+
+    app = FastAPI(title="pyladcp studio", docs_url=None, redoc_url=None)
+
+    def _check(label: str) -> None:
+        if label not in state.labels and label not in state._explicit:
+            raise HTTPException(404, f"unknown station {label!r} "
+                                     f"(launched with: {', '.join(state.labels)})")
+
+    @app.get("/api/stations")
+    def stations() -> dict:
+        return {"stations": state.labels, "cruise": state.cruise,
+                "sadcp": state.sadcp is not None,
+                "sadcp_folder": state.sadcp.folder if state.sadcp else None}
+
+    @app.post("/api/station/{label}/prepare")
+    async def prepare(label: str, request: Request) -> dict:
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        with state.lock_for(label):
+            ses = state.session(label)
+            cached = cfg.edit in ses._prepared
+            t0 = time.perf_counter()
+            ses.prepare(cfg.edit)
+            ms = (time.perf_counter() - t0) * 1000.0
+        return {"station": label, "cached": cached, "prepare_ms": round(ms, 1)}
+
+    @app.post("/api/station/{label}/solve")
+    async def solve(label: str, request: Request) -> dict:
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        return solve_payload(state, label, cfg)
+
+    static = Path(__file__).parent / "static"
+    app.mount("/", StaticFiles(directory=str(static), html=True), name="static")
+    return app
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="ladcp-studio",
+        description="pyladcp Studio: interactive single-station LADCP processing "
+                    "in the browser (local server)")
+    ap.add_argument("stations", nargs="*", help="station id(s) to work on, e.g. 80 79")
+    ap.add_argument("--root", default=_QA_ROOT_DEFAULT,
+                    help=f"base dir for file discovery (default: {_QA_ROOT_DEFAULT})")
+    ap.add_argument("--cruise", default=_QA_CRUISE_DEFAULT,
+                    help=f"cruise preset (default: {_QA_CRUISE_DEFAULT})")
+    ap.add_argument("--index", default=None,
+                    help="archive index JSON (ladcp-index build); with no station "
+                         "ids, serves every cast in the index")
+    ap.add_argument("--from-hex", action="store_true",
+                    help="build missing cleaned CTD from the index's raw .hex anchor")
+    ap.add_argument("--ctd-cache", default=None, help="cache dir for --from-hex .cnv")
+    ap.add_argument("--sadcp", metavar="PATH",
+                    help="ship-ADCP source for the inverse constraint (as in ladcp-qa); "
+                         "the GUI can then toggle/weight it per solve")
+    ap.add_argument("--sadcp-source", choices=("vmdas", "codas"), default="vmdas")
+    ap.add_argument("--sadcp-filetype", choices=("STA", "LTA"), default="STA")
+    ap.add_argument("--sadcp-xducer", type=float, default=5.0)
+    ap.add_argument("--sadcp-timeoff", default=None, metavar="SECONDS|auto")
+    ap.add_argument("--sadcp-nav", metavar="PATH", default=None)
+    ap.add_argument("--sadcp-reingest", action="store_true")
+    ap.add_argument("--host", default="127.0.0.1", help="bind address (default: localhost)")
+    ap.add_argument("--port", type=int, default=8642, help="port (default: 8642)")
+    ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
+    args = ap.parse_args(argv)
+
+    labels = list(args.stations)
+    if not labels and args.index:
+        from ..qa.cli import _all_station_labels
+        labels = _all_station_labels(args.index, Path(args.root), args.cruise)
+    if not labels:
+        ap.error("give one or more station ids, or --index to serve the whole archive")
+
+    sadcp = None
+    if args.sadcp:
+        try:
+            sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
+                                filetype=args.sadcp_filetype, xducer=args.sadcp_xducer,
+                                timeoff=parse_timeoff(args.sadcp_timeoff),
+                                nav=args.sadcp_nav, reingest=args.sadcp_reingest)
+        except ValueError as e:
+            ap.error(str(e))
+
+    state = StudioState(labels, root=args.root, cruise=args.cruise, index=args.index,
+                        from_hex=args.from_hex, ctd_cache=args.ctd_cache, sadcp=sadcp)
+    app = create_app(state)
+
+    import uvicorn
+    url = f"http://{args.host}:{args.port}"
+    print(f"pyladcp studio: {len(labels)} station(s) at {url}  (Ctrl-C to stop)")
+    if not args.no_browser:
+        import webbrowser
+        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0

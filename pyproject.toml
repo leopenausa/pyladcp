@@ -36,9 +36,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "pytest", "pre-commit"]
+dev = ["ruff", "pytest", "pre-commit", "httpx"]    # httpx: fastapi TestClient (studio tests)
 export = ["openpyxl"]
 docs = ["mkdocs-material"]
+gui = ["fastapi", "uvicorn"]                       # ladcp-studio local web GUI
 
 [project.urls]
 Homepage = "https://github.com/leopenausa/pyladcp"
@@ -50,9 +51,13 @@ ladcp-qa = "ladcp.qa.cli:main"
 ladcp-index = "ladcp.archive_cli:main"
 ladcp-sadcp-section = "ladcp.plots.sadcp_section:main"
 ladcp-compare = "ladcp.qa.compare:main"
+ladcp-studio = "ladcp.studio.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ladcp.studio" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
