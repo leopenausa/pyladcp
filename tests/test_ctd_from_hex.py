@@ -26,12 +26,15 @@ def test_xmlcon_for_finds_sibling(tmp_path):
 
 def test_xmlcon_for_matches_mismatched_case_stem(tmp_path):
     # the MORIA-25b..g case: .hex stem is lowercase, the .XMLCON carries an uppercase
-    # station letter -> must still match on a case-sensitive filesystem.
+    # station letter -> must still match on a case-sensitive filesystem. Compare file
+    # identity, not spelling: on case-insensitive filesystems (macOS/Windows) the
+    # exact-case fast path legitimately returns the lowercase-stem alias of the same file.
     hexp = tmp_path / "MORIA-25b-CTD.hex"
     hexp.write_text("* hex\n")
     xml = tmp_path / "MORIA-25B-CTD.XMLCON"
     xml.write_text("<config/>\n")
-    assert ctd_raw.xmlcon_for(hexp) == xml
+    found = ctd_raw.xmlcon_for(hexp)
+    assert found.samefile(xml)
 
 
 def test_xmlcon_for_raises_when_absent(tmp_path):
