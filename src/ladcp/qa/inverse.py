@@ -316,8 +316,15 @@ def bottom_referenced_profile(merged, bt, sync, *, zbottom: float, dz: float = 8
     return BottomProfile(z=z, u=u, v=v, uerr=uerr, n=n)
 
 
-def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
-    """Shared front end: sync + bottom detect + filtered bottom track + super-ensembles."""
+def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
+    """Shared front end: sync + bottom detect + filtered bottom track + super-ensembles.
+
+    This is the expensive, weight-independent part of a solve (~1.2 s on MORIA-80
+    vs ~30 ms for the inverse itself). The returned tuple can be handed back to
+    :func:`compute_velocity_full` via ``context=`` to re-solve with different
+    constraint weights without rebuilding -- the cache tier behind
+    :class:`ladcp.session.StationSession`.
+    """
     from .bottom import bottom_track_velocity, detect_bottom
 
     sync = synchronize(dh, ctd)
@@ -354,6 +361,9 @@ def _build(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
         mask_up_bins=getattr(params, "edit_mask_up_bins", (1,)) if params is not None else (1,))
     zmax = sync.maxdepth if np.isfinite(sync.maxdepth) else float(np.nanmax(se.izm))
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom
+
+
+_build = build_solve_context        # original (private) name
 
 
 @dataclass
@@ -567,7 +577,8 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
                           dz: float = 8.0, params=None, weightmin: float = 0.1,
                           solver: str = "inverse", sadcp: np.ndarray | None = None,
                           sadcpfac: float = 3.0, botfac: float = 1.0,
-                          barofac: float = 1.0, smoofac: float = 0.0) -> VelocityResult:
+                          barofac: float = 1.0, smoofac: float = 0.0,
+                          context=None) -> VelocityResult:
     """End-to-end solve returning every product the velocity figures need.
 
     ``solver`` selects the velocity (``.lad``) solution, naming the legacy ``ps.shear``
@@ -586,6 +597,11 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     ``ps.smoofac`` constraint weights (inverse only): how strongly the bottom track and
     the GPS barotropic row pull the solution, and the curvature-smoothing strength
     (legacy defaults 1/1/0).
+
+    ``context`` is an optional pre-built :func:`build_solve_context` tuple for the same
+    ``(dh, ctd, dz, params)``; passing it skips the expensive front end so repeated
+    solves with different weights cost only the inverse (the
+    :class:`ladcp.session.StationSession` cache path).
     """
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")
@@ -599,7 +615,8 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
                 f"{label}-looker is in {head.coord_frame.value!r} coordinates; the velocity solve "
                 "requires earth-frame velocities. A beam->earth transform is not yet implemented "
                 "(the QA report flags this as a coord_frame WARN).")
-    se, z, merged, bt, sync, bottom = _build(dh, ctd, dz=dz, params=params)
+    se, z, merged, bt, sync, bottom = (context if context is not None
+                                       else build_solve_context(dh, ctd, dz=dz, params=params))
     sp_mag = shear_method(se, dz=dz, drot=0.0, z=z)         # magnetic baroclinic shape
     bp_mag = bottom_referenced_profile(merged, bt, sync, zbottom=bottom.zbottom, dz=dz,
                                        drot=0.0)
