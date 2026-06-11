@@ -1,7 +1,7 @@
 """Validation harness (qa/validate.py): golden-dr loader + scoring.
 
 MORIA-80's golden .mat is a committed fixture, so its targets always load. The other
-ladder stations (MORIA-10, FDCCC1_001/002) live only in the local New_golden/ tree and
+ladder stations (MORIA-10, CRUISE2_001/002) live only in the local New_golden/ tree and
 are skipped when absent. score() math is exercised synthetically so it runs everywhere.
 """
 
@@ -50,14 +50,14 @@ def test_score_profile_against_self_is_perfect():
     assert s["u"].rms == pytest.approx(0.0, abs=1e-9)
 
 
-@pytest.mark.parametrize("name", ["MORIA-10", "FDCCC1_001", "FDCCC1_002"])
+@pytest.mark.parametrize("name", ["MORIA-10", "CRUISE2_001", "CRUISE2_002"])
 def test_local_only_stations(name):
     st = V.STATIONS[name]
     if not st.mat.exists():
         pytest.skip(f"{name} golden not present (local-only)")
     dr = V.load_dr(name)
     assert dr.z.size == dr.u.size > 5
-    # FDCCC1_002 is the only ladder cast that truly used the SADCP constraint.
-    assert dr.has_sadcp == (name == "FDCCC1_002")
+    # CRUISE2_002 is the only ladder cast that truly used the SADCP constraint.
+    assert dr.has_sadcp == (name == "CRUISE2_002")
     if dr.has_sadcp:
         assert np.isfinite(dr.u_sadcp).sum() > 1

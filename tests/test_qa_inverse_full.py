@@ -104,7 +104,7 @@ def test_shear_path_unchanged(both_solvers):
     # rms reflects the velocity-path editing fix set now applied before averaging
     # (units/floor/refmed/btgate/outlier_n): MORIA-80 shear rms is bias-dominated while the
     # profile shape is unchanged. See memory ladcp-editing-rootcause-2026-06.
-    # 2026-06-10 (FDCCC1 reference-offset root-cause): the bottom track now prefers the RDI
+    # 2026-06-10 (CRUISE2 reference-offset root-cause): the bottom track now prefers the RDI
     # firmware track when the PD0 carries one -- legacy btrk_mode=3 semantics (legacy used it
     # on MORIA too, btrk_used=1). MORIA-80's RDI and own tracks differ ~1 cm/s, moving the
     # BT-referenced shear bias 0.031 -> 0.0397; the inverse (the product path) is golden-
@@ -132,9 +132,9 @@ def test_lainsadcp_reproduces_fdccc1_002_golden_weight():
     # the embedded SADCP profiles + golden velerr must give the logged mean weight 1.5993
     from ladcp.qa import validate as V
     from ladcp.qa.inverse_full import _lainsadcp
-    if not V.STATIONS["FDCCC1_002"].mat.exists():
-        pytest.skip("FDCCC1_002 golden not present (local-only)")
-    dr = V.load_dr("FDCCC1_002")
+    if not V.STATIONS["CRUISE2_002"].mat.exists():
+        pytest.skip("CRUISE2_002 golden not present (local-only)")
+    dr = V.load_dr("CRUISE2_002")
     svel = np.column_stack([dr.z_sadcp, dr.u_sadcp, dr.v_sadcp, dr.uerr_sadcp])
     svel = svel[np.isfinite(svel[:, 1])]
     _, w, _, _ = _lainsadcp(svel, nz=int(225 / 8), dz=8.0, sadcpfac=3.0, velerr=0.056327)

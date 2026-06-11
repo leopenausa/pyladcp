@@ -160,7 +160,7 @@ def test_ingest_adds_ship_velocity_to_get_absolute(tmp_path):
 
 def test_ingest_dedups_compiled_plus_parts(tmp_path):
     # a compiled whole-cruise STA next to the per-deployment files it was built
-    # from (FDCCC1) repeats every ensemble -- identical timestamps must collapse
+    # from (CRUISE2) repeats every ensemble -- identical timestamps must collapse
     import shutil
     _write_sta(tmp_path / "part.STA")
     shutil.copy(tmp_path / "part.STA", tmp_path / "compiled.STA")

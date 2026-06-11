@@ -1,7 +1,7 @@
 """Ship navigation tracks + SADCP clock-desync correction.
 
 Shipboard-ADCP acquisition PCs are not always synchronised to GPS time: on
-FDCCC1 the VmDAS clock was ~12 years off (STA timestamps start 2010-01-01 for a
+one validation cruise the VmDAS clock was ~12 years off (STA timestamps start 2010-01-01 for a
 March-2022 cruise) while the embedded GPS *positions* were correct. Because the
 ship's track is effectively a unique function of time, the wrong clock can be
 recovered by sliding the SADCP position series against an independently

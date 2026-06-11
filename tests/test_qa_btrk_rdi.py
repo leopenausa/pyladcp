@@ -2,7 +2,7 @@
 
 The own water-track BT samples a near-seabed water cell and inherits
 boundary-layer flow (~10-15% of the current leaks into the package velocity on
-strong-drift casts -- the FDCCC1 t1-01/t1-02/t99-03 whole-profile offsets).
+strong-drift casts -- the CRUISE2 t1-01/t1-02/t99-03 whole-profile offsets).
 When the PD0 carries firmware BT pings they are the velocity source.
 """
 

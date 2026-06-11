@@ -1,6 +1,6 @@
-"""Nav-track reader + SADCP clock-desync estimation (FDCCC1 curveball).
+"""Nav-track reader + SADCP clock-desync estimation (CRUISE2 curveball).
 
-The acquisition PC's clock can be arbitrarily wrong (FDCCC1: ~12 years) while the
+The acquisition PC's clock can be arbitrarily wrong (CRUISE2: ~12 years) while the
 embedded GPS positions stay correct; the offset is recovered by sliding the
 position series against an independently timestamped nav track.
 """
@@ -70,7 +70,7 @@ def _synthetic_track(n=2000, dt_s=30.0, t0="2022-03-01T00:00:00"):
 def test_estimate_time_offset_recovers_known_shift():
     t, lat, lon = _synthetic_track()
     nav = NavTrack(time=t, lat=lat, lon=lon)
-    true_offset = 383_809_944.0                  # ~12.2 y, the FDCCC1 scale
+    true_offset = 383_809_944.0                  # ~12.2 y, the CRUISE2 scale
     wrong = t - np.timedelta64(int(true_offset * 1e9), "ns")
     # the mis-clocked instrument saw a sub-window of the track
     sl = slice(200, 1500)

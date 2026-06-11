@@ -16,7 +16,7 @@ the residual integer lag on the coarse-aligned grid. The single-stage ``bestlag`
 pipeline used before could only reach a ``±nlag`` offset (and structurally no more than
 ~half the CTD length), so a cast buried deep in the recording was silently mis-mapped onto
 the on-deck pings — the in-water depth window then contained no valid velocity and every
-super-ensemble collapsed to NaN (FDCCC1_001).
+super-ensemble collapsed to NaN (CRUISE2_001).
 
 Validated against MORIA-80: maxdepth 1072.7 m (golden ``p.maxdepth`` 1072.68) and a
 synchronization correlation of ~0.97 (golden 0.984); the coarse stage returns the same
@@ -62,12 +62,12 @@ def water_window(z_on_ping: np.ndarray, threshold: float = 10.0,
     cast's deepest point -- the descent-to-ascent excursion, matching the legacy
     "continuous profile" semantics -- with below-threshold spells of at most
     ``max_gap`` pings bridged. A first-to-last-deep-ping rule would also sweep up
-    pre-cast surface soaks: on FDCCC1 t99-03 the package soaked ~3.5 min at
+    pre-cast surface soaks: on cruise-2 t99-03 the package soaked ~3.5 min at
     10-15 m before the real descent, and including the soak mixes its surface
     drift into the GPS barotropic reference (-6 cm/s on a 0.12 m/s flow). The gap
     bridging separates such genuine surfacings (minutes near the surface) from
     single-ping threshold flicker when the package hovers right at ``threshold``
-    (FDCCC1 t1-01 ends with ~5 min hanging at 10 m). On a normal cast the deep
+    (cruise-2 t1-01 ends with ~5 min hanging at 10 m). On a normal cast the deep
     span is one contiguous run and the result is unchanged.
     """
     inw = np.where(np.isfinite(z_on_ping) & (z_on_ping > threshold))[0]
@@ -93,7 +93,7 @@ def _extend_z_by_w(z: np.ndarray, w_ad: np.ndarray, tad: np.ndarray) -> np.ndarr
     """Extend the CTD-anchored package depth past the CTD record by integrating ADCP w.
 
     The CTD deck unit is sometimes stopped while the LADCP is still in the water
-    (FDCCC1 t1-01: recording ends with the package at 107 m, ~6 min before recovery);
+    (cruise-2 t1-01: recording ends with the package at 107 m, ~6 min before recovery);
     interpolation alone leaves those pings depth-less and the cast gets truncated --
     losing upper-ocean data *and* shortening the GPS-displacement window of the
     barotropic reference. Legacy ``getdpthi`` integrates the ADCP's own vertical

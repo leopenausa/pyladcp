@@ -44,7 +44,7 @@ def test_dm_to_deg_signs():
 
 def test_station_from_filename():
     assert _station_from_name(pathlib.Path("MORIA-80-CTD.hex")) == "MORIA-80"
-    assert _station_from_name(pathlib.Path("FDCCC1_002_ctd.hdr")) == "FDCCC1_002"
+    assert _station_from_name(pathlib.Path("CRUISE2_002_ctd.hdr")) == "CRUISE2_002"
 
 
 def test_read_hex_header_parses_anchor(tmp_path):
@@ -97,7 +97,7 @@ def test_match_master_picks_cast_over_stub_starting_nearer():
 
 
 def test_match_master_earliest_cast_wins_on_back_to_back_stations():
-    # the FDCCC1 t3-01..03 pattern: consecutive ~1 h shelf stations all start inside
+    # the CRUISE2 t3-01..03 pattern: consecutive ~1 h shelf stations all start inside
     # the 2 h tolerance of the previous anchor -- the *first* genuine cast after the
     # on-station time belongs to this station, even when a later one is bigger.
     utc = np.datetime64("2022-03-04T02:16:45")

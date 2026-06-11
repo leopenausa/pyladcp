@@ -3,9 +3,8 @@
 The pipeline is designed so a previously unseen cruise — different naming
 conventions, different instruments, desynced acquisition clocks — processes
 end-to-end with four commands. Validated on MORIA (N Atlantic, earth-coord
-WH300s, MASTER/SLAVE dirs) and FDCCC1 / FAR-DWO Cap de Creus (W Med,
-beam-coord WH300s, flat `MA*`/`SL*` dir, OS75 SADCP with a ~12-year clock
-error).
+WH300s, MASTER/SLAVE dirs) and a second full cruise (beam-coord WH300s,
+flat `MA*`/`SL*` dir, OS75 SADCP with a ~12-year clock error).
 
 ## 1. Build the archive index
 
@@ -53,7 +52,7 @@ ladcp-qa --all-stations \
   the STA files), `--sadcp-timeoff auto` recovers the constant clock offset by
   sliding the STA's embedded GPS positions against an independently timestamped
   navigation track (`--sadcp-nav`: SADO `posicion` exports or any time/lat/lon
-  CSV; file or directory). On FDCCC1 this matched the operators' manual
+  CSV; file or directory). On the second validation cruise this matched the operators' manual
   correction to 5 s with a 10-m median track residual. A known offset can be
   given directly in seconds.
 * A folder holding both a compiled STA and its per-deployment parts is fine —
@@ -83,9 +82,9 @@ ladcp-compare --ours <out> --legacy <legacy_processed_dir> -o <out>/legacy_compa
 
 | cruise | stations | median u rms vs legacy | notes |
 |--------|----------|------------------------|-------|
-| FDCCC1 | 30/31    | ~1.4 cm/s (corr 0.97)  | 31st has no CTD raw; 2 shallow casts reported with `--botfac 0` (bad near-bottom firmware BT samples, labelled in the report) |
+| cruise 2 | 30/31    | ~1.4 cm/s (corr 0.97)  | 31st has no CTD raw; 2 shallow casts reported with `--botfac 0` (bad near-bottom firmware BT samples, labelled in the report) |
 
-Three FDCCC1-discovered fixes are now defaults: the bottom track prefers the
+Three fixes discovered on that cruise are now defaults: the bottom track prefers the
 RDI firmware track when the PD0 carries one (legacy `btrk_mode=3`; the own
 water-track BT inherits boundary-layer flow and biased strong-drift casts by
 ~10–15 % of the current), the in-water window is the deep segment containing

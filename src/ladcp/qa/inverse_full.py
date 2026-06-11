@@ -168,7 +168,7 @@ def _lainsadcp(svel: np.ndarray, nz: int, dz: float, sadcpfac: float, velerr: fl
     **magnetic** frame (same as the LADCP data). Each finite point pins the ocean velocity
     at its depth bin: row weight ``sadcpfac * velerr/verr`` (legacy halving/column-norm
     ``fac2`` is computed but commented out in the source, so it is omitted here -- this
-    reproduces the logged "mean sadcp weight" ~1.6 on FDCCC1_002). Only the ocean block is
+    reproduces the logged "mean sadcp weight" ~1.6 on CRUISE2_002). Only the ocean block is
     touched (``Ac`` row = 0). Returns ``(jz, w, rhs, kept)`` where ``kept`` is the
     ``fac>0.1`` mask the legacy stores as ``dr.*_sadcp``; empty arrays if unusable.
 

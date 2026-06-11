@@ -1,6 +1,6 @@
 """End-to-end regression for the large clock-offset sync fix + near-touch false-lock guard.
 
-FDCCC1_001 is the canonical failure case: the ADCP pinged ~24 min on deck before the cast, so
+CRUISE2_001 is the canonical failure case: the ADCP pinged ~24 min on deck before the cast, so
 the in-water window sits ~2400 s into the record -- beyond the old single-stage ``bestlag``
 reach. The old pipeline mis-mapped the depth onto the on-deck pings (0% velocity coverage) and
 the profile collapsed to empty; the seabed stack then locked a deep constant-range artifact
@@ -20,14 +20,14 @@ from ladcp.qa.depth import synchronize
 from ladcp.qa.ingest import apply_header_config, load_dualhead
 from ladcp.qa.inverse import compute_velocity_full
 
-_ST = V.STATIONS["FDCCC1_001"]
-pytestmark = pytest.mark.skipif(not _ST.has_raw, reason="FDCCC1_001 raw not present (local-only)")
+_ST = V.STATIONS["CRUISE2_001"]
+pytestmark = pytest.mark.skipif(not _ST.has_raw, reason="CRUISE2_001 raw not present (local-only)")
 
 
 @pytest.fixture(scope="module")
 def fdccc1_001():
-    p = resolve_params("MORIA", "FDCCC1_001")     # geometry comes from the PD0 headers
-    dh = load_dualhead(str(_ST.raw_down), str(_ST.raw_up), station="FDCCC1_001", params=p)
+    p = resolve_params("MORIA", "CRUISE2_001")     # geometry comes from the PD0 headers
+    dh = load_dualhead(str(_ST.raw_down), str(_ST.raw_up), station="CRUISE2_001", params=p)
     apply_header_config(p, dh)
     ctd = read_ctd_cnv(str(_ST.ctd), params=p)
     return dh, ctd, p
@@ -60,7 +60,7 @@ def test_near_touch_seabed_not_deep_artifact(fdccc1_001):
 def test_profile_is_non_empty_and_matches_golden(fdccc1_001):
     dh, ctd, p = fdccc1_001
     vr = compute_velocity_full(dh, ctd, drot=0.0, params=p, solver="inverse")
-    dr = V.load_dr("FDCCC1_001")
+    dr = V.load_dr("CRUISE2_001")
     sc = V.score_profile(vr.vp.z, vr.vp.u, vr.vp.v, dr)
     assert sc["u"].n >= 10                           # was 0 (empty) before the fix
     assert sc["u"].corr > 0.9                        # legacy medianan(na=0) reference lifts this

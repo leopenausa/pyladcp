@@ -38,13 +38,15 @@ The work below is sequenced; each step gets its own detailed plan before executi
    the slave by overlap; results cache to `.ladcp_archive.json`, re-scanning only new files.
    Replaces the hard-coded manifest — `ladcp-qa <st> --index …` resolves raw files by station
    with no naming convention. Validated on 79/80/82 (auto-resolved to MLADC036/037/039, matching
-   the curated files). Remaining: FDCCC1 (raw not on disk + publication-gated).
+   the curated files). Remaining: cruise-2 goldens (local-only + publication-gated).
 4. **Robustness (#4b)** — single-head casts, beam-vs-earth frames, acquisition-script
    variance, edge cases.
 5. **Outputs (#3)** ✅ — Excel + ODV + NetCDF + CSV export (per-station files and cruise-level
    aggregates under `exports/`); shipped as `ladcp/export/`.
 6. **Release hardening (#7)** — public-API freeze, `ruff format` pass, docs site,
-   versioning/CHANGELOG, PyPI publish.
+   versioning/CHANGELOG, **PyPI publish** (name `pyladcp` free as of 2026-06; plan:
+   GitHub-Actions Trusted Publishing, TestPyPI dry-run first, Zenodo DOI on the
+   same release; audit the sdist contents before the first upload).
 7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → the cleaned 6-col `.cnv`
    the solver consumes, so casts without a pre-processed profile still run. The recipe
    lives in CTD_project (`ctd_pipeline.convert_for_ladcp`: datcnv → ITS-90/PSS-78 derive →

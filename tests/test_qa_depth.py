@@ -79,7 +79,7 @@ def test_maxdepth_matches_golden(sync):
     assert sync.maxdepth == pytest.approx(golden["maxdepth"], abs=1.0)
 
 
-# --- water_window: deep-segment semantics (FDCCC1 t99-03 / t1-01) --------------------
+# --- water_window: deep-segment semantics (CRUISE2 t99-03 / t1-01) --------------------
 def test_water_window_normal_cast_unchanged():
     import numpy as np
 
@@ -121,7 +121,7 @@ def test_extend_z_by_w_fills_truncated_ctd_tail():
     import numpy as np
 
     from ladcp.qa.depth import _extend_z_by_w
-    # CTD record stops mid-ascent (FDCCC1 t1-01); ADCP w keeps going
+    # CTD record stops mid-ascent (CRUISE2 t1-01); ADCP w keeps going
     tad = np.arange(300, dtype=float)
     z = np.full(300, np.nan)
     z[:200] = np.concatenate([np.linspace(5, 100, 100), np.linspace(100, 52, 100)])

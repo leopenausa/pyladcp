@@ -72,7 +72,7 @@ def _legacy_tim_span(dr_raw):
     if t.size < 2:
         return None
     # LDEO julian.m counts from noon (astronomical JD); decoding against midnight
-    # removes the 12 h: verified on FDCCC1_001 (cast 01:36 UTC, tim decodes 13:36
+    # removes the 12 h: verified on CRUISE2_001 (cast 01:36 UTC, tim decodes 13:36
     # under the astronomical epoch)
     epoch = np.datetime64("2000-01-01T00:00:00")
     def conv(jd):

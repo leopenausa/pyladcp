@@ -7,7 +7,7 @@ told which deployment file is which cast. The chain:
    orientation -- cached by ``name + size + mtime`` so later runs only touch newly
    arrived files. Files come from ``MASTER/`` + ``SLAVE/`` subdirs when present (MORIA
    layout), else from a recursive ``*.000`` sweep of the whole tree (flat layouts such
-   as FDCCC1's ``MA*``/``SL*`` in one dir). Each file is classified down/up-looker by
+   as one cruise's ``MA*``/``SL*`` in one dir). Each file is classified down/up-looker by
    the path convention when it carries one, else by the PD0 sysconfig facing bit -- so
    no naming convention is required;
 2. **anchor** each cast with a Seabird CTD ``.hex`` header (:mod:`ladcp.io.ctd_hex`), which
@@ -178,7 +178,7 @@ def _match_master(utc: np.datetime64, m_info: dict) -> tuple[str | None, str]:
     starts within :data:`_START_TOL` after it (the deck-unit logging on MORIA 01-04 was
     restarted mid-station, so the real cast can begin after the on-station time and is buried
     among sub-minute stubs -- those are excluded by :data:`MIN_CAST_ENS`, and on back-to-back
-    shelf stations (FDCCC1 t3-01..03, ~1 h apart) the *next* station's cast can also start
+    shelf stations (cruise-2 t3-01..03, ~1 h apart) the *next* station's cast can also start
     inside the tolerance, so earliest-start, not largest, is the correct pick); else, only if
     nothing looks like a cast, fall back to the nearest window/start so genuinely small
     (shallow-shelf) casts still resolve. Never a stub when a genuine cast qualifies.
