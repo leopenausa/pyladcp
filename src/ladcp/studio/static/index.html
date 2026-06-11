@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pyladcp · studio</title>
+<link rel="stylesheet" href="./studio.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div class="wordmark">py<em>ladcp</em> studio</div>
+    <select id="station" class="station-select" title="station"></select>
+    <div id="status" class="solve-state"><span class="dot"></span><span id="status-text">connecting…</span></div>
+    <div class="spacer"></div>
+    <button class="btn" id="copycli" title="copy the ladcp-qa command reproducing this solution">copy CLI</button>
+  </header>
+
+  <nav class="rail">
+    <div class="sect">
+      <h3>Pipeline</h3>
+      <div class="stage" id="st-prep"><span class="st-dot"></span><span class="nm">prepare</span><span class="tm" id="prep-ms">–</span></div>
+      <div class="stage" id="st-solve"><span class="st-dot"></span><span class="nm">solve</span><span class="tm" id="solve-ms">–</span></div>
+    </div>
+
+    <div class="sect">
+      <h3>Solver</h3>
+      <div class="seg" id="solver">
+        <button data-v="shear">shear</button><button data-v="inverse" class="on">inverse</button>
+      </div>
+      <div class="knob" data-k="botfac" data-max="40" data-def="10">
+        <div class="row"><label>botfac<span>bottom track</span></label><output>1.0</output></div>
+        <input type="range" min="0" max="40" value="10"></div>
+      <div class="knob" data-k="barofac" data-max="40" data-def="10">
+        <div class="row"><label>barofac<span>barotropic</span></label><output>1.0</output></div>
+        <input type="range" min="0" max="40" value="10"></div>
+      <div class="knob" data-k="smoofac" data-max="20" data-def="0">
+        <div class="row"><label>smoofac<span>smoothing</span></label><output>0.0</output></div>
+        <input type="range" min="0" max="20" value="0"></div>
+      <div class="knob" data-k="sadcpfac" data-max="60" data-def="30">
+        <div class="row"><label>sadcpfac<span>ship ADCP</span></label><output>3.0</output></div>
+        <input type="range" min="0" max="60" value="30"></div>
+    </div>
+
+    <div class="sect">
+      <h3>Constraints</h3>
+      <div class="tgl" id="tgl-downonly"><span class="sw"></span>down-looker only<small>--down-only</small></div>
+      <div class="tgl" id="tgl-sadcp"><span class="sw"></span>SADCP constraint<small id="sadcp-note">no source</small></div>
+    </div>
+
+    <div class="sect">
+      <h3>Solution</h3>
+      <div class="readouts">
+        <div class="ro"><div class="k">declination</div><div class="v" id="ro-drot">–</div></div>
+        <div class="ro"><div class="k">seabed</div><div class="v" id="ro-zbottom">–</div></div>
+        <div class="ro"><div class="k">ubar</div><div class="v" id="ro-ubar">–</div></div>
+        <div class="ro"><div class="k">vbar</div><div class="v" id="ro-vbar">–</div></div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="plot-head">
+      <h2>Velocity solution</h2>
+      <div class="legend">
+        <span class="key"><i class="ln u"></i>u east</span>
+        <span class="key"><i class="ln v"></i>v north</span>
+        <span class="key"><i class="dot-bt"></i>bottom track</span>
+        <span class="key"><i class="band"></i>±1σ</span>
+      </div>
+    </div>
+    <div class="plot-wrap">
+      <canvas id="plot"></canvas>
+      <div id="overlay" class="overlay">preparing station…</div>
+    </div>
+    <div class="cli-bar"><span class="cli-label">CLI</span><code id="cli">–</code></div>
+  </main>
+
+</div>
+<script src="./studio.js"></script>
+</body>
+</html>
