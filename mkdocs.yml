@@ -57,5 +57,5 @@ nav:
       - "A · CLI flag reference": appendix-a-flags.md
       - "B · LDEO_IX ↔ pyladcp mapping": appendix-b-legacy-map.md
       - "C · File formats": appendix-c-formats.md
-      - "D · Logsheet templates": appendix-d-logsheets.md
+      - "D · Logsheet checklist": appendix-d-logsheets.md
       - "E · Glossary": appendix-e-glossary.md
