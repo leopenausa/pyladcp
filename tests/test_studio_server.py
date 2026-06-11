@@ -195,3 +195,34 @@ def test_lad_matches_direct_export(client, tmp_path):
     write_lad(result.vp, str(path), station="MORIA-80", lat=prep.lat, lon=prep.lon,
               drot=-9.878379, time=prep.when)
     assert r.text == path.read_text(encoding="utf-8")
+
+
+# ------------------------------------------------- data errors are clean 400s (PR 5)
+
+def test_bad_sadcp_folder_is_400_not_500(tmp_path):
+    from ladcp.session import SadcpConfig
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    st = StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                     sadcp=SadcpConfig(folder=str(tmp_path / "empty_sadcp")))
+    c = TestClient(create_app(st))
+    r = c.post("/api/station/MORIA-80/solve",
+               json={"solve": {"drot": -9.878379}, "use_sadcp": True})
+    assert r.status_code == 400
+    assert "FileNotFoundError" in r.json()["detail"]
+    # constraint off -> same station still solves fine
+    ok = c.post("/api/station/MORIA-80/solve",
+                json={"solve": {"drot": -9.878379}, "use_sadcp": False})
+    assert ok.status_code == 200
+
+
+def test_launch_rejects_sadcp_dir_without_sta(tmp_path, capsys):
+    from ladcp.studio.server import main
+    sub = tmp_path / "DATA"
+    sub.mkdir()
+    (sub / "x.STA").write_bytes(b"")
+    with pytest.raises(SystemExit) as exc:
+        main(["80", "--sadcp", str(tmp_path), "--no-browser"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "no .STA files directly under" in err
+    assert "DATA" in err                          # the helpful subfolder hint
