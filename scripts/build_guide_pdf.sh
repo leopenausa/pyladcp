@@ -25,10 +25,14 @@ CHAPTERS=(
   "$G/appendix-e-glossary.md"
 )
 
+# --from markdown (not gfm): the markdown reader assigns relative column widths
+# to wide pipe tables, so long cells wrap instead of overflowing the page.
 pandoc "${CHAPTERS[@]}" \
-  --from gfm+attributes \
+  --from markdown \
   --resource-path="$G" \
   --pdf-engine=xelatex \
+  --lua-filter=scripts/guide_pdf_admonitions.lua \
+  -H scripts/guide_pdf_preamble.tex \
   -V mainfont="DejaVu Serif" \
   -V monofont="DejaVu Sans Mono" \
   --toc --toc-depth=2 \
