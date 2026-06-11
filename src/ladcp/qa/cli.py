@@ -555,9 +555,20 @@ def main(argv: list[str] | None = None) -> int:
                         outdir=args.outdir, make_plots=not args.no_plots, drot=args.drot,
                         solver=args.solver, sadcp_opts=sadcp_opts, formats=formats,
                         inv_opts=inv_opts)
+            # each worker must NOT spin up a full BLAS thread pool: 6 workers x 16
+            # OpenBLAS threads thrash the cores (measured 3x slower on the 40-cast
+            # MORIA soak: 465s vs 148s). The pool itself is the parallelism, so
+            # workers run single-threaded BLAS; an explicit user env setting wins.
+            # The spawn context (all platforms) makes the limit apply at numpy load.
+            for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                        "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+                os.environ.setdefault(var, "1")
+            import multiprocessing
             from concurrent.futures import ProcessPoolExecutor, as_completed
+            ctx = multiprocessing.get_context("spawn")
             slots: list[tuple[str, str, object] | None] = [None] * n
-            with ProcessPoolExecutor(max_workers=jobs, initializer=_pool_init) as ex:
+            with ProcessPoolExecutor(max_workers=jobs, initializer=_pool_init,
+                                     mp_context=ctx) as ex:
                 futs = {ex.submit(_pool_task, dict(base, item=item, _i=i)): i
                         for i, item in enumerate(plan)}
                 for fut in as_completed(futs):
