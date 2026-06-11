@@ -37,8 +37,22 @@ from pathlib import Path
 
 import numpy as np
 
-# Repo root (.../LADCP_project), three parents up from src/ladcp/qa/.
-_REPO = Path(__file__).resolve().parents[3]
+
+def _find_repo() -> Path:
+    """Repo root (.../LADCP_project), three parents up from src/ladcp/qa/.
+
+    That only holds for a source checkout (editable install). Under a plain
+    ``pip install`` this file lives in site-packages, where no fixtures exist —
+    fall back to the working directory so ``pytest`` run from a checkout still
+    finds ``tests/fixtures/``.
+    """
+    src = Path(__file__).resolve().parents[3]
+    if (src / "tests" / "fixtures").is_dir():
+        return src
+    return Path.cwd()
+
+
+_REPO = _find_repo()
 _GOLDEN = _REPO / "New_golden"                          # local-only full goldens
 _FIXGOLDEN = _REPO / "tests" / "fixtures" / "New_golden"  # committed (CI-visible)
 

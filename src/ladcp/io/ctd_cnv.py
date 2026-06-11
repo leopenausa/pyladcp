@@ -40,7 +40,7 @@ def _parse_cnv_header(path: str) -> tuple[int, dict[str, int]]:
     """
     roles: dict[str, int] = {}
     n_header = 0
-    with open(path) as fh:
+    with open(path, encoding="latin-1") as fh:
         for line in fh:
             s = line.strip()
             if not (s.startswith("#") or s.startswith("*")):

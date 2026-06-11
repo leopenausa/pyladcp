@@ -427,7 +427,7 @@ def write_report(results: list[PairResult], ours_only, legacy_only,
         lines = ["unpaired stations:"]
         lines += [f"  ours-only:   {o.station} ({o.time})" for o in ours_only]
         lines += [f"  legacy-only: {m.name} ({m.time})" for m in legacy_only]
-        (out / "unpaired.txt").write_text("\n".join(lines) + "\n")
+        (out / "unpaired.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return csv_path, pdf_path
 
 

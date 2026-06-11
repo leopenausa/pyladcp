@@ -47,7 +47,7 @@ def write_lad(vp: VelocityProfile, path: str, *, station: str = "",
         e = ev if np.isfinite(ev) else 0.0
         lines.append(f"{z:6.1f} {u:6.3f} {v:6.3f} {e:6.3f} ")
     text = "\n".join(lines) + "\n"
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
     return path
 
@@ -78,6 +78,6 @@ def write_bot(bp: BottomProfile, path: str, *, station: str = "",
         ev = e if np.isfinite(e) else 0.0
         lines.append(f"{z:6.1f} {u:6.3f} {v:6.3f} {ev:6.3f}")
     text = "\n".join(lines) + "\n"
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
     return path

@@ -43,8 +43,8 @@ figures/
 qa_out/
 validation_out/
 .ladcp_archive.json
-# local CLI quick-guide (PDF + generator), not committed for now
-guide/
+# guide/ (PDF quick-guides + generators) is committed; only its cache is not
+guide/__pycache__/
 
 # --- archives / binaries ---
 *.rar
