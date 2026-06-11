@@ -20,8 +20,21 @@ keywords:
   - ADCP
   - inverse method
 references:
+  - type: article
+    title: "Deep velocity profiling using Lowered Acoustic Doppler Current Profilers: Bottom track and inverse solutions"
+    authors:
+      - family-names: "Visbeck"
+        given-names: "Martin"
+    journal: "Journal of Atmospheric and Oceanic Technology"
+    volume: 19
+    issue: 5
+    start: 794
+    end: 807
+    year: 2002
+    doi: "10.1175/1520-0426(2002)019<0794:DVPULA>2.0.CO;2"
   - type: software
     title: "LDEO_IX LADCP processing software"
+    url: "https://www.ldeo.columbia.edu/~ant/LADCP.html"
     notes: >-
       pyladcp re-implements the algorithms of the LDEO_IX package by Martin Visbeck
       and colleagues (Lamont-Doherty Earth Observatory). The original MATLAB code is
