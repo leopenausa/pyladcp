@@ -59,6 +59,10 @@ async function solve() {
   const firstLoad = last === null || last.station !== S.station;
   if (firstLoad) $("overlay").classList.remove("hidden");
   status("busy", firstLoad ? "preparing…" : "solving…");
+  if (firstLoad) {
+    $("st-load").className = "stage busy";
+    $("st-build").className = "stage busy";
+  }
   $("st-solve").className = "stage busy";
   try {
     const r = await fetch(`api/station/${encodeURIComponent(S.station)}/solve`,
@@ -75,8 +79,14 @@ async function solve() {
     if (mySeq !== seq) return;
     last = p;
     $("overlay").classList.add("hidden");
-    $("st-prep").className = "stage done";
-    $("prep-ms").textContent = p.prepared ? "cached" : "built";
+    const fmtStage = ms => ms == null ? "–" : (ms >= 100 ? `${(ms / 1000).toFixed(1)} s`
+                                                         : `${Math.round(ms)} ms`);
+    $("st-load").className = "stage done";
+    $("load-ms").textContent = fmtStage(p.stages.load_ms)
+      + (p.prepared ? " · cached" : "");
+    $("st-build").className = "stage done";
+    $("build-ms").textContent = fmtStage(p.stages.build_ms)
+      + (p.prepared ? " · cached" : "");
     $("st-solve").className = "stage done";
     $("solve-ms").textContent = `${p.solve_ms} ms`;
     status("live", `solved in ${p.solve_ms} ms`);
@@ -218,10 +228,12 @@ document.addEventListener("keydown", ev => {
 const canvas = $("plot");
 const ctx = canvas.getContext("2d");
 
-const AXIS = "#9fb4c8";                          // high-contrast axis ink
-const GRID = "rgba(159,180,200,.14)";
-const ZERO = "rgba(159,180,200,.38)";
-const FONT = '12px ui-monospace,"SF Mono",Consolas,monospace';
+const AXIS = "#bdd0e2";                          // axis ink: deliberately bright
+const FRAME = "rgba(189,208,226,.45)";           // pane frames + tick marks
+const GRID = "rgba(159,180,200,.13)";
+const ZERO = "rgba(189,208,226,.40)";
+const FONT = '13px ui-monospace,"SF Mono",Consolas,monospace';
+const FONT_TITLE = '600 13px ui-monospace,"SF Mono",Consolas,monospace';
 
 function niceStep(span, target) {
   const raw = span / target;
@@ -282,19 +294,30 @@ function draw(p) {
   const Y = zz => padT + zz / zmax * (H - padT - padB);
   const X = (val, pane, lim) => pane[0] + (val + lim) / (2 * lim) * (pane[1] - pane[0]);
 
-  // depth grid + labels (left pane carries the depth axis)
+  // depth grid + tick marks + labels (left pane carries the depth axis)
   const rightEdge = ref ? panes.d[1] : panes.v[1];
   const zstep = niceStep(zmax, 8);
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   for (let zz = 0; zz <= zmax; zz += zstep) {
     ctx.strokeStyle = GRID; ctx.beginPath();
     ctx.moveTo(panes.u[0], Y(zz)); ctx.lineTo(rightEdge, Y(zz)); ctx.stroke();
+    ctx.strokeStyle = FRAME; ctx.beginPath();             // tick mark on the axis
+    ctx.moveTo(panes.u[0] - 5, Y(zz)); ctx.lineTo(panes.u[0], Y(zz)); ctx.stroke();
     ctx.fillStyle = AXIS;
-    ctx.fillText(zz ? `${zz}` : "0 m", panes.u[0] - 8, Y(zz));
+    ctx.fillText(`${zz}`, panes.u[0] - 9, Y(zz));
   }
+  // depth-axis title, rotated along the left edge
+  ctx.save();
+  ctx.translate(15, (padT + H - padB) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = FONT_TITLE; ctx.fillStyle = AXIS;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("depth · m", 0, 0);
+  ctx.restore();
+  ctx.font = FONT;
 
   const drawFrame = (pane, lim, title, tickTarget) => {
-    ctx.strokeStyle = GRID;
+    ctx.strokeStyle = FRAME;
     ctx.strokeRect(pane[0], padT, pane[1] - pane[0], H - padT - padB);
     const vstep = niceStep(2 * lim, tickTarget);
     ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -302,15 +325,18 @@ function draw(p) {
       const x = X(val, pane, lim);
       ctx.strokeStyle = Math.abs(val) < 1e-12 ? ZERO : GRID;
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+      ctx.strokeStyle = FRAME; ctx.beginPath();           // tick mark below the frame
+      ctx.moveTo(x, H - padB); ctx.lineTo(x, H - padB + 5); ctx.stroke();
       ctx.fillStyle = AXIS;
-      ctx.fillText(`${Math.round(val * 1000) / 10}`, x, H - padB + 6);
+      ctx.fillText(`${Math.round(val * 1000) / 10}`, x, H - padB + 8);
     }
-    ctx.fillStyle = AXIS; ctx.textBaseline = "alphabetic";
+    ctx.font = FONT_TITLE; ctx.fillStyle = AXIS; ctx.textBaseline = "alphabetic";
     ctx.fillText(title, (pane[0] + pane[1]) / 2, padT - 10);
+    ctx.font = FONT;
   };
   drawFrame(panes.u, vmax, "U  east  ·  cm s⁻¹", 6);
   drawFrame(panes.v, vmax, "V  north  ·  cm s⁻¹", 6);
-  if (ref) drawFrame(panes.d, dmax, "Δu  Δv", 2);
+  if (ref) drawFrame(panes.d, dmax, "Δ  ·  cm s⁻¹", 2);
 
   // seabed
   if (p.zbottom !== null && p.zbottom <= zmax) {
@@ -346,20 +372,24 @@ function draw(p) {
   }
   ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = 1;
 
-  // ±1σ band on u
-  ctx.fillStyle = "rgba(57,211,200,.13)";
-  ctx.beginPath();
-  let started = false;
-  for (let i = 0; i < z.length; i++) {
-    if (u[i] === null || ue[i] === null) continue;
-    const x = X(u[i] - ue[i], panes.u, vmax), y = Y(z[i]);
-    started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true;
-  }
-  for (let i = z.length - 1; i >= 0; i--) {
-    if (u[i] === null || ue[i] === null) continue;
-    ctx.lineTo(X(u[i] + ue[i], panes.u, vmax), Y(z[i]));
-  }
-  if (started) ctx.fill();
+  // ±1σ bands (the LADCP error estimate is isotropic: uerr applies to u and v)
+  const sigmaBand = (comp, pane, color) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < z.length; i++) {
+      if (comp[i] === null || ue[i] === null) continue;
+      const x = X(comp[i] - ue[i], pane, vmax), y = Y(z[i]);
+      started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true;
+    }
+    for (let i = z.length - 1; i >= 0; i--) {
+      if (comp[i] === null || ue[i] === null) continue;
+      ctx.lineTo(X(comp[i] + ue[i], pane, vmax), Y(z[i]));
+    }
+    if (started) ctx.fill();
+  };
+  sigmaBand(u, panes.u, "rgba(57,211,200,.13)");
+  sigmaBand(v, panes.v, "rgba(255,158,100,.13)");
 
   // bottom-track reference (dots)
   if (p.bt) {
@@ -469,6 +499,37 @@ $("station").addEventListener("change", () => {
   last = null;
   clearPins();                                   // pins are per-station (z grids differ)
   scheduleSolve(0);
+});
+
+function stepStation(dir) {
+  const sel = $("station");
+  const next = sel.selectedIndex + dir;
+  if (next < 0 || next >= sel.options.length) return;
+  sel.selectedIndex = next;
+  sel.dispatchEvent(new Event("change"));
+}
+$("prev-st").addEventListener("click", () => stepStation(-1));
+$("next-st").addEventListener("click", () => stepStation(1));
+
+$("dl-lad").addEventListener("click", async () => {
+  if (!S.station) return;
+  try {
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/lad`,
+                          { method: "POST", body: body(),
+                            headers: { "Content-Type": "application/json" } });
+    if (!r.ok) {
+      status("err", `lad export failed: ${r.statusText}`);
+      return;
+    }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${S.station}.lad`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    status("err", `lad export failed: ${e.message}`);
+  }
 });
 
 $("copycli").addEventListener("click", async () => {

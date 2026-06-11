@@ -11,17 +11,21 @@
 
   <header class="top">
     <div class="wordmark">py<em>ladcp</em> studio</div>
+    <button class="btn nav" id="prev-st" title="previous station">‹</button>
     <select id="station" class="station-select" title="station"></select>
+    <button class="btn nav" id="next-st" title="next station">›</button>
     <div id="status" class="solve-state"><span class="dot"></span><span id="status-text">connecting…</span></div>
     <div class="spacer"></div>
     <button class="btn" id="pinbtn" title="freeze the current solution as a ghost overlay">⊕ pin</button>
+    <button class="btn" id="dl-lad" title="download the current solution as a .lad file">↓ .lad</button>
     <button class="btn" id="copycli" title="copy the ladcp-qa command reproducing this solution">copy CLI</button>
   </header>
 
   <nav class="rail">
     <div class="sect">
       <h3>Pipeline</h3>
-      <div class="stage" id="st-prep"><span class="st-dot"></span><span class="nm">prepare</span><span class="tm" id="prep-ms">–</span></div>
+      <div class="stage" id="st-load"><span class="st-dot"></span><span class="nm">raw ingest</span><span class="tm" id="load-ms">–</span></div>
+      <div class="stage" id="st-build"><span class="st-dot"></span><span class="nm" title="editing · bottom detect · super-ensembles">build</span><span class="tm" id="build-ms">–</span></div>
       <div class="stage" id="st-solve"><span class="st-dot"></span><span class="nm">solve</span><span class="tm" id="solve-ms">–</span></div>
     </div>
 

@@ -171,6 +171,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         t0 = time.perf_counter()
         result = ses.solve(cfg)
         ms = (time.perf_counter() - t0) * 1000.0
+        stages = dict(ses._prepared[cfg.edit].timings)
         if cfg.solve.drot is not None:
             drot, drot_source = cfg.solve.drot, "explicit"
         else:
@@ -184,7 +185,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         "station": label,
         "solver": cfg.solve.solver,
         "drot": _num(drot), "drot_source": drot_source,
-        "solve_ms": round(ms, 1), "prepared": prepared,
+        "solve_ms": round(ms, 1), "prepared": prepared, "stages": stages,
         "zbottom": _num(result.zbottom),
         "profile": {"z": _arr(vp.z), "u": _arr(vp.u), "v": _arr(vp.v),
                     "uerr": _arr(vp.uerr), "nvel": _arr(vp.nvel),
@@ -326,6 +327,34 @@ def create_app(state: StudioState):
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
         return solve_payload(state, label, cfg)
+
+    @app.post("/api/station/{label}/lad")
+    async def lad(label: str, request: Request) -> Response:
+        """The current solution as an LDEO ``.lad`` text file (download)."""
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        import tempfile
+
+        from ..qa.export import write_lad
+        with state.lock_for(label):
+            ses = state.session(label)
+            prep = ses.prepare(cfg.edit)
+            result = ses.solve(cfg)
+            drot = cfg.solve.drot
+            if drot is None:
+                drot, _src = ses.declination(cfg.edit)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"{label}.lad"
+            write_lad(result.vp, str(path), station=label, lat=prep.lat, lon=prep.lon,
+                      drot=drot, time=prep.when)
+            text = path.read_text(encoding="utf-8")
+        return Response(content=text, media_type="text/plain",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{label}.lad"'})
 
     @app.post("/api/station/{label}/qa/{panel}")
     async def qa_panel(label: str, panel: str, request: Request) -> Response:
