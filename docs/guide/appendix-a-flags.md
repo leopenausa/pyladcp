@@ -236,3 +236,44 @@ options:
   --title TITLE         figure title
   -o OUT, --out OUT     output PNG (default sadcp_section.png)
 ```
+
+## `ladcp-studio`
+
+```text
+usage: ladcp-studio [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
+                    [--from-hex] [--ctd-cache CTD_CACHE] [--sadcp PATH]
+                    [--sadcp-source {vmdas,codas}]
+                    [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
+                    [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
+                    [--sadcp-reingest] [--host HOST] [--port PORT]
+                    [--no-browser]
+                    [stations ...]
+
+pyladcp Studio: interactive single-station LADCP processing in the browser
+(local server)
+
+positional arguments:
+  stations              station id(s) to work on, e.g. 80 79
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           base dir for file discovery (default: New_golden/Good)
+  --cruise CRUISE       cruise preset (default: MORIA)
+  --index INDEX         archive index JSON (ladcp-index build); with no
+                        station ids, serves every cast in the index
+  --from-hex            build missing cleaned CTD from the index's raw .hex
+                        anchor
+  --ctd-cache CTD_CACHE
+                        cache dir for --from-hex .cnv
+  --sadcp PATH          ship-ADCP source for the inverse constraint (as in
+                        ladcp-qa); the GUI can then toggle/weight it per solve
+  --sadcp-source {vmdas,codas}
+  --sadcp-filetype {STA,LTA}
+  --sadcp-xducer SADCP_XDUCER
+  --sadcp-timeoff SECONDS|auto
+  --sadcp-nav PATH
+  --sadcp-reingest
+  --host HOST           bind address (default: localhost)
+  --port PORT           port (default: 8642)
+  --no-browser          do not open the browser
+```

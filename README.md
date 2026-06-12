@@ -56,7 +56,7 @@ real-data fixture — one full MORIA station, raw PD0s + CTD + the legacy golden
 
 ```bash
 pip install pytest
-pytest -q          # expect ~246 passed, ~21 skipped (skips = local-only cruise data)
+pytest -q          # expect ~320 passed, ~22 skipped (skips = local-only cruise data)
 ```
 
 If you prefer conda, `conda env create -f environment.yml` builds a ready `pyladcp` env
@@ -136,6 +136,28 @@ CODAS products, `--anomaly` for the baroclinic view):
   <img src="docs/images/moria_os150_section.png" width="640"
        alt="MORIA OS150 shipboard-ADCP velocity section along the cruise track">
 </p>
+
+## Interactive single-station tuning — `ladcp-studio`
+
+For the *should-I-tune-this-cast* questions there is a local web GUI: the velocity
+profile re-renders live (~30 ms) as you move the solver weights or toggle constraints,
+and editing changes rebuild in ~1.5 s. Pin a baseline solution and a Δ-strip shows
+exactly what your change did, against depth. It runs the same engine as `ladcp-qa` —
+bit-identical results, enforced by tests — and the bar under the plot always shows the
+`ladcp-qa` command that reproduces the current state.
+
+```bash
+pip install -e ".[gui]"                 # FastAPI + uvicorn, optional extra
+ladcp-studio 80 --root tests/fixtures/New_golden/Good    # try it on the test station
+```
+
+<p align="center">
+  <img src="docs/images/studio_moria80.png" width="720"
+       alt="pyladcp Studio: live u/v velocity profile with solver weight sliders">
+</p>
+
+It takes the same discovery flags as `ladcp-qa` (`--index`, `--cruise`, `--sadcp`, …);
+chapter 10 of the [processing guide](https://leopenausa.github.io/pyladcp/) is the tour.
 
 ## Using it as a library
 
