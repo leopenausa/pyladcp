@@ -95,7 +95,7 @@ def pair_slave_by_time(master: Path, slave_dir: Path, *, pattern: str = "S*.000"
     cands = {str(p): _time_span(p) for p in sorted(slave_dir.glob(pattern))}
     key = best_overlap(span, cands)
     if key is None:
-        raise SystemExit(f"no slave file in {slave_dir} overlaps {master.name} in time")
+        raise FileNotFoundError(f"no slave file in {slave_dir} overlaps {master.name} in time")
     return Path(key)
 
 
@@ -112,12 +112,12 @@ def _discover_curated(root: Path, st: str) -> StationFiles:
             if len(hits) == 1:
                 return hits[0]
             if len(hits) > 1:
-                raise SystemExit(f"ambiguous match for {pat!r}: {[h.name for h in hits]}")
+                raise ValueError(f"ambiguous match for {pat!r}: {[h.name for h in hits]}")
         return None
 
     down = pick(f"LADCP/*{st}*-M.000", f"LADCP/*{st}*M*.000")
     if down is None:
-        raise SystemExit(f"no down-looker found for station {st!r} under {root}/LADCP")
+        raise FileNotFoundError(f"no down-looker found for station {st!r} under {root}/LADCP")
     up = pick(f"LADCP/*{st}*-S.000", f"LADCP/*{st}*S*.000")
     ctd = pick(f"CTD/*{st}*.cnv")
     label = down.name.split("-LADCP")[0] if "-LADCP" in down.name else st
@@ -199,7 +199,7 @@ def discover(station: str, *, root: Path, cruise: str = "MORIA",
     if entry is not None:
         master = root / entry.master
         if not master.exists():
-            raise SystemExit(f"manifest master not found: {master}")
+            raise FileNotFoundError(f"manifest master not found: {master}")
         slave = pair_slave_by_time(master, root / entry.slave_dir)
         ctd = (root / entry.ctd) if entry.ctd else None
         return StationFiles(down=master, up=slave, ctd=ctd, label=label)

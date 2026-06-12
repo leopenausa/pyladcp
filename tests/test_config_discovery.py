@@ -138,3 +138,21 @@ def test_apply_header_config_sets_head_count_and_stashes_geometry():
     apply_header_config(p, dh)
     assert p.up_dn_looker == 1                          # both heads present, down faces down
     assert p.extra["instrument"]["nbin_d"] == dh.down.n_cells
+
+
+# --- discovery failures are real exceptions (not SystemExit) ------------------------
+def test_discover_unknown_station_raises_filenotfound(tmp_path):
+    """Servers (ladcp-studio) must be able to catch discovery failures; SystemExit
+    is a BaseException and escaped the HTTP error mapping as a raw 500."""
+    (tmp_path / "LADCP").mkdir()
+    with pytest.raises(FileNotFoundError, match=r"no down-looker found for station '-'"):
+        D.discover("-", root=tmp_path, cruise="NOPE")
+
+
+def test_discover_ambiguous_match_raises_valueerror(tmp_path):
+    lad = tmp_path / "LADCP"
+    lad.mkdir()
+    (lad / "X-80a-LADCP-M.000").write_bytes(b"")
+    (lad / "X-80b-LADCP-M.000").write_bytes(b"")
+    with pytest.raises(ValueError, match="ambiguous match"):
+        D.discover("80", root=tmp_path, cruise="X")
