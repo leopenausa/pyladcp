@@ -32,36 +32,36 @@
     <div class="sect">
       <h3>Solver</h3>
       <div class="seg" id="solver">
-        <button data-v="shear">shear</button><button data-v="inverse" class="on">inverse</button>
+        <button data-v="shear" data-tip="Legacy shear method: integrate the vertical shear of the super-ensembles, then reference the result with bottom track + ship drift.">shear</button><button data-v="inverse" class="on" data-tip="Full LDEO constrained least squares (default): all data and constraints solved jointly, weighted by the sliders below.">inverse</button>
       </div>
       <div class="knob" data-k="botfac" data-max="40" data-def="10">
-        <div class="row"><label>botfac<span>bottom track</span></label><output>1.0</output></div>
+        <div class="row"><label data-tip="Bottom-track constraint weight (legacy ps.botfac, default 1). Anchors the near-seabed profile to the bottom-track velocities; 0 removes the constraint.">botfac<span>bottom track</span></label><output>1.0</output></div>
         <input type="range" min="0" max="40" value="10"></div>
       <div class="knob" data-k="barofac" data-max="40" data-def="10">
-        <div class="row"><label>barofac<span>barotropic</span></label><output>1.0</output></div>
+        <div class="row"><label data-tip="Barotropic constraint weight (legacy ps.barofac, default 1). The GPS ship-drift row pins the depth-mean (absolute) velocity of the profile.">barofac<span>barotropic</span></label><output>1.0</output></div>
         <input type="range" min="0" max="40" value="10"></div>
       <div class="knob" data-k="smoofac" data-max="20" data-def="0">
-        <div class="row"><label>smoofac<span>smoothing</span></label><output>0.0</output></div>
+        <div class="row"><label data-tip="Curvature-smoothing weight (legacy ps.smoofac, default 0 = off). Damps vertical wiggles in the solution at the cost of vertical resolution.">smoofac<span>smoothing</span></label><output>0.0</output></div>
         <input type="range" min="0" max="20" value="0"></div>
       <div class="knob" data-k="sadcpfac" data-max="60" data-def="30">
-        <div class="row"><label>sadcpfac<span>ship ADCP</span></label><output>3.0</output></div>
+        <div class="row"><label data-tip="Ship-ADCP constraint weight (legacy ps.sadcpfac, golden default 3). Pulls the upper profile toward the ship-ADCP ocean velocities (white squares).">sadcpfac<span>ship ADCP</span></label><output>3.0</output></div>
         <input type="range" min="0" max="60" value="30"></div>
     </div>
 
     <div class="sect">
       <h3>Constraints</h3>
-      <div class="tgl" id="tgl-downonly"><span class="sw"></span>down-looker only<small>--down-only</small></div>
-      <div class="tgl" id="tgl-sadcp"><span class="sw"></span>SADCP constraint<small id="sadcp-note">no source</small></div>
+      <div class="tgl" id="tgl-downonly" data-tip="Solve from the down-looker alone (up-looker excluded from the velocity solve). Diagnostic for head disagreement; near-surface coverage is reduced."><span class="sw"></span>down-looker only<small>--down-only</small></div>
+      <div class="tgl" id="tgl-sadcp" data-tip="Add the ship-ADCP ocean-velocity rows to the inverse. The source is fixed at launch (--sadcp); the weight is the sadcpfac slider."><span class="sw"></span>SADCP constraint<small id="sadcp-note">no source</small></div>
     </div>
 
     <div class="sect">
       <h3>Editing <span class="rebuild-note">rebuilds ~1.5 s</span></h3>
       <div class="field">
-        <label for="in-nearfield">near-field bins <small>e.g. 3,4 · none</small></label>
+        <label for="in-nearfield" data-tip="1-based down-looker bins blanked at edit time, e.g. 3,4 to mask a near-field target such as a device hung below the rosette; 'none' disables the cruise preset.">near-field bins <small>e.g. 3,4 · none</small></label>
         <input id="in-nearfield" type="text" placeholder="cruise preset" spellcheck="false">
       </div>
       <div class="field">
-        <label for="in-dzbelow">dzbelow <small>[m] seabed margin</small></label>
+        <label for="in-dzbelow" data-tip="Seabed cut margin [m] (legacy p.dzbelow, default 16 = 2×bin size): the flat cut on cells near the detected bottom when the range-dependent side-lobe wedge is disabled.">dzbelow <small>[m] seabed margin</small></label>
         <input id="in-dzbelow" type="number" step="8" min="0" placeholder="cruise preset">
       </div>
     </div>
