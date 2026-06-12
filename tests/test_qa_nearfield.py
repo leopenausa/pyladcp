@@ -1,9 +1,11 @@
-"""Monocorer near-field band fix: config gating, mask plumbing, errvel-ratio detector.
+"""Monocorer near-field mask: user-opt-in only, mask plumbing, errvel-ratio detector.
 
 A rigid device hung ~25-28 m below the package contaminated the MORIA down-looker's
 26 m + 34 m cells on the operational block 03-28 (except the verified-clean 07-10).
-The opt-in fix masks those bins (``edit_nearfield_dn_bins``); a non-destructive
-near/far |errvel| ratio detects the situation on any cruise.
+Masking those bins (``edit_nearfield_dn_bins``) is ALWAYS the user's explicit call --
+no cruise preset sets it (user decision 2026-06-12). The non-destructive near/far
+|errvel| ratio detects the situation on any cruise, and its WARN note names the bins
+to mask.
 """
 
 from __future__ import annotations
@@ -34,30 +36,22 @@ DROT = -9.878379
 # --------------------------------------------------------------------------- #
 # config gating
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("station, expect", [
-    ("MORIA-03", (3, 4)),       # block start
-    ("MORIA-22", (3, 4)),
-    ("MORIA-25f", (3, 4)),      # letter-suffixed repeats inherit the cast number
-    ("MORIA-28", (3, 4)),       # block end
-    ("MORIA-07", ()),           # verified clean inside the block
-    ("MORIA-08", ()),
-    ("MORIA-09", ()),
-    ("MORIA-10", ()),
-    ("MORIA-02", ()),           # before the block
-    ("MORIA-80", ()),           # deep clean block
-    ("MORIA-rinse", ()),        # no cast number
+@pytest.mark.parametrize("station", [
+    "MORIA-03", "MORIA-22", "MORIA-25f", "MORIA-28",     # the former auto-masked block
+    "MORIA-07", "MORIA-80", "MORIA-rinse",
 ])
-def test_moria_nearfield_gating(station, expect):
-    assert resolve_params("MORIA", station).edit_nearfield_dn_bins == expect
+def test_no_preset_ever_sets_the_mask(station):
+    """The mask is always user-opt-in: even monocorer-block stations resolve empty."""
+    assert resolve_params("MORIA", station).edit_nearfield_dn_bins == ()
 
 
 def test_default_is_empty():
     assert CastParams(station="X").edit_nearfield_dn_bins == ()
 
 
-def test_cli_style_override_wins():
-    p = resolve_params("MORIA", "MORIA-22", overrides={"edit_nearfield_dn_bins": ()})
-    assert p.edit_nearfield_dn_bins == ()
+def test_cli_style_override_applies():
+    p = resolve_params("MORIA", "MORIA-22", overrides={"edit_nearfield_dn_bins": (3, 4)})
+    assert p.edit_nearfield_dn_bins == (3, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -152,3 +146,21 @@ def test_metric_warn_suppressed_when_masked():
     assert m.status == Status.OK                     # ...but masked -> no WARN
     qc2 = assess(replace(dh, params=None), params=CastParams(station="SYN"))
     assert qc2.metrics["nearfield_errvel_ratio"].status == Status.WARN
+
+
+def test_warn_note_names_the_bins_to_mask():
+    """The WARN is actionable: it suggests the exact --nearfield-dn-bins value."""
+    from ladcp.qa.report import assess
+    dh = DualHead(station="SYN", down=_synthetic_head(contaminated=True))
+    m = assess(dh, params=CastParams(station="SYN")).metrics["nearfield_errvel_ratio"]
+    assert m.status == Status.WARN
+    assert ("consider --nearfield-dn-bins 3,4 "
+            "(elevated |errvel| at 26-34 m below the package)") in m.note
+
+
+def test_elevated_bins_locate_the_device_band():
+    from ladcp.qa.screen import nearfield_elevated_bins
+    bad = nearfield_elevated_bins(DualHead(station="SYN", down=_synthetic_head(True)))
+    assert [(b, r) for b, r in bad] == [(3, 26.0), (4, 34.0)]   # device + echo tail
+    assert nearfield_elevated_bins(
+        DualHead(station="SYN", down=_synthetic_head(False))) == []

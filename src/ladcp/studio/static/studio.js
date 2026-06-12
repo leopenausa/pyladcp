@@ -15,7 +15,9 @@ const S = {                                     // mirrors SessionConfig
   solver: "inverse",
   botfac: 1.0, barofac: 1.0, smoofac: 0.0, sadcpfac: 3.0,
   down_only: false,
-  nearfield: null,                              // null = preset, [] = none, [3,4] = bins
+  use_nearfield: false,                         // the near-field mask toggle (default OFF)
+  nearfield: null,                              // 1-based bins when typed, e.g. [3,4]
+  dn_geom: null,                                // {first_m, cell_m, n_bins} from the solve
   dzbelow: null,                                // null = preset
   use_sadcp: false,                             // the constraint toggle
   sadcp_key: null,                              // selected key from sadcp_sources
@@ -37,7 +39,8 @@ function status(cls, text) {
 }
 
 function editBody() {
-  return { down_only: S.down_only, nearfield_dn_bins: S.nearfield, dzbelow: S.dzbelow };
+  const nf = (S.use_nearfield && S.nearfield && S.nearfield.length) ? S.nearfield : null;
+  return { down_only: S.down_only, nearfield_dn_bins: nf, dzbelow: S.dzbelow };
 }
 
 function body() {
@@ -98,6 +101,7 @@ async function solve() {
     $("ro-vbar").textContent = fmtVel(p.profile.vbar);
     $("cli").textContent = p.cli;
     $("key-sadcp").style.display = p.sadcp ? "flex" : "none";
+    if (p.dn_geom) { S.dn_geom = p.dn_geom; syncNearfieldControls(); }
     renderQaList(p.panels);
     draw(p);
   } catch (e) {
@@ -116,8 +120,8 @@ function pinLabel() {
   if (S.smoofac !== 0.0) parts.push(`smoofac ${S.smoofac}`);
   if (S.use_sadcp && S.sadcp_key) parts.push(`sadcp ${S.sadcp_key} ${S.sadcpfac}`);
   if (S.down_only) parts.push("down-only");
-  if (S.nearfield !== null)
-    parts.push(`nf ${S.nearfield.length ? S.nearfield.join(",") : "none"}`);
+  if (S.use_nearfield && S.nearfield && S.nearfield.length)
+    parts.push(`nf ${S.nearfield.join(",")}`);
   if (S.dzbelow !== null) parts.push(`dzbelow ${S.dzbelow}`);
   return parts.join(" · ");
 }
@@ -508,15 +512,60 @@ function bindEditField(input, parse) {
   input.addEventListener("keydown", ev => { if (ev.key === "Enter") input.blur(); });
 }
 
+/* near-field mask: bins ("3,4") or a depth range below the package ("22-38m" /
+ * a single "26m" = the bin containing that depth), converted with the station's
+ * real bin geometry from the last solve. Bins stay canonical (the CLI contract). */
 bindEditField($("in-nearfield"), text => {
-  if (text === "") { S.nearfield = null; return; }
-  if (text.toLowerCase() === "none") { S.nearfield = []; return; }
-  S.nearfield = text.split(",").map(s => {
-    const n = Number(s.trim());
-    if (!Number.isInteger(n) || n < 1) throw new Error("bad bin");
-    return n;
-  });
+  if (text === "" || text.toLowerCase() === "none") { S.nearfield = null; return; }
+  const m = text.match(/^\s*(\d+(?:\.\d+)?)\s*(?:[-–]\s*(\d+(?:\.\d+)?))?\s*m\s*$/i);
+  if (m) {
+    if (!S.dn_geom) throw new Error("geometry not loaded yet");
+    const { first_m, cell_m, n_bins } = S.dn_geom;
+    const bins = [];
+    if (m[2] === undefined) {                    // single depth: the bin containing it
+      const b = Math.round((parseFloat(m[1]) - first_m) / cell_m) + 1;
+      if (b < 1 || b > n_bins) throw new Error("depth outside the bin range");
+      bins.push(b);
+    } else {                                     // range: bins whose centre lies inside
+      const lo = parseFloat(m[1]), hi = parseFloat(m[2]);
+      for (let b = 1; b <= n_bins; b++) {
+        const c = first_m + (b - 1) * cell_m;
+        if (c >= lo && c <= hi) bins.push(b);
+      }
+      if (!bins.length) throw new Error("no bin centre in that range");
+    }
+    S.nearfield = bins;
+  } else {
+    S.nearfield = text.split(",").map(s => {
+      const n = Number(s.trim());
+      if (!Number.isInteger(n) || n < 1) throw new Error("bad bin");
+      return n;
+    });
+  }
+  syncNearfieldControls();
 });
+
+$("tgl-nearfield").addEventListener("click", () => {
+  S.use_nearfield = !S.use_nearfield;
+  syncNearfieldControls();
+  if (S.nearfield && S.nearfield.length) scheduleSolve(0);   // mask actually changed
+});
+
+function syncNearfieldControls() {
+  $("tgl-nearfield").classList.toggle("on", S.use_nearfield);
+  $("in-nearfield").disabled = !S.use_nearfield;
+  let note = "no mask";
+  if (S.use_nearfield && S.nearfield && S.nearfield.length) {
+    note = `bins ${S.nearfield.join(",")}`;
+    if (S.dn_geom) {
+      const { first_m, cell_m } = S.dn_geom;
+      const lo = first_m + (Math.min(...S.nearfield) - 1) * cell_m - cell_m / 2;
+      const hi = first_m + (Math.max(...S.nearfield) - 1) * cell_m + cell_m / 2;
+      note += ` ≈ ${lo.toFixed(0)}–${hi.toFixed(0)} m below package`;
+    }
+  }
+  $("nearfield-note").textContent = note;
+}
 
 bindEditField($("in-dzbelow"), text => {
   if (text === "") { S.dzbelow = null; return; }
@@ -528,6 +577,7 @@ bindEditField($("in-dzbelow"), text => {
 $("station").addEventListener("change", () => {
   S.station = $("station").value;
   last = null;
+  S.dn_geom = null;                              // refreshed by the station's first solve
   clearPins();                                   // pins are per-station (z grids differ)
   scheduleSolve(0);
 });

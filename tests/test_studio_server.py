@@ -416,3 +416,23 @@ def test_raw_label_skips_generic_data_dir():
     assert raw_label("sADCP/sadcp_75/DATA") == "sadcp_75"
     assert raw_label("sADCP/sadcp_150") == "sadcp_150"
     assert raw_label("DATA") == "raw"
+
+
+def test_solve_payload_carries_dn_geometry(client):
+    p = client.post("/api/station/MORIA-80/solve",
+                    json={"solve": {"drot": -9.878379}}).json()
+    g = p["dn_geom"]
+    assert g["cell_m"] == 8.0                     # MORIA WH300 geometry
+    assert 0 < g["first_m"] < 20 and g["n_bins"] > 4
+
+
+def test_found_sources_are_never_the_default_constraint(tmp_path):
+    """A launch with only discovered CODAS products must not silently constrain."""
+    from ladcp.session import SadcpConfig
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    st = StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                     sadcp_found=[SadcpConfig(folder=str(tmp_path), source="codas")])
+    cfg = config_from_body({}, st)               # default request
+    assert cfg.sadcp is None                     # offered in the dropdown, not active
+    on = config_from_body({"use_sadcp": True}, st)   # explicit boolean = explicit intent
+    assert on.sadcp is not None

@@ -124,23 +124,50 @@ def nearfield_errvel_ratio(dh: DualHead) -> float:
     at short range below the package (see the MORIA monocorer block 03-28). The device
     occupies only one or two bins, so the near-field statistic is the MAX of the
     per-bin medians (a pooled median would dilute it with clean neighbours). It removes
-    no data -- pair it with ``edit_nearfield_dn_bins`` to actually mask the cells.
+    no data -- pair it with ``edit_nearfield_dn_bins`` to actually mask the cells
+    (always the user's explicit call; :func:`nearfield_hot_bin` names the bin to mask).
     """
+    return _nearfield_stats(dh)[0]
+
+
+# per-bin "elevated" cut for the WARN's mask suggestion. Measured on MORIA: the clean
+# deep cast 80 tops out at 1.50 (bin 4), the contaminated band's affected bins span
+# 1.79-2.52 (BOTH the 26 m device cell and the 34 m echo-tail cell) -- 1.6 separates.
+NEARFIELD_BIN_RATIO = 1.6
+
+
+def nearfield_elevated_bins(dh: DualHead,
+                            ratio_min: float = NEARFIELD_BIN_RATIO,
+                            ) -> list[tuple[int, float]]:
+    """Near-field down-looker bins with elevated |errvel|: ``[(1-based bin, range m)]``.
+
+    Feeds the QA WARN's actionable note: these are exactly the bins to pass to
+    ``--nearfield-dn-bins``. Data-driven, so it lists the device cell AND its echo
+    tail without guessing geometry (on MORIA both 26 m + 34 m cells are elevated;
+    the hottest one is the tail). Empty when nothing is elevated or no statistics.
+    """
+    return [(b, rng) for b, rng, r in _nearfield_stats(dh)[1] if r > ratio_min]
+
+
+def _nearfield_stats(dh: DualHead) -> tuple[float, list[tuple[int, float, float]]]:
+    """``(max near/far ratio, [(1-based bin, range m, per-bin ratio), ...])``."""
     d = dh.down
     ev = np.abs(d.vel[_ERR_COMP].astype(float))
     rng = dh.bin_depth(d)
     near = (rng >= NEARFIELD_RANGE[0]) & (rng < NEARFIELD_RANGE[1])
     far = rng >= NEARFIELD_FAR_MIN
     if near.sum() < 1 or far.sum() < 2:
-        return float("nan")
+        return float("nan"), []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)    # all-NaN bins on sparse casts
         per_bin = np.nanmedian(ev[near], axis=1)
-        m_near = np.nanmax(per_bin) if np.isfinite(per_bin).any() else np.nan
         m_far = np.nanmedian(ev[far])
-    if not (np.isfinite(m_near) and np.isfinite(m_far)) or m_far <= 0:
-        return float("nan")
-    return float(m_near / m_far)
+    if not np.isfinite(per_bin).any() or not np.isfinite(m_far) or m_far <= 0:
+        return float("nan"), []
+    detail = [(int(b) + 1, float(r), float(v / m_far))
+              for b, r, v in zip(np.flatnonzero(near), rng[near], per_bin, strict=True)
+              if np.isfinite(v)]
+    return float(np.nanmax(per_bin) / m_far), detail
 
 
 def _hspeed_count(dh: DualHead, vlim: float) -> int:

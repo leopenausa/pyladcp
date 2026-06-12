@@ -52,9 +52,10 @@ the package (a corer, a second instrument, a snagged line) reflects coherent ene
 that inflates the near-field error velocity.
 
 **What to do on WARN:** check the deployment log for anything mounted or hung under
-the rosette. If confirmed, mask the affected bins (`--nearfield-dn-bins`, or per-cruise
-via `edit_nearfield_dn_bins` in the cruise preset) and rerun. The row's note says when
-a mask is already active.
+the rosette. If confirmed, mask the affected bins and rerun — the row's note names
+the exact value to use (e.g. *consider `--nearfield-dn-bins 3,4` (elevated |errvel|
+at 26–34 m below the package)*). Masking is **always your explicit call**: no cruise
+preset applies it silently. The note also says when a mask is already active.
 
 ### `beam_performance_down` / `_up`
 

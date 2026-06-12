@@ -18,7 +18,12 @@ from .bottom import bottom_metric, detect_bottom
 from .depth import synchronize, water_window
 from .ingest import DualHead
 from .range import profiling_range, range_metric
-from .screen import NEARFIELD_WARN_RATIO, nearfield_errvel_ratio, screen
+from .screen import (
+    NEARFIELD_WARN_RATIO,
+    nearfield_elevated_bins,
+    nearfield_errvel_ratio,
+    screen,
+)
 
 
 def assess(dh: DualHead, params: CastParams | None = None,
@@ -42,13 +47,20 @@ def assess(dh: DualHead, params: CastParams | None = None,
     if np.isfinite(nf):
         masked = bool(getattr(p, "edit_nearfield_dn_bins", ()) if p is not None else ())
         nf_status = Status.WARN if (nf > NEARFIELD_WARN_RATIO and not masked) else Status.OK
+        note = ("near (18-42 m) / far (>50 m) down-looker |errvel|; >1.7 = a "
+                "rigid target hung below the package")
+        if masked:
+            note += "; near-field bins masked via edit_nearfield_dn_bins"
+        elif nf_status == Status.WARN:
+            bad = nearfield_elevated_bins(dh)   # masking is the user's explicit call:
+            if bad:                             # name the exact bins so the call is easy
+                bins = ",".join(str(b) for b, _ in bad)
+                lo, hi = bad[0][1], bad[-1][1]
+                note += (f"; consider --nearfield-dn-bins {bins} "
+                         f"(elevated |errvel| at {lo:.0f}-{hi:.0f} m below the package)")
         qc.add(Metric("nearfield_errvel_ratio", round(nf, 2), "", nf_status,
                       threshold={"warn": NEARFIELD_WARN_RATIO},
-                      source_stage="qa.screen",
-                      note=("near (18-42 m) / far (>50 m) down-looker |errvel|; >1.7 = a "
-                            "rigid target hung below the package"
-                            + ("; near-field bins masked via edit_nearfield_dn_bins"
-                               if masked else ""))))
+                      source_stage="qa.screen", note=note))
 
     # --- per-head beam + range health ---
     for head in (dh.down, dh.up):
