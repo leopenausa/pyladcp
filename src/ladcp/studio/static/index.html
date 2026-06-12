@@ -51,7 +51,11 @@
     <div class="sect">
       <h3>Constraints</h3>
       <div class="tgl" id="tgl-downonly" data-tip="Solve from the down-looker alone (up-looker excluded from the velocity solve). Diagnostic for head disagreement; near-surface coverage is reduced."><span class="sw"></span>down-looker only<small>--down-only</small></div>
-      <div class="tgl" id="tgl-sadcp" data-tip="Add the ship-ADCP ocean-velocity rows to the inverse. The source is fixed at launch (--sadcp); the weight is the sadcpfac slider."><span class="sw"></span>SADCP constraint<small id="sadcp-note">no source</small></div>
+      <div class="field">
+        <label for="sel-sadcp" data-tip="Which ship-ADCP product feeds the inverse ocean-velocity rows: 'raw' = the VmDAS averages (--sadcp); other entries = CODAS-processed products (--sadcp-codas, repeatable). 'off' removes the constraint; the weight is the sadcpfac slider.">SADCP source</label>
+        <select id="sel-sadcp" disabled><option value="off">off</option></select>
+        <small class="src-note" id="sadcp-note">launch with --sadcp / --sadcp-codas</small>
+      </div>
     </div>
 
     <div class="sect">
