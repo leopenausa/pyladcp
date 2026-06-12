@@ -485,6 +485,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = SessionConfig.from_args(args)
+        if cfg.sadcp is not None:     # fail at launch, not minutes in at the first solve
+            cfg.sadcp.validate_folder()
     except ValueError as e:           # same messages the inline checks used to emit
         ap.error(str(e))
     sadcp_opts = cfg.sadcp_opts()
