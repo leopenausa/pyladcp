@@ -20,6 +20,9 @@ it to make a processing decision.
   produces.
 - **A cast looks wrong?** Go straight to [chapter 9 (troubleshooting)](09-troubleshooting.md)
   and [chapter 7 (solvers & weights)](07-solvers-weights.md).
+- **Tuning a single station?** [Chapter 10](10-studio.md) is the interactive GUI
+  (`ladcp-studio`): move the weights and watch the profile respond live, then copy the
+  `ladcp-qa` command that reproduces what you found.
 
 Every command shown in this guide is executed by pyladcp's continuous-integration tests
 against the repository's built-in test station — if the guide and the code ever

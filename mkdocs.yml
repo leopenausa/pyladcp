@@ -53,6 +53,7 @@ nav:
   - "7 · Solvers & weight tuning": 07-solvers-weights.md
   - "8 · Ship-ADCP integration": 08-ship-adcp.md
   - "9 · Troubleshooting": 09-troubleshooting.md
+  - "10 · Interactive Studio": 10-studio.md
   - Appendices:
       - "A · CLI flag reference": appendix-a-flags.md
       - "B · LDEO_IX ↔ pyladcp mapping": appendix-b-legacy-map.md
