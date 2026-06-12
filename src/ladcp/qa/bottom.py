@@ -429,9 +429,7 @@ _RDI_BT_VLIM = 2.5          # horizontal speed limit [m/s]
 def bottom_track_velocity(dh: DualHead, merged, *, btrk_mode: int = 3,
                           btrk_below: float = _BTRK_BELOW,
                           btrk_ts: float = _BTRK_TS, btrk_range=_BTRK_RANGE,
-                          btrk_wlim: float = _BTRK_WLIM,
-                          wlim: float | None = None,
-                          vlim: float | None = None) -> BottomTrack:
+                          btrk_wlim: float = _BTRK_WLIM) -> BottomTrack:
     """Per-ping bottom-track velocity (legacy ``getbtrack`` mode semantics).
 
     ``btrk_mode`` follows legacy: with mode 1/3 (default 3) the RDI *firmware*
@@ -492,21 +490,14 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_mode: int = 3,
     rdi = _rdi_bottom_track(dh, n) if btrk_mode in (1, 3) else None
     if rdi is not None:
         rvel, rw, rhbot = rdi
-        # loadrdi.m:219-225 + 267-271: the firmware track gets the same wlim/vlim
-        # edits as the water cells -- |wb - wref_dn| > wlim and hspeed > vlim drop
-        # the bottom velocity (cruise-preset thresholds, NOT the loose firmware
-        # sentinels _rdi_bottom_track already screened with). Distances stay.
-        wref_dn = getattr(merged, "wref_dn", None)
-        if wref_dn is not None and wlim is not None:
-            with np.errstate(invalid="ignore"):
-                badw = np.abs(rw - wref_dn[:n]) > wlim
-            rvel[badw] = np.nan
-            rw[badw] = np.nan
-        if vlim is not None:
-            with np.errstate(invalid="ignore"):
-                badv = np.abs(rvel) > vlim
-            rvel[badv] = np.nan
-            rw[badv] = np.nan
+        # NOTE (2026-06-12, wlim/vlim wiring): legacy loadrdi ALSO applies its
+        # wlim/vlim edits to the firmware track (loadrdi.m:219-225, 267-271).
+        # That edit is deliberately NOT ported: our BT chain differs from
+        # legacy's (RDI-preferred source, the 50-300 m height gates, _boutlier),
+        # and layering the wb-edit on top double-screens it -- validated on
+        # FDCCC1 it biased shallow casts (t1-99 u rms vs legacy 2.8 -> 9.3 cm/s
+        # in isolation) while adding nothing on the MORIA-80 golden (0.64 vs
+        # 0.68). The water-cell wlim/vlim edits (screen.py) are ported in full.
         # legacy keeps RDI's distances and only fills gaps from the echo fit
         rhbot = np.where(np.isfinite(rhbot), rhbot, np.where(np.isfinite(zpeak), zpeak, np.nan))
         return BottomTrack(bvel=rvel, bw=rw, hbot=rhbot,

@@ -125,31 +125,25 @@ def test_disabled_by_loose_thresholds():
     assert sr.counts["wlim_removed_down"] == sr.counts["vlim_removed"] == 0
 
 
-def test_rdi_bottom_track_gets_the_edits():
+def test_rdi_bottom_track_is_deliberately_not_edited():
+    """Legacy also wlim/vlim-edits the firmware bottom track (loadrdi.m:219-271);
+    that part is deliberately NOT ported. Our BT chain already differs from
+    legacy's (RDI-preferred source, 50-300 m height gates, _boutlier), and the
+    FDCCC1 validation showed the layered wb-edit biases shallow casts (t1-99
+    u rms vs legacy 2.8 -> 9.3 cm/s isolated) while adding nothing on the
+    MORIA-80 golden (0.64 vs 0.68). This pin documents the decision: a BT
+    sample whose w fails the water wlim test must SURVIVE."""
     from ladcp.qa.bottom import bottom_track_velocity
     d = _head(nbin=20, nens=40)
-    # a believable firmware bottom track: package velocity ~0, bt w ~ -0.5 (mirror)
     bt_vel = np.zeros((4, 40))
-    bt_vel[2] = -0.5 + 0.0
-    bt_vel[2, 7] = -0.9             # w deviates 0.4+0.5+... vs wref_dn 0.5 -> |bw-wref| huge
-    bt_vel[0, 9] = 1.4              # hspeed > vlim
+    bt_vel[2] = -0.9                # |bw - wref_dn(0.5)| = 1.4 >> wlim everywhere
+    bt_vel[0, 9] = 1.4              # and one sample over vlim too
     d2 = replace(d, bt_vel=bt_vel, bt_range=np.full((4, 40), 200.0))
     dh = DualHead(station="SYN", down=d2)
     merged = merge_heads(dh, params=PARAMS)
-    bt = bottom_track_velocity(dh, merged, btrk_mode=3, wlim=PARAMS.wlim, vlim=PARAMS.vlim)
+    bt = bottom_track_velocity(dh, merged, btrk_mode=3)
     assert bt.source == "rdi"
-    assert np.isnan(bt.bvel[9])                 # vlim edit
-    assert np.isnan(bt.bw[7]) and np.isnan(bt.bvel[7])   # wlim edit vs wref_dn
-    # untouched samples survive: |(-0.5) - 0.5| > wlim though...
-    # the synthetic w mirror makes ALL samples wlim-fail unless wref matches; assert
-    # the edit is selective when bw == wref instead:
-    bt_vel2 = np.zeros((4, 40))
-    bt_vel2[2] = 0.5                            # bt w == water wref -> all pass wlim
-    d3 = replace(d, bt_vel=bt_vel2, bt_range=np.full((4, 40), 200.0))
-    dh3 = DualHead(station="SYN", down=d3)
-    m3 = merge_heads(dh3, params=PARAMS)
-    bt3 = bottom_track_velocity(dh3, m3, btrk_mode=3, wlim=PARAMS.wlim, vlim=PARAMS.vlim)
-    assert np.isfinite(bt3.bvel).sum() == 40
+    assert np.isfinite(bt.bvel).sum() == 40     # untouched by the water-cell edits
 
 
 @needs_fixtures
