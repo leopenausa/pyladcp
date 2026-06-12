@@ -104,6 +104,7 @@ async function solve() {
     if (p.dn_geom) { S.dn_geom = p.dn_geom; syncNearfieldControls(); }
     renderQaList(p.panels);
     draw(p);
+    if (E.journal === null) refreshEdits();      // first solve: populate the edits card
   } catch (e) {
     if (mySeq === seq) status("err", `error: ${e.message}`);
   }
@@ -115,6 +116,7 @@ const fmtVel = x => x === null ? "–" : `${(x * 100).toFixed(1)} cm/s`;
 
 function pinLabel() {
   const parts = [S.solver];
+  if (last && last.manual_edits) parts.push(`edits ${last.manual_edits}`);
   if (S.botfac !== 1.0) parts.push(`botfac ${S.botfac}`);
   if (S.barofac !== 1.0) parts.push(`barofac ${S.barofac}`);
   if (S.smoofac !== 0.0) parts.push(`smoofac ${S.smoofac}`);
@@ -579,6 +581,7 @@ $("station").addEventListener("change", () => {
   last = null;
   S.dn_geom = null;                              // refreshed by the station's first solve
   clearPins();                                   // pins are per-station (z grids differ)
+  resetEditView();                               // journal + matrix are per-station too
   scheduleSolve(0);
 });
 
@@ -622,6 +625,301 @@ $("copycli").addEventListener("click", async () => {
   setTimeout(() => $("copycli").classList.remove("flash"), 600);
 });
 
+/* ------------------------------------------------------------------ edit view
+ *
+ * The brush: a per-head ensemble x bin heatmap (server-rendered, full-bleed PNG)
+ * with a transparent overlay canvas for marquee + flagged rectangles. The pixel
+ * mapping is purely fractional: x/width -> ensemble (0-based, joint-trimmed),
+ * y/height -> bin (1-based, row 0 = bin 1). The journal on the server is the
+ * single source of truth -- POST/DELETE here, and every solve picks it up. */
+
+const E = {
+  open: false,
+  head: "down", field: "errvel",
+  meta: null,                                    // edit/meta payload (geometry)
+  journal: null,                                 // journal dict from the server
+  stale: null,                                   // staleness message or null
+  drag: null,                                    // {x0,y0,x1,y1} in overlay px
+};
+
+function resetEditView() {
+  E.meta = null; E.journal = null; E.stale = null; E.drag = null;
+  renderEditsList();
+  if (E.open) loadEditView();
+}
+
+function setView(which) {
+  E.open = which === "edit";
+  $("viewseg").querySelectorAll("button").forEach(b =>
+    b.classList.toggle("on", b.dataset.v === which));
+  $("profile-view").classList.toggle("hidden", E.open);
+  $("edit-view").classList.toggle("hidden", !E.open);
+  $("plot-title").textContent = E.open ? "Raw ensemble matrix" : "Velocity solution";
+  document.querySelector(".legend").style.visibility = E.open ? "hidden" : "visible";
+  if (E.open) loadEditView();
+  else if (last) draw(last);
+}
+$("viewseg").querySelectorAll("button").forEach(b =>
+  b.addEventListener("click", () => setView(b.dataset.v)));
+
+$("edit-head").querySelectorAll("button").forEach(b =>
+  b.addEventListener("click", () => {
+    if (b.classList.contains("disabled")) return;
+    E.head = b.dataset.v;
+    $("edit-head").querySelectorAll("button").forEach(x =>
+      x.classList.toggle("on", x === b));
+    loadHeatmap();
+  }));
+
+$("edit-field").querySelectorAll("button").forEach(b =>
+  b.addEventListener("click", () => {
+    E.field = b.dataset.v;
+    $("edit-field").querySelectorAll("button").forEach(x =>
+      x.classList.toggle("on", x === b));
+    loadHeatmap();
+  }));
+
+async function loadEditView() {
+  if (!S.station) return;
+  $("heat-msg").classList.remove("hidden");
+  $("heat-msg").textContent = "loading matrix…";
+  try {
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/edit/meta`,
+                          { method: "POST", body: body(),
+                            headers: { "Content-Type": "application/json" } });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail || r.statusText;
+      $("heat-msg").textContent = `error: ${detail}`;
+      return;
+    }
+    const m = await r.json();
+    E.meta = m;
+    E.journal = m.journal;
+    E.stale = m.stale;
+    const upBtn = $("edit-head").querySelector('button[data-v="up"]');
+    const noUp = !m.heads.up;
+    upBtn.classList.toggle("disabled", noUp);
+    upBtn.dataset.tip = noUp ? "no up-looker in this configuration" :
+      "Up-looker (slave) raw matrix.";
+    if (noUp && E.head === "up") {
+      E.head = "down";
+      $("edit-head").querySelectorAll("button").forEach(x =>
+        x.classList.toggle("on", x.dataset.v === "down"));
+    }
+    renderEditsList();
+    await loadHeatmap();
+  } catch (e) {
+    $("heat-msg").textContent = `error: ${e.message}`;
+  }
+}
+
+async function loadHeatmap() {
+  if (!E.meta) return;
+  $("heat-msg").classList.remove("hidden");
+  $("heat-msg").textContent = "rendering…";
+  $("heat-ylab").textContent =
+    `bin 1 (top) → bin ${(E.meta.heads[E.head] || {}).n_bins || "N"} · ${E.head}-looker`;
+  $("heat-xlab").textContent = `ensemble 0 → ${E.meta.joint_n_ens - 1} (joint-trimmed)`;
+  try {
+    const r = await fetch(
+      `api/station/${encodeURIComponent(S.station)}/edit/heatmap/${E.head}/${E.field}`,
+      { method: "POST", body: body(), headers: { "Content-Type": "application/json" } });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail || r.statusText;
+      $("heat-msg").textContent = `error: ${detail}`;
+      return;
+    }
+    const blob = await r.blob();
+    const img = $("heat");
+    const old = img.src;
+    img.src = URL.createObjectURL(blob);
+    if (old) URL.revokeObjectURL(old);
+    if (E.stale) {
+      $("heat-msg").textContent = `journal is stale: ${E.stale}`;
+    } else {
+      $("heat-msg").classList.add("hidden");
+    }
+    drawHeatOverlay();
+  } catch (e) {
+    $("heat-msg").textContent = `error: ${e.message}`;
+  }
+}
+
+/* fractional pixel <-> cell mapping over the overlay canvas */
+function cellOf(px, py) {
+  const o = $("heat-overlay");
+  const g = E.meta.heads[E.head];
+  const ens = Math.max(0, Math.min(E.meta.joint_n_ens - 1,
+    Math.floor(px / o.clientWidth * E.meta.joint_n_ens)));
+  const bin = Math.max(1, Math.min(g.n_bins,
+    Math.floor(py / o.clientHeight * g.n_bins) + 1));
+  return { ens, bin };
+}
+
+function drawHeatOverlay() {
+  const o = $("heat-overlay");
+  const dpr = window.devicePixelRatio || 1;
+  const W = o.clientWidth, H = o.clientHeight;
+  if (!W || !H || !E.meta) return;
+  o.width = W * dpr; o.height = H * dpr;
+  const c = o.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  const g = E.meta.heads[E.head];
+  if (!g) return;
+  const nE = E.meta.joint_n_ens;
+  // persisted rectangles for this head
+  for (const e of (E.journal ? E.journal.entries : [])) {
+    if (e.head !== E.head) continue;
+    const x = e.ens_first / nE * W;
+    const w = (e.ens_last - e.ens_first + 1) / nE * W;
+    const y = (e.bin_first - 1) / g.n_bins * H;
+    const h = (e.bin_last - e.bin_first + 1) / g.n_bins * H;
+    c.fillStyle = "rgba(255,92,92,.30)";
+    c.strokeStyle = "rgba(255,92,92,.85)";
+    c.fillRect(x, y, w, h);
+    c.strokeRect(x, y, w, h);
+  }
+  // live marquee
+  if (E.drag) {
+    const { x0, y0, x1, y1 } = E.drag;
+    c.setLineDash([5, 4]);
+    c.strokeStyle = "#53c7e8";
+    c.lineWidth = 1.6;
+    c.strokeRect(Math.min(x0, x1), Math.min(y0, y1),
+                 Math.abs(x1 - x0), Math.abs(y1 - y0));
+    c.setLineDash([]);
+    c.lineWidth = 1;
+  }
+}
+
+const heatOv = $("heat-overlay");
+heatOv.addEventListener("pointerdown", ev => {
+  if (!E.meta || E.stale) return;
+  heatOv.setPointerCapture(ev.pointerId);
+  const r = heatOv.getBoundingClientRect();
+  E.drag = { x0: ev.clientX - r.left, y0: ev.clientY - r.top,
+             x1: ev.clientX - r.left, y1: ev.clientY - r.top };
+});
+heatOv.addEventListener("pointermove", ev => {
+  if (!E.drag) return;
+  const r = heatOv.getBoundingClientRect();
+  E.drag.x1 = Math.max(0, Math.min(r.width, ev.clientX - r.left));
+  E.drag.y1 = Math.max(0, Math.min(r.height, ev.clientY - r.top));
+  drawHeatOverlay();
+});
+heatOv.addEventListener("pointerup", async () => {
+  if (!E.drag) return;
+  const d = E.drag;
+  E.drag = null;
+  const a = cellOf(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1));
+  const b = cellOf(Math.max(d.x0, d.x1), Math.max(d.y0, d.y1));
+  drawHeatOverlay();
+  if (Math.abs(d.x1 - d.x0) < 3 && Math.abs(d.y1 - d.y0) < 3) return;   // a click
+  let e0 = a.ens, e1 = b.ens;
+  if ((e1 - e0 + 1) / E.meta.joint_n_ens > 0.9) {     // ~full cast -> all ensembles
+    e0 = 0; e1 = E.meta.joint_n_ens - 1;
+  }
+  await postEdit({ head: E.head, bin_first: a.bin, bin_last: b.bin,
+                   ens_first: e0, ens_last: e1, view: E.field, note: "" });
+});
+
+async function postEdit(entry) {
+  try {
+    const payload = JSON.parse(body());
+    payload.entry = entry;
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/edits`,
+                          { method: "POST", body: JSON.stringify(payload),
+                            headers: { "Content-Type": "application/json" } });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail || r.statusText;
+      status("err", `edit failed: ${detail}`);
+      return;
+    }
+    applyEditsPayload(await r.json());
+  } catch (e) {
+    status("err", `edit failed: ${e.message}`);
+  }
+}
+
+async function deleteEdit(id) {
+  try {
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/edits/${id}`,
+                          { method: "DELETE" });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail || r.statusText;
+      status("err", `delete failed: ${detail}`);
+      return;
+    }
+    applyEditsPayload(await r.json());
+  } catch (e) {
+    status("err", `delete failed: ${e.message}`);
+  }
+}
+
+function applyEditsPayload(p) {
+  E.journal = p.journal;
+  E.stale = p.stale;
+  renderEditsList();
+  drawHeatOverlay();
+  scheduleSolve(0);                              // edit change: server rebuilds (~1.5 s)
+}
+
+async function refreshEdits() {
+  if (!S.station) return;
+  try {
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/edits`);
+    if (!r.ok) return;
+    const p = await r.json();
+    E.journal = p.journal;
+    E.stale = p.stale;
+    renderEditsList();
+  } catch { /* the edits card is best-effort outside the edit view */ }
+}
+
+function renderEditsList() {
+  const box = $("edits-list");
+  box.innerHTML = "";
+  const entries = E.journal ? E.journal.entries : [];
+  $("edits-hint").style.display = entries.length ? "none" : "block";
+  const badge = $("edits-badge");
+  badge.textContent = entries.length;
+  badge.classList.toggle("hidden", !entries.length);
+  for (const e of entries) {
+    const d = document.createElement("div");
+    d.className = "pin-item edit-item";
+    const lbl = document.createElement("span");
+    lbl.className = "lbl";
+    const allEns = E.journal.joint_n_ens &&
+      e.ens_first === 0 && e.ens_last >= E.journal.joint_n_ens - 1;
+    const bins = e.bin_first === e.bin_last ? `bin ${e.bin_first}`
+                                            : `bins ${e.bin_first}–${e.bin_last}`;
+    lbl.textContent = `${e.head === "down" ? "DN" : "UP"} · ${bins} · ` +
+      (allEns ? "all ens" : `ens ${e.ens_first}–${e.ens_last}`);
+    if (e.note) {
+      const sub = document.createElement("small");
+      sub.textContent = e.note;
+      lbl.appendChild(sub);
+    }
+    const x = document.createElement("span");
+    x.className = "x";
+    x.title = "remove this edit (re-solves)";
+    x.textContent = "✕";
+    x.addEventListener("click", () => deleteEdit(e.id));
+    d.append(lbl, x);
+    box.appendChild(d);
+  }
+  if (E.stale && entries.length) {
+    const w = document.createElement("div");
+    w.className = "hint stale-warn";
+    w.textContent = `⚠ journal stale — not applied: ${E.stale}`;
+    box.appendChild(w);
+  }
+}
+
+new ResizeObserver(() => { if (E.open) drawHeatOverlay(); }).observe($("heat-wrap"));
+$("heat").addEventListener("load", drawHeatOverlay);
+
 /* ------------------------------------------------------------------ boot */
 
 (async function init() {
@@ -654,6 +952,7 @@ $("copycli").addEventListener("click", async () => {
     renderPins();
     await solve();
     if (location.hash === "#demo") demoPins();   // showcase pins/Δ (also used for QA shots)
+    if (location.hash === "#edit") setView("edit");   // deep-link the brush view
   } catch (e) {
     status("err", `error: ${e.message}`);
   }

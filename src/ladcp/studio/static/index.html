@@ -86,7 +86,10 @@
 
   <main class="main">
     <div class="plot-head">
-      <h2>Velocity solution</h2>
+      <h2 id="plot-title">Velocity solution</h2>
+      <div class="seg view-seg" id="viewseg">
+        <button data-v="profile" class="on" data-tip="The solved velocity profile (live + pins + Δ).">profile</button><button data-v="edit" data-tip="Brush editing: flag bad cells on the raw ensemble matrix; rectangles persist to a journal that ladcp-qa --edits replays bit-identically.">✏ edit</button>
+      </div>
       <div class="legend">
         <span class="key"><i class="ln u"></i>u east</span>
         <span class="key"><i class="ln v"></i>v north</span>
@@ -97,14 +100,39 @@
         <span class="key dim">Δ = live − selected pin</span>
       </div>
     </div>
-    <div class="plot-wrap">
+    <div class="plot-wrap" id="profile-view">
       <canvas id="plot"></canvas>
       <div id="overlay" class="overlay">preparing station…</div>
+    </div>
+    <div id="edit-view" class="edit-view hidden">
+      <div class="edit-bar">
+        <div class="seg" id="edit-head">
+          <button data-v="down" class="on" data-tip="Down-looker (master) raw matrix.">DN</button><button data-v="up" data-tip="Up-looker (slave) raw matrix.">UP</button>
+        </div>
+        <div class="seg" id="edit-field">
+          <button data-v="errvel" class="on" data-tip="|error velocity| — the natural QC field (earth-coords); a rigid hung device shows as a bright fixed-range band.">errvel</button><button data-v="echo" data-tip="Beam-mean echo amplitude — hung devices and interference are often most obvious here.">echo</button>
+        </div>
+        <span class="edit-hint">drag a rectangle to flag cells · grey = auto-screened ·
+          red = manual flags · &gt;90% width snaps to all ensembles</span>
+      </div>
+      <div class="heat-wrap" id="heat-wrap">
+        <img id="heat" alt="ensemble matrix" draggable="false">
+        <canvas id="heat-overlay"></canvas>
+        <div id="heat-msg" class="overlay hidden"></div>
+      </div>
+      <div class="edit-axis"><span id="heat-xlab">ensemble →</span>
+        <span class="spacer"></span><span id="heat-ylab">bin 1 (top) → bin N</span></div>
     </div>
     <div class="cli-bar"><span class="cli-label">CLI</span><code id="cli">–</code></div>
   </main>
 
   <aside class="side">
+    <div class="sect">
+      <h3>Manual edits <span id="edits-badge" class="badge hidden">0</span></h3>
+      <div id="edits-list"></div>
+      <div class="hint" id="edits-hint">no manual edits — brush rectangles in the
+        ✏ edit view; the journal replays in batch via ladcp-qa --edits.</div>
+    </div>
     <div class="sect">
       <h3>Pinned solutions</h3>
       <div id="pins"></div>
