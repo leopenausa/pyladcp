@@ -166,3 +166,53 @@ def test_configs_are_hashable_cache_keys():
     b = SessionConfig(edit=EditConfig(nearfield_dn_bins=(3, 4)))
     assert hash(a) == hash(b) and a == b
     assert len({a.edit, b.edit, EditConfig()}) == 2
+
+
+# ---------------------------------------------------------------- launch-time folder check
+
+def test_validate_folder_missing_dir(tmp_path):
+    cfg = SadcpConfig(folder=str(tmp_path / "nope"))
+    with pytest.raises(ValueError, match="is not a directory"):
+        cfg.validate_folder()
+
+
+def test_validate_folder_no_sta_files_hints_subfolder(tmp_path):
+    (tmp_path / "DATA").mkdir()
+    (tmp_path / "DATA" / "x.STA").write_bytes(b"")
+    with pytest.raises(ValueError, match=r"no \.STA files directly under .* "
+                                         r"\(not searched recursively\).*DATA"):
+        SadcpConfig(folder=str(tmp_path)).validate_folder()
+
+
+def test_validate_folder_accepts_sta_files(tmp_path):
+    (tmp_path / "a.STA").write_bytes(b"")
+    SadcpConfig(folder=str(tmp_path)).validate_folder()       # no raise
+
+
+def test_validate_folder_cache_counts_unless_reingest(tmp_path):
+    from ladcp.io.sadcp_vmdas import CACHE_NAME
+    (tmp_path / CACHE_NAME).write_bytes(b"")
+    SadcpConfig(folder=str(tmp_path)).validate_folder()       # cache satisfies ingest
+    with pytest.raises(ValueError, match=r"no \.STA files directly under"):
+        SadcpConfig(folder=str(tmp_path), reingest=True).validate_folder()
+
+
+def test_validate_folder_codas_existence_only(tmp_path):
+    nc = tmp_path / "contour.nc"
+    with pytest.raises(ValueError, match="does not exist"):
+        SadcpConfig(folder=str(nc), source="codas").validate_folder()
+    nc.write_bytes(b"")
+    SadcpConfig(folder=str(nc), source="codas").validate_folder()
+
+
+def test_qa_cli_rejects_bad_sadcp_at_launch(tmp_path, capsys):
+    sub = tmp_path / "DATA"
+    sub.mkdir()
+    (sub / "x.STA").write_bytes(b"")
+    with pytest.raises(SystemExit) as exc:
+        from ladcp.qa.cli import main
+        main(["80", "--sadcp", str(tmp_path), "--no-log"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "no .STA files directly under" in err
+    assert "DATA" in err                          # the helpful subfolder hint

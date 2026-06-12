@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import shlex
 from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -102,6 +103,36 @@ class SadcpConfig:
     def __post_init__(self) -> None:
         if self.timeoff == "auto" and not self.nav:
             raise ValueError("--sadcp-timeoff auto needs --sadcp-nav")
+
+    def validate_folder(self) -> None:
+        """Launch-time existence check on ``folder`` (raises ``ValueError``).
+
+        Fails fast at the CLI instead of minutes later at the first solve: VmDAS
+        ingest does NOT recurse, so pointing ``--sadcp`` at the parent of the
+        ``DATA/`` subfolder that actually holds the ``.STA`` files is a silent
+        trap. A present ingest cache counts as valid (the raw averages may have
+        been archived away) unless ``--sadcp-reingest`` forces a re-parse.
+        """
+        p = Path(self.folder)
+        if self.source == "codas":                  # NetCDF file or its directory
+            if not p.exists():
+                raise ValueError(f"--sadcp: {p} does not exist")
+            return
+        if not p.is_dir():
+            raise ValueError(f"--sadcp: {p} is not a directory")
+        from .io.sadcp_vmdas import CACHE_NAME
+        if not self.reingest and (p / CACHE_NAME).exists():
+            return                                  # ingest loads the cache directly
+        ft = self.filetype
+        if not list(p.glob(f"*.{ft}")):
+            subs = sorted(str(c.relative_to(p)) for c in p.iterdir()
+                          if c.is_dir() and list(c.glob(f"*.{ft}")))
+            msg = f"--sadcp: no .{ft} files directly under {p} (not searched recursively)"
+            if subs:
+                msg += (f"; found .{ft} files in: "
+                        + ", ".join(f"{p}/{s}" for s in subs[:4])
+                        + " — point --sadcp there")
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)

@@ -437,25 +437,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sadcp = None
     if args.sadcp:
-        if args.sadcp_source == "vmdas":     # fail at launch, not at the first solve
-            p = Path(args.sadcp)
-            if not p.is_dir():
-                ap.error(f"--sadcp: {p} is not a directory")
-            ft = args.sadcp_filetype
-            if not list(p.glob(f"*.{ft}")):
-                subs = sorted(str(c.relative_to(p)) for c in p.iterdir()
-                              if c.is_dir() and list(c.glob(f"*.{ft}")))
-                msg = f"--sadcp: no .{ft} files directly under {p} (not searched recursively)"
-                if subs:
-                    msg += (f"; found .{ft} files in: "
-                            + ", ".join(f"{p}/{s}" for s in subs[:4])
-                            + " — point --sadcp there")
-                ap.error(msg)
         try:
             sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
                                 filetype=args.sadcp_filetype, xducer=args.sadcp_xducer,
                                 timeoff=parse_timeoff(args.sadcp_timeoff),
                                 nav=args.sadcp_nav, reingest=args.sadcp_reingest)
+            sadcp.validate_folder()      # fail at launch, not at the first solve
         except ValueError as e:
             ap.error(str(e))
 
