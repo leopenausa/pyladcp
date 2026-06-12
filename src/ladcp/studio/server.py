@@ -513,7 +513,23 @@ def main(argv: list[str] | None = None) -> int:
             names = ", ".join(codas_label(p) for p in found)
             print(f"studio: CODAS products found under {Path(args.root) / 'codas'} "
                   f"({names}) — add --sadcp-codas <dir> to offer them in the "
-                  f"SADCP source dropdown")
+                  f"SADCP source dropdown", flush=True)
+
+    # fail at launch, not as a 500 at the first solve: every station id must resolve
+    # to files (catches a missing --root, a typo'd id, or a stray token parsed as a
+    # station). Path checks only -- --from-hex CTD conversion still happens lazily.
+    from ..discovery import _load_index, discover
+    root_p = Path(args.root)
+    idx = _load_index(Path(args.index)) if args.index else None
+    for lab in labels:
+        try:
+            discover(lab, root=root_p, cruise=args.cruise, index=idx, from_hex=False)
+        except (FileNotFoundError, ValueError) as e:
+            msg = f"station {lab!r}: {e}"
+            if not root_p.is_dir():
+                msg += (f"  [--root {args.root!r} does not exist under {Path.cwd()} "
+                        f"— pass --root <cruise folder>]")
+            ap.error(msg)
 
     state = StudioState(labels, root=args.root, cruise=args.cruise, index=args.index,
                         from_hex=args.from_hex, ctd_cache=args.ctd_cache, sadcp=sadcp,

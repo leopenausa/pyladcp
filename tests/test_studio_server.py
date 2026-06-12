@@ -345,3 +345,26 @@ def test_launch_rejects_missing_codas_product(tmp_path, capsys):
         main(["80", "--sadcp-codas", str(tmp_path / "nope"), "--no-browser"])
     assert exc.value.code == 2
     assert "no CODAS NetCDF" in capsys.readouterr().err
+
+
+# ------------------------------------------------- launch validates station ids
+
+def test_launch_rejects_unresolvable_station(tmp_path, capsys):
+    """A stray token parsed as a station id (or a typo) errors at launch with the
+    discovery message -- previously a raw 500 at the first solve."""
+    from ladcp.studio.server import main
+    (tmp_path / "LADCP").mkdir()
+    with pytest.raises(SystemExit) as exc:
+        main(["-", "--root", str(tmp_path), "--no-browser"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "station '-'" in err and "no down-looker" in err
+
+
+def test_launch_missing_root_gets_a_hint(tmp_path, capsys):
+    from ladcp.studio.server import main
+    with pytest.raises(SystemExit) as exc:
+        main(["80", "--root", str(tmp_path / "not_a_cruise"), "--no-browser"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "station '80'" in err and "pass --root <cruise folder>" in err
