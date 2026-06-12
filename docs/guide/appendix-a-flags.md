@@ -242,7 +242,7 @@ options:
 ```text
 usage: ladcp-studio [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                     [--from-hex] [--ctd-cache CTD_CACHE] [--sadcp PATH]
-                    [--sadcp-source {vmdas,codas}]
+                    [--sadcp-codas PATH] [--sadcp-source {vmdas,codas}]
                     [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
                     [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
                     [--sadcp-reingest] [--host HOST] [--port PORT]
@@ -267,6 +267,10 @@ options:
                         cache dir for --from-hex .cnv
   --sadcp PATH          ship-ADCP source for the inverse constraint (as in
                         ladcp-qa); the GUI can then toggle/weight it per solve
+  --sadcp-codas PATH    CODAS-processed product (contour NetCDF or its
+                        processing dir) offered in the GUI's SADCP source
+                        dropdown alongside the raw --sadcp; repeatable, one
+                        entry per product
   --sadcp-source {vmdas,codas}
   --sadcp-filetype {STA,LTA}
   --sadcp-xducer SADCP_XDUCER

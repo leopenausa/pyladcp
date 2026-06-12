@@ -51,7 +51,7 @@ def test_stations_endpoint(client):
     r = client.get("/api/stations")
     assert r.status_code == 200
     assert r.json() == {"stations": ["MORIA-80"], "cruise": "MORIA",
-                        "sadcp": False, "sadcp_folder": None}
+                        "sadcp": False, "sadcp_folder": None, "sadcp_sources": []}
 
 
 def test_prepare_then_cached(client):
@@ -247,3 +247,101 @@ def test_solve_payload_carries_sadcp_trace(monkeypatch):
     off = c.post("/api/station/MORIA-80/solve",
                  json={"solve": {"drot": -9.878379}, "use_sadcp": False}).json()
     assert off["sadcp"] is None and off["sadcp_bins"] == 0
+
+
+# ------------------------------------------------- SADCP source dropdown (raw | codas)
+
+def _two_source_state(tmp_path):
+    from ladcp.session import SadcpConfig
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    codas = tmp_path / "codas" / "os150nb_enr"
+    (codas / "contour").mkdir(parents=True)
+    (codas / "contour" / "os150nb.nc").write_bytes(b"")
+    return StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                       sadcp=SadcpConfig(folder="sADCP/DATA"),
+                       sadcp_codas=[SadcpConfig(folder=str(codas), source="codas")])
+
+
+def test_stations_payload_lists_sources(tmp_path):
+    st = _two_source_state(tmp_path)
+    info = TestClient(create_app(st)).get("/api/stations").json()
+    assert [s["key"] for s in info["sadcp_sources"]] == ["raw", "os150nb_enr"]
+    assert [s["source"] for s in info["sadcp_sources"]] == ["vmdas", "codas"]
+    assert info["sadcp"] is True                  # legacy fields still describe primary
+    assert info["sadcp_folder"] == "sADCP/DATA"
+
+
+def test_sadcp_key_selects_the_source(tmp_path, monkeypatch):
+    import ladcp.qa.cli as qacli
+    seen = []
+    fake = np.column_stack([np.arange(20.0, 120.0, 20.0), np.full(5, 0.10),
+                            np.full(5, -0.05), np.full(5, 0.02)])
+    monkeypatch.setattr(qacli, "_sadcp_profile",
+                        lambda opts, *a, **k: seen.append(opts) or fake)
+    st = _two_source_state(tmp_path)
+    c = TestClient(create_app(st))
+    drot = {"solve": {"drot": -9.878379}}
+    assert c.post("/api/station/MORIA-80/solve",
+                  json=dict(drot, sadcp_key="os150nb_enr")).json()["sadcp_bins"] == 5
+    assert seen[-1]["source"] == "codas" and seen[-1]["folder"].endswith("os150nb_enr")
+    assert c.post("/api/station/MORIA-80/solve",
+                  json=dict(drot, sadcp_key="raw")).json()["sadcp_bins"] == 5
+    assert seen[-1]["source"] == "vmdas" and seen[-1]["folder"] == "sADCP/DATA"
+    off = c.post("/api/station/MORIA-80/solve", json=dict(drot, sadcp_key="off")).json()
+    assert off["sadcp_bins"] == 0
+
+
+def test_sadcp_key_round_trips_through_cli(tmp_path, monkeypatch):
+    """The hard contract holds per source: each choice is one ladcp-qa invocation."""
+    import ladcp.qa.cli as qacli
+    fake = np.column_stack([[50.0], [0.1], [0.0], [0.02]])
+    monkeypatch.setattr(qacli, "_sadcp_profile", lambda *a, **k: fake)
+    st = _two_source_state(tmp_path)
+    c = TestClient(create_app(st))
+    p = c.post("/api/station/MORIA-80/solve",
+               json={"solve": {"drot": -9.878379}, "sadcp_key": "os150nb_enr"}).json()
+    args = build_parser().parse_args(shlex.split(p["cli"])[1:])
+    assert args.sadcp.endswith("os150nb_enr") and args.sadcp_source == "codas"
+
+
+def test_unknown_sadcp_key_is_400(tmp_path):
+    st = _two_source_state(tmp_path)
+    r = TestClient(create_app(st)).post("/api/station/MORIA-80/solve",
+                                        json={"sadcp_key": "os75nb_enr"})
+    assert r.status_code == 400
+    assert "unknown SADCP source" in r.json()["detail"]
+
+
+def test_legacy_use_sadcp_means_first_source(tmp_path, monkeypatch):
+    import ladcp.qa.cli as qacli
+    seen = []
+    fake = np.column_stack([[50.0], [0.1], [0.0], [0.02]])
+    monkeypatch.setattr(qacli, "_sadcp_profile",
+                        lambda opts, *a, **k: seen.append(opts) or fake)
+    st = _two_source_state(tmp_path)
+    c = TestClient(create_app(st))
+    c.post("/api/station/MORIA-80/solve",
+           json={"solve": {"drot": -9.878379}, "use_sadcp": True})
+    assert seen[-1]["source"] == "vmdas"
+
+
+def test_codas_label_and_discovery(tmp_path):
+    from ladcp.studio.server import codas_label, discover_codas_products
+    assert codas_label("codas/os150nb_enr/contour/os150nb.nc") == "os150nb_enr"
+    assert codas_label("codas/os150nb_enr") == "os150nb_enr"
+    assert codas_label("a/flat.nc") == "a"        # bare .nc: its directory names it
+    base = tmp_path / "codas"
+    (base / "os75nb_sta" / "contour").mkdir(parents=True)
+    (base / "os75nb_sta" / "contour" / "os75nb.nc").write_bytes(b"")
+    (base / "loose.nc").write_bytes(b"")
+    found = discover_codas_products(tmp_path)
+    assert [codas_label(p) for p in found] == ["os75nb_sta", "codas"]
+    assert discover_codas_products(tmp_path / "nowhere") == []
+
+
+def test_launch_rejects_missing_codas_product(tmp_path, capsys):
+    from ladcp.studio.server import main
+    with pytest.raises(SystemExit) as exc:
+        main(["80", "--sadcp-codas", str(tmp_path / "nope"), "--no-browser"])
+    assert exc.value.code == 2
+    assert "no CODAS NetCDF" in capsys.readouterr().err

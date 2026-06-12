@@ -34,11 +34,22 @@ localhost-only). Everything you know from `ladcp-qa` carries over:
 ladcp-studio 80 79 --root "$B" --cruise MYCRUISE          # several stations, ‹ › to switch
 ladcp-studio --index "$B/.ladcp_archive.json" --root "$B" # every cast in the archive index
 ladcp-studio 80 --sadcp "$B/sADCP/DATA"                   # enable the ship-ADCP constraint
+ladcp-studio 80 --sadcp "$B/sADCP/DATA" \
+             --sadcp-codas "$B/codas/os150nb_enr"         # raw AND a CODAS product
 ```
 
 `--sadcp` works exactly as in `ladcp-qa` (chapter 8) and is validated at launch — if
 the folder doesn't directly hold the `.STA` files, the error tells you which subfolder
-does. The full flag list:
+does.
+
+`--sadcp-codas` (repeatable) adds CODAS-processed products (chapter 8 / the CODAS
+guide) to a **source dropdown** in the Constraints section, so you can switch the
+constraint between the raw averages and any processed product per solve — pin one,
+switch, and the Δ-strip shows what the processing chain is worth at this station.
+Each choice is still a single `ladcp-qa` command (`--sadcp <path> --sadcp-source
+codas`), shown in the CLI bar as always. If products exist under the conventional
+`<root>/codas/` but you didn't pass any, launch prints which ones it found — nothing
+is ever fed to a solve implicitly. The full flag list:
 
 <!-- guide-test -->
 ```bash

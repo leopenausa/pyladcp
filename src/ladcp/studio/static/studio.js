@@ -17,8 +17,8 @@ const S = {                                     // mirrors SessionConfig
   down_only: false,
   nearfield: null,                              // null = preset, [] = none, [3,4] = bins
   dzbelow: null,                                // null = preset
-  use_sadcp: false,
-  sadcp_available: false,
+  sadcp_key: "off",                             // "off" | a key from sadcp_sources
+  sadcp_sources: [],                            // [{key, source, folder}] fixed at launch
 };
 
 let seq = 0;                                    // drop stale in-flight responses
@@ -44,7 +44,7 @@ function body() {
     edit: editBody(),
     solve: { solver: S.solver, botfac: S.botfac, barofac: S.barofac,
              smoofac: S.smoofac, sadcpfac: S.sadcpfac },
-    use_sadcp: S.use_sadcp,
+    sadcp_key: S.sadcp_key,
   });
 }
 
@@ -113,7 +113,7 @@ function pinLabel() {
   if (S.botfac !== 1.0) parts.push(`botfac ${S.botfac}`);
   if (S.barofac !== 1.0) parts.push(`barofac ${S.barofac}`);
   if (S.smoofac !== 0.0) parts.push(`smoofac ${S.smoofac}`);
-  if (S.use_sadcp) parts.push(`sadcp ${S.sadcpfac}`);
+  if (S.sadcp_key !== "off") parts.push(`sadcp ${S.sadcp_key} ${S.sadcpfac}`);
   if (S.down_only) parts.push("down-only");
   if (S.nearfield !== null)
     parts.push(`nf ${S.nearfield.length ? S.nearfield.join(",") : "none"}`);
@@ -471,12 +471,17 @@ $("tgl-downonly").addEventListener("click", () => {
   scheduleSolve(0);                              // edit change: server rebuilds (~1.5 s)
 });
 
-$("tgl-sadcp").addEventListener("click", () => {
-  if (!S.sadcp_available) return;
-  S.use_sadcp = !S.use_sadcp;
-  $("tgl-sadcp").classList.toggle("on", S.use_sadcp);
+$("sel-sadcp").addEventListener("change", () => {
+  S.sadcp_key = $("sel-sadcp").value;
+  updateSadcpNote();
   scheduleSolve(0);
 });
+
+function updateSadcpNote() {
+  const src = S.sadcp_sources.find(s => s.key === S.sadcp_key);
+  $("sadcp-note").textContent = src ? src.folder
+    : (S.sadcp_sources.length ? "constraint off" : "launch with --sadcp / --sadcp-codas");
+}
 
 /* editing overrides: parse on Enter/blur; empty = cruise preset (null) */
 function bindEditField(input, parse) {
@@ -568,12 +573,18 @@ $("copycli").addEventListener("click", async () => {
       o.value = o.textContent = label;
       sel.appendChild(o);
     }
-    S.sadcp_available = info.sadcp;
-    S.use_sadcp = info.sadcp;                    // launched with --sadcp -> on by default
-    const tgl = $("tgl-sadcp");
-    tgl.classList.toggle("on", S.use_sadcp);
-    tgl.classList.toggle("disabled", !info.sadcp);
-    $("sadcp-note").textContent = info.sadcp ? info.sadcp_folder : "launch with --sadcp";
+    S.sadcp_sources = info.sadcp_sources || [];
+    const srcSel = $("sel-sadcp");
+    for (const s of S.sadcp_sources) {
+      const o = document.createElement("option");
+      o.value = o.textContent = s.key;
+      o.title = s.folder;
+      srcSel.appendChild(o);
+    }
+    S.sadcp_key = S.sadcp_sources.length ? S.sadcp_sources[0].key : "off";
+    srcSel.value = S.sadcp_key;                  // first launch source on by default
+    srcSel.disabled = !S.sadcp_sources.length;
+    updateSadcpNote();
     S.station = info.stations[0];
     sel.value = S.station;
     renderPins();
