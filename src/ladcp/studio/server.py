@@ -567,13 +567,18 @@ def create_app(state: StudioState):
 
         Every config-consuming endpoint routes through here: the journal is the
         single source of truth for manual edits, so a request body never carries
-        rectangles and no endpoint can solve/render a different edit set.
+        rectangles and no endpoint can solve/render a different edit set. The one
+        escape hatch is ``ignore_edits: true`` -- an explicit request for the
+        no-edits solution (the edit view's baseline inset / A-B comparison);
+        the response then reports ``manual_edits: 0``.
         """
         body = await request.json() if int(request.headers.get("content-length") or 0) else {}
         try:
             cfg = config_from_body(body, state)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
+        if body.get("ignore_edits"):
+            return cfg
         with _data_errors():
             return state.attach_edits(cfg, state.session(label))
 

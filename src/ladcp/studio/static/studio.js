@@ -101,10 +101,13 @@ async function solve() {
     $("ro-vbar").textContent = fmtVel(p.profile.vbar);
     $("cli").textContent = p.cli;
     $("key-sadcp").style.display = p.sadcp ? "flex" : "none";
+    $("ro-edits").textContent = p.manual_edits
+      ? `${p.manual_edits} rect (✏)` : "none";
     if (p.dn_geom) { S.dn_geom = p.dn_geom; syncNearfieldControls(); }
     renderQaList(p.panels);
     draw(p);
     if (E.journal === null) refreshEdits();      // first solve: populate the edits card
+    if (E.open) ensureBaseline(p);               // edit view: refresh the inset Δ
   } catch (e) {
     if (mySeq === seq) status("err", `error: ${e.message}`);
   }
@@ -565,7 +568,13 @@ function syncNearfieldControls() {
       const hi = first_m + (Math.max(...S.nearfield) - 1) * cell_m + cell_m / 2;
       note += ` ≈ ${lo.toFixed(0)}–${hi.toFixed(0)} m below package`;
     }
+  } else if (S.use_nearfield) {
+    note = "type bins to mask — nothing masked yet";
   }
+  // the brush journal masks cells through the same edit stage (the two OR
+  // together); say so here so an active journal is never a surprise
+  const nEdits = E.journal ? E.journal.entries.length : 0;
+  if (nEdits) note += ` · ✏ ${nEdits} brush rect(s) also active`;
   $("nearfield-note").textContent = note;
 }
 
@@ -640,10 +649,11 @@ const E = {
   journal: null,                                 // journal dict from the server
   stale: null,                                   // staleness message or null
   drag: null,                                    // {x0,y0,x1,y1} in overlay px
+  baseline: null,                                // no-edits profile {key,z,u,v,ubar,vbar}
 };
 
 function resetEditView() {
-  E.meta = null; E.journal = null; E.stale = null; E.drag = null;
+  E.meta = null; E.journal = null; E.stale = null; E.drag = null; E.baseline = null;
   renderEditsList();
   if (E.open) loadEditView();
 }
@@ -656,8 +666,10 @@ function setView(which) {
   $("edit-view").classList.toggle("hidden", !E.open);
   $("plot-title").textContent = E.open ? "Raw ensemble matrix" : "Velocity solution";
   document.querySelector(".legend").style.visibility = E.open ? "hidden" : "visible";
-  if (E.open) loadEditView();
-  else if (last) draw(last);
+  if (E.open) {
+    loadEditView();
+    if (last) ensureBaseline(last);
+  } else if (last) draw(last);
 }
 $("viewseg").querySelectorAll("button").forEach(b =>
   b.addEventListener("click", () => setView(b.dataset.v)));
@@ -878,6 +890,7 @@ async function refreshEdits() {
 }
 
 function renderEditsList() {
+  syncNearfieldControls();                       // its note cross-references the journal
   const box = $("edits-list");
   box.innerHTML = "";
   const entries = E.journal ? E.journal.entries : [];
@@ -917,7 +930,107 @@ function renderEditsList() {
   }
 }
 
-new ResizeObserver(() => { if (E.open) drawHeatOverlay(); }).observe($("heat-wrap"));
+/* --- the inset: live solution vs the no-edits baseline, same config ---------
+ *
+ * The point of brushing is the solution response, but on a clean cast a one-bin
+ * mask moves the profile by well under 1 cm/s -- invisible at the main plot's
+ * scale. The inset re-fetches the SAME configuration with `ignore_edits: true`
+ * (cached server-side like any EditConfig) and shows live vs that baseline plus
+ * the Δubar/Δvbar numbers, so every brush stroke has a visible, quantified
+ * effect even when it is "the edit costs nothing" -- itself an answer. */
+
+let baselineSeq = 0;                             // drop stale baseline fetches
+
+async function ensureBaseline(p) {
+  const key = S.station + "|" + body();
+  if (p.manual_edits === 0) {                    // the live solve IS the baseline
+    E.baseline = { key, ...p.profile };
+    drawEditInset();
+    return;
+  }
+  if (E.baseline && E.baseline.key === key) {
+    drawEditInset();
+    return;
+  }
+  drawEditInset();                               // show "capturing baseline…" meanwhile
+  const mySeq = ++baselineSeq;
+  try {
+    const payload = JSON.parse(body());
+    payload.ignore_edits = true;
+    const r = await fetch(`api/station/${encodeURIComponent(S.station)}/solve`,
+                          { method: "POST", body: JSON.stringify(payload),
+                            headers: { "Content-Type": "application/json" } });
+    if (!r.ok || mySeq !== baselineSeq) return;
+    const b = await r.json();
+    if (mySeq !== baselineSeq) return;
+    E.baseline = { key, ...b.profile };
+    drawEditInset();
+  } catch { /* inset is best-effort; the next solve retries */ }
+}
+
+function drawEditInset() {
+  const c = $("edit-inset");
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.clientWidth, H = c.clientHeight;
+  if (!W || !H) return;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = "rgba(13,18,24,.88)";
+  g.fillRect(0, 0, W, H);
+  g.strokeStyle = "rgba(189,208,226,.35)";
+  g.strokeRect(0.5, 0.5, W - 1, H - 1);
+  g.font = '10px ui-monospace,"SF Mono",Consolas,monospace';
+  if (!last) return;
+  const base = E.baseline, live = last.profile;
+  const padT = 30, padB = 8, padX = 8;
+  const zs = live.z.filter(x => x !== null);
+  const zmax = Math.max(...zs, 1);
+  let vmax = 0.02;
+  for (const a of [live.u, live.v, base ? base.u : [], base ? base.v : []])
+    for (const x of a) if (x !== null) vmax = Math.max(vmax, Math.abs(x));
+  vmax *= 1.1;
+  const Y = zz => padT + zz / zmax * (H - padT - padB);
+  const X = v => padX + (v + vmax) / (2 * vmax) * (W - 2 * padX);
+  const trace = (zarr, comp) => {
+    g.beginPath();
+    let pen = false;
+    for (let i = 0; i < zarr.length; i++) {
+      if (comp[i] === null || zarr[i] === null) { pen = false; continue; }
+      const x = X(comp[i]), y = Y(zarr[i]);
+      pen ? g.lineTo(x, y) : g.moveTo(x, y); pen = true;
+    }
+    g.stroke();
+  };
+  g.strokeStyle = "rgba(189,208,226,.25)";       // zero line
+  g.beginPath(); g.moveTo(X(0), padT); g.lineTo(X(0), H - padB); g.stroke();
+  if (base) {
+    g.setLineDash([4, 3]); g.lineWidth = 1;
+    g.strokeStyle = "rgba(160,175,195,.7)";
+    trace(base.z, base.u);
+    trace(base.z, base.v);
+    g.setLineDash([]);
+  }
+  g.lineWidth = 1.3;
+  g.strokeStyle = "#39d3c8"; trace(live.z, live.u);
+  g.strokeStyle = "#ff9e64"; trace(live.z, live.v);
+  g.fillStyle = "#bdd0e2";
+  g.fillText("live vs no-edits", 8, 13);
+  if (base && base.ubar !== null && live.ubar !== null) {
+    const du = (live.ubar - base.ubar) * 100, dv = (live.vbar - base.vbar) * 100;
+    g.fillStyle = "#e8b153";
+    g.fillText(`Δū ${du >= 0 ? "+" : ""}${du.toFixed(2)} · ` +
+               `Δv̄ ${dv >= 0 ? "+" : ""}${dv.toFixed(2)} cm/s`, 8, 25);
+  } else {
+    g.fillStyle = "#7a8494";
+    g.fillText(last.manual_edits ? "capturing baseline…" : "no edits active", 8, 25);
+  }
+}
+
+new ResizeObserver(() => {
+  if (E.open) { drawHeatOverlay(); drawEditInset(); }
+}).observe($("heat-wrap"));
 $("heat").addEventListener("load", drawHeatOverlay);
 
 /* ------------------------------------------------------------------ boot */

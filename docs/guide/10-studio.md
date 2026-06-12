@@ -104,6 +104,14 @@ change, ~1.5 s), and the ✕ on an entry removes it again — the solution retur
 *all ensembles*, i.e. a pure bin mask: flagging bins 3–4 across the whole cast is
 exactly `--nearfield-dn-bins 3,4`, bit for bit.
 
+The **inset profile** in the corner shows the live solution against the *no-edits
+baseline* (same weights and constraints), with the Δubar/Δvbar numbers. On a clean
+cast, a one-bin brush moves the profile by well under 1 cm/s — invisible at the main
+plot's scale — so the inset is where you read each stroke's true cost. A near-zero Δ
+is an answer too: the data you flagged wasn't driving the solution. (The near-field
+mask in the left rail and brush rectangles feed the same edit stage and simply
+combine; the rail's note tells you when brush edits are also active.)
+
 This is the tool for the artifacts thresholds can't catch: a rigid device hung below
 the package reads the *package's* motion at |errvel| well under the 0.2 m/s edit
 limit (chapter 6) — coherent, biased, and invisible to a global threshold, but

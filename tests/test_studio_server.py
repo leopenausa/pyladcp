@@ -650,3 +650,22 @@ def test_journal_uses_canonical_label_not_launch_token(tmp_path):
     # the emitted command parses and carries the journal's geometry
     args = build_parser().parse_args(shlex.split(solved["cli"])[1:])
     assert SessionConfig.from_args(args).edit.manual_flags[0][:3] == ("down", 3, 4)
+
+
+def test_ignore_edits_returns_the_no_edits_baseline(eclient):
+    """`ignore_edits: true` is the edit-view inset's baseline: same config, journal
+    deliberately NOT attached, so live-minus-baseline isolates the brush effect."""
+    _clear_journal(eclient)
+    _, base_u = _profile(eclient)
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
+                                     "ens_first": 0, "ens_last": 10 ** 9}})
+    assert r.status_code == 200
+
+    p, edited_u = _profile(eclient)
+    assert p["manual_edits"] == 1
+    pb, ignored_u = _profile(eclient, {"ignore_edits": True})
+    assert pb["manual_edits"] == 0 and "--edits" not in pb["cli"]
+    np.testing.assert_array_equal(ignored_u, base_u)     # == the pre-brush solution
+    assert not np.array_equal(edited_u, ignored_u, equal_nan=True)
+    _clear_journal(eclient)
