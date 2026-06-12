@@ -266,7 +266,9 @@ options:
   --ctd-cache CTD_CACHE
                         cache dir for --from-hex .cnv
   --sadcp PATH          ship-ADCP source for the inverse constraint (as in
-                        ladcp-qa); the GUI can then toggle/weight it per solve
+                        ladcp-qa); repeatable — each folder becomes an entry
+                        in the GUI's source dropdown (e.g. the 75 and 150 kHz
+                        instruments)
   --sadcp-codas PATH    CODAS-processed product (contour NetCDF or its
                         processing dir) offered in the GUI's SADCP source
                         dropdown alongside the raw --sadcp; repeatable, one

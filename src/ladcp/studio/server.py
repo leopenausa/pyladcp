@@ -72,15 +72,46 @@ def codas_label(path: str | Path) -> str:
     return p.name or str(p)
 
 
-def discover_codas_products(root: str | Path) -> list[Path]:
-    """CODAS contour NetCDFs under the ``<root>/codas`` convention.
+def raw_label(path: str | Path) -> str:
+    """Short dropdown label for a raw VmDAS folder: the last informative path part
+    (``sADCP/sadcp_75/DATA`` -> ``sadcp_75`` — the trailing ``DATA`` says nothing)."""
+    for part in reversed(Path(path).parts):
+        if part.lower() not in ("data", "", "/", "."):
+            return part
+    return "raw"
 
-    Launch-time *hint only* — discovered products are listed so the user can pass
-    ``--sadcp-codas`` explicitly; nothing implicit ever feeds a solve (with several
-    products on disk — instruments x STA/ENR routes — the choice is scientific).
-    """
+
+def discover_codas_products(root: str | Path) -> list[Path]:
+    """CODAS contour NetCDFs under the ``<root>/codas`` convention."""
     base = Path(root) / "codas"
     return sorted(base.glob("*/contour/*.nc")) + sorted(base.glob("*.nc"))
+
+
+def merge_discovered_codas(root: str | Path,
+                           flagged: list[SadcpConfig]) -> list[SadcpConfig]:
+    """``flagged`` + products auto-discovered under ``<root>/codas`` (deduped).
+
+    Discovered products only *populate the dropdown* — picking one is an explicit
+    user action, and the default selection stays with the explicitly flagged
+    sources — so with several products on disk (instruments x STA/ENR routes) the
+    scientific choice remains the user's.
+    """
+    from ..io.sadcp_codas import resolve_codas_nc
+    seen = set()
+    for c in flagged:
+        try:
+            seen.add(resolve_codas_nc(c.folder).resolve())
+        except FileNotFoundError:
+            pass                                 # flagged paths are validated at launch
+    out = list(flagged)
+    for nc in discover_codas_products(root):
+        r = nc.resolve()
+        if r in seen:
+            continue
+        seen.add(r)
+        folder = nc.parent.parent if nc.parent.name == "contour" else nc
+        out.append(SadcpConfig(folder=str(folder), source="codas"))
+    return out
 
 
 class StudioState:
@@ -89,8 +120,9 @@ class StudioState:
     def __init__(self, labels: list[str], *, root: str = _QA_ROOT_DEFAULT,
                  cruise: str = _QA_CRUISE_DEFAULT, index: str | None = None,
                  from_hex: bool = False, ctd_cache: str | None = None,
-                 sadcp: SadcpConfig | None = None,
+                 sadcp: SadcpConfig | list[SadcpConfig] | None = None,
                  sadcp_codas: list[SadcpConfig] | None = None,
+                 sadcp_found: list[SadcpConfig] | None = None,
                  explicit: dict[str, StationEntry] | None = None):
         self.labels = list(labels)
         self.root = root
@@ -98,17 +130,32 @@ class StudioState:
         self.index = index
         self.from_hex = from_hex
         self.ctd_cache = ctd_cache
-        self.sadcp = sadcp                       # primary launch identity (or None)
+        raws = [sadcp] if isinstance(sadcp, SadcpConfig) else list(sadcp or [])
+        self.sadcp = raws[0] if raws else None   # primary launch identity (or None)
         # the GUI's source dropdown: key -> identity, primary first. Each solve still
         # carries exactly ONE SadcpConfig, so the ladcp-qa CLI contract is unchanged.
+        # A single raw source keeps the plain key "raw"; several get folder-derived
+        # names (--sadcp sADCP/sadcp_75/DATA --sadcp sADCP/sadcp_150/DATA ->
+        # "sadcp_75", "sadcp_150").
         sources: OrderedDict[str, SadcpConfig] = OrderedDict()
-        if sadcp is not None:
-            sources["raw" if sadcp.source == "vmdas" else codas_label(sadcp.folder)] = sadcp
-        for cfg in sadcp_codas or []:
-            key, n = codas_label(cfg.folder), 2
-            while key in sources:                # same tree name twice: suffix, keep both
-                key, n = f"{codas_label(cfg.folder)}-{n}", n + 1
+        self.sadcp_origin: dict[str, str] = {}   # key -> "flag" | "found"
+
+        def add(key: str, cfg: SadcpConfig, origin: str = "flag") -> None:
+            base, n = key, 2
+            while key in sources:                # same name twice: suffix, keep both
+                key, n = f"{base}-{n}", n + 1
             sources[key] = cfg
+            self.sadcp_origin[key] = origin
+
+        for cfg in raws:
+            if cfg.source != "vmdas":
+                add(codas_label(cfg.folder), cfg)
+            else:
+                add("raw" if len(raws) == 1 else raw_label(cfg.folder), cfg)
+        for cfg in sadcp_codas or []:
+            add(codas_label(cfg.folder), cfg)
+        for cfg in sadcp_found or []:            # discovered: in the dropdown, never the
+            add(codas_label(cfg.folder), cfg, "found")   # default constraint
         self.sadcp_sources = sources
         self._explicit = dict(explicit or {})
         self._sessions: OrderedDict[str, StationSession] = OrderedDict()
@@ -368,7 +415,8 @@ def create_app(state: StudioState):
         return {"stations": state.labels, "cruise": state.cruise,
                 "sadcp": state.sadcp is not None,
                 "sadcp_folder": state.sadcp.folder if state.sadcp else None,
-                "sadcp_sources": [{"key": k, "source": c.source, "folder": c.folder}
+                "sadcp_sources": [{"key": k, "source": c.source, "folder": c.folder,
+                                   "origin": state.sadcp_origin.get(k, "flag")}
                                   for k, c in state.sadcp_sources.items()]}
 
     @app.post("/api/station/{label}/prepare")
@@ -462,9 +510,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--from-hex", action="store_true",
                     help="build missing cleaned CTD from the index's raw .hex anchor")
     ap.add_argument("--ctd-cache", default=None, help="cache dir for --from-hex .cnv")
-    ap.add_argument("--sadcp", metavar="PATH",
+    ap.add_argument("--sadcp", metavar="PATH", action="append", default=[],
                     help="ship-ADCP source for the inverse constraint (as in ladcp-qa); "
-                         "the GUI can then toggle/weight it per solve")
+                         "repeatable — each folder becomes an entry in the GUI's "
+                         "source dropdown (e.g. the 75 and 150 kHz instruments)")
     ap.add_argument("--sadcp-codas", metavar="PATH", action="append", default=[],
                     help="CODAS-processed product (contour NetCDF or its processing "
                          "dir) offered in the GUI's SADCP source dropdown alongside "
@@ -488,16 +537,17 @@ def main(argv: list[str] | None = None) -> int:
     if not labels:
         ap.error("give one or more station ids, or --index to serve the whole archive")
 
-    sadcp = None
-    if args.sadcp:
+    raw_cfgs = []
+    for p in args.sadcp:                     # the --sadcp-* knobs apply to every entry
         try:
-            sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
-                                filetype=args.sadcp_filetype, xducer=args.sadcp_xducer,
-                                timeoff=parse_timeoff(args.sadcp_timeoff),
-                                nav=args.sadcp_nav, reingest=args.sadcp_reingest)
-            sadcp.validate_folder()      # fail at launch, not at the first solve
+            cfg = SadcpConfig(folder=p, source=args.sadcp_source,
+                              filetype=args.sadcp_filetype, xducer=args.sadcp_xducer,
+                              timeoff=parse_timeoff(args.sadcp_timeoff),
+                              nav=args.sadcp_nav, reingest=args.sadcp_reingest)
+            cfg.validate_folder()            # fail at launch, not at the first solve
         except ValueError as e:
             ap.error(str(e))
+        raw_cfgs.append(cfg)
 
     codas_cfgs = []
     for p in args.sadcp_codas:
@@ -507,13 +557,13 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             ap.error(f"--sadcp-codas: {e}")
         codas_cfgs.append(SadcpConfig(folder=p, source="codas"))
-    if not codas_cfgs:                       # hint only -- never feed a solve implicitly
-        found = discover_codas_products(args.root)
-        if found:
-            names = ", ".join(codas_label(p) for p in found)
-            print(f"studio: CODAS products found under {Path(args.root) / 'codas'} "
-                  f"({names}) — add --sadcp-codas <dir> to offer them in the "
-                  f"SADCP source dropdown", flush=True)
+    # products discovered under <root>/codas join the dropdown (selecting one is an
+    # explicit user action; the default constraint stays with the explicit flags)
+    found_cfgs = merge_discovered_codas(args.root, codas_cfgs)[len(codas_cfgs):]
+    if found_cfgs:
+        print(f"studio: offering CODAS products found under {Path(args.root) / 'codas'} "
+              f"in the SADCP source dropdown: "
+              + ", ".join(codas_label(c.folder) for c in found_cfgs), flush=True)
 
     # fail at launch, not as a 500 at the first solve: every station id must resolve
     # to files (catches a missing --root, a typo'd id, or a stray token parsed as a
@@ -532,8 +582,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(msg)
 
     state = StudioState(labels, root=args.root, cruise=args.cruise, index=args.index,
-                        from_hex=args.from_hex, ctd_cache=args.ctd_cache, sadcp=sadcp,
-                        sadcp_codas=codas_cfgs)
+                        from_hex=args.from_hex, ctd_cache=args.ctd_cache, sadcp=raw_cfgs,
+                        sadcp_codas=codas_cfgs, sadcp_found=found_cfgs)
     app = create_app(state)
 
     import uvicorn

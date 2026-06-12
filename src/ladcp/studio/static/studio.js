@@ -17,8 +17,9 @@ const S = {                                     // mirrors SessionConfig
   down_only: false,
   nearfield: null,                              // null = preset, [] = none, [3,4] = bins
   dzbelow: null,                                // null = preset
-  sadcp_key: "off",                             // "off" | a key from sadcp_sources
-  sadcp_sources: [],                            // [{key, source, folder}] fixed at launch
+  use_sadcp: false,                             // the constraint toggle
+  sadcp_key: null,                              // selected key from sadcp_sources
+  sadcp_sources: [],                            // [{key, source, folder, origin}] fixed at launch
 };
 
 let seq = 0;                                    // drop stale in-flight responses
@@ -44,7 +45,7 @@ function body() {
     edit: editBody(),
     solve: { solver: S.solver, botfac: S.botfac, barofac: S.barofac,
              smoofac: S.smoofac, sadcpfac: S.sadcpfac },
-    sadcp_key: S.sadcp_key,
+    sadcp_key: (S.use_sadcp && S.sadcp_key) ? S.sadcp_key : "off",
   });
 }
 
@@ -113,7 +114,7 @@ function pinLabel() {
   if (S.botfac !== 1.0) parts.push(`botfac ${S.botfac}`);
   if (S.barofac !== 1.0) parts.push(`barofac ${S.barofac}`);
   if (S.smoofac !== 0.0) parts.push(`smoofac ${S.smoofac}`);
-  if (S.sadcp_key !== "off") parts.push(`sadcp ${S.sadcp_key} ${S.sadcpfac}`);
+  if (S.use_sadcp && S.sadcp_key) parts.push(`sadcp ${S.sadcp_key} ${S.sadcpfac}`);
   if (S.down_only) parts.push("down-only");
   if (S.nearfield !== null)
     parts.push(`nf ${S.nearfield.length ? S.nearfield.join(",") : "none"}`);
@@ -471,16 +472,25 @@ $("tgl-downonly").addEventListener("click", () => {
   scheduleSolve(0);                              // edit change: server rebuilds (~1.5 s)
 });
 
-$("sel-sadcp").addEventListener("change", () => {
-  S.sadcp_key = $("sel-sadcp").value;
-  updateSadcpNote();
+$("tgl-sadcp").addEventListener("click", () => {
+  if (!S.sadcp_sources.length) return;
+  S.use_sadcp = !S.use_sadcp;
+  syncSadcpControls();
   scheduleSolve(0);
 });
 
-function updateSadcpNote() {
+$("sel-sadcp").addEventListener("change", () => {
+  S.sadcp_key = $("sel-sadcp").value;
+  syncSadcpControls();
+  if (S.use_sadcp) scheduleSolve(0);
+});
+
+function syncSadcpControls() {
+  $("tgl-sadcp").classList.toggle("on", S.use_sadcp);
+  $("tgl-sadcp").classList.toggle("disabled", !S.sadcp_sources.length);
+  $("sel-sadcp").disabled = !S.sadcp_sources.length || !S.use_sadcp;
   const src = S.sadcp_sources.find(s => s.key === S.sadcp_key);
-  $("sadcp-note").textContent = src ? src.folder
-    : (S.sadcp_sources.length ? "constraint off" : "launch with --sadcp / --sadcp-codas");
+  $("sadcp-note").textContent = src ? src.folder : "launch with --sadcp / --sadcp-codas";
 }
 
 /* editing overrides: parse on Enter/blur; empty = cruise preset (null) */
@@ -577,14 +587,18 @@ $("copycli").addEventListener("click", async () => {
     const srcSel = $("sel-sadcp");
     for (const s of S.sadcp_sources) {
       const o = document.createElement("option");
-      o.value = o.textContent = s.key;
+      o.value = s.key;
+      o.textContent = `${s.key} · ${s.source}${s.origin === "found" ? " (found)" : ""}`;
       o.title = s.folder;
       srcSel.appendChild(o);
     }
-    S.sadcp_key = S.sadcp_sources.length ? S.sadcp_sources[0].key : "off";
-    srcSel.value = S.sadcp_key;                  // first launch source on by default
-    srcSel.disabled = !S.sadcp_sources.length;
-    updateSadcpNote();
+    // an explicitly flagged source defaults the constraint ON; discovered-only
+    // sources sit in the dropdown until the user turns the toggle on
+    const flagged = S.sadcp_sources.find(s => s.origin !== "found");
+    S.sadcp_key = (flagged || S.sadcp_sources[0] || {}).key || null;
+    S.use_sadcp = Boolean(flagged);
+    if (S.sadcp_key) srcSel.value = S.sadcp_key;
+    syncSadcpControls();
     S.station = info.stations[0];
     sel.value = S.station;
     renderPins();
