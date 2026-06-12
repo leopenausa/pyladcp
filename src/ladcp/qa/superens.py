@@ -232,6 +232,7 @@ class MergedHeads:
     izd: np.ndarray
     izu: np.ndarray
     hrot: np.ndarray            # [nens] per-ping up->down rotation applied [deg]
+    wref_dn: np.ndarray | None = None   # [nens] down near-bin median w (BT wlim edit)
     std_min: float = np.nan     # super-ensemble scatter floor (Single_Ping_Err/sqrt(ppe))
     beam_dn: float = 20.0       # down-looker beam angle [deg]  (side-lobe geometry)
     beam_up: float = 20.0       # up-looker beam angle [deg]
@@ -261,7 +262,7 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
     n = d.n_ens if single else min(d.n_ens, u.n_ens)   # joint ensembles (shift 0)
     sr = screen(dh, params)
 
-    def head_fields(head, good, ne):
+    def head_fields(head, good, wv_bad, ne):
         vel = head.vel[:, :, :ne].astype(float)
         uu, vv, ww, ee = vel[0], vel[1], vel[2], vel[3]
         with _quiet_nan():
@@ -273,9 +274,13 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
                 a[mask] = np.nan
             corr = corr.copy()
             corr[mask] = np.nan
+        if wv_bad is not None:                  # loadrdi wlim/vlim: VELOCITIES only --
+            m = wv_bad[:, :ne]                  # corr (weight) and errvel stay, like legacy
+            for a in (uu, vv, ww):
+                a[m] = np.nan
         return uu, vv, ww, ee, corr
 
-    ud, vd, wd, ed, cd = head_fields(d, sr.good_down, n)
+    ud, vd, wd, ed, cd = head_fields(d, sr.good_down, sr.wv_bad_down, n)
 
     if single:
         ru, rv, rw, re = ud, vd, wd, ed                # down head alone, own compass frame
@@ -284,7 +289,7 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
         nbin_u = 0
         offset = dh.bin_depth(d)                       # +down depth offset from package
     else:
-        uu, vu, wu, eu, cu = head_fields(u, sr.good_up, n)
+        uu, vu, wu, eu, cu = head_fields(u, sr.good_up, sr.wv_bad_up, n)
 
         # per-ping rotation hrot (deg), rotup2down==1 (golden)
         hdg_d = np.asarray(d.heading[:n], float)
@@ -324,8 +329,9 @@ def merge_heads(dh: DualHead, *, rot_deg: float | None = None,
     std_min = sw / np.tan(np.radians(beam)) / ppe
 
     beam_up = float(u.meta.get("beam_angle_deg", beam)) if not single else float(beam)
+    wref = sr.wref_down[:n] if sr.wref_down is not None else None
     return MergedHeads(ru=ru, rv=rv, rw=rw, re=re, weight=weight, offset=offset,
-                       izd=izd, izu=izu, hrot=hrot, std_min=std_min,
+                       izd=izd, izu=izu, hrot=hrot, wref_dn=wref, std_min=std_min,
                        beam_dn=float(beam), beam_up=beam_up,
                        cell_dn=float(d.cell_m),
                        cell_up=float(u.cell_m) if not single else float(d.cell_m))

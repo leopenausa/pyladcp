@@ -40,6 +40,12 @@ class ScreenResult:
     tiltd_down: np.ndarray | None = None        # [nens] deg
     good_down: np.ndarray | None = None         # [ncell, nens] bool (cell passes edits)
     good_up: np.ndarray | None = None
+    # wlim/vlim cell edits (loadrdi.m:180-237): VELOCITY-ONLY removal masks --
+    # legacy NaNs u/v/w but leaves the correlation (the weight normalisation is
+    # untouched) and the error velocity alone. True = remove the cell's velocities.
+    wv_bad_down: np.ndarray | None = None       # [ncell, nens] bool
+    wv_bad_up: np.ndarray | None = None
+    wref_down: np.ndarray | None = None         # [nens] near-bin median w (BT edit uses it)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -69,6 +75,35 @@ def _cell_good(head: RawADCP, pglim: float, elim: float) -> tuple[np.ndarray, in
     return good, int(pg_bad.sum()), int(ev_bad.sum())
 
 
+_WRANGE = 5     # loadrdi.m:183 d.wrange: near bins forming the per-ensemble w reference
+
+
+def _wv_bad(head: RawADCP, good: np.ndarray, wlim: float,
+            vlim: float) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """The loadrdi wlim + vlim velocity edits for one head (loadrdi.m:180-237).
+
+    Water cells move with the package vertically, so a cell whose w deviates more
+    than ``wlim`` from the head's near-bin median w (``d.wrange=5``) is not water
+    -- bottom/surface echo, interference, or noise; horizontal speed > ``vlim``
+    is the same verdict. Legacy NaNs u/v/w for these cells (correlation and error
+    velocity untouched). Computed on the pg/errvel survivors, BEFORE the tilt
+    ensemble rejection, exactly the legacy order (updown -> wlim -> vlim -> tilt).
+
+    Returns ``(bad, wref, n_wlim, n_vlim)``: the velocity-only removal mask, the
+    per-ensemble reference w (the bottom-track edit reuses the down-looker's),
+    and the two removal counts.
+    """
+    u = np.where(good, head.vel[0], np.nan)
+    v = np.where(good, head.vel[1], np.nan)
+    w = np.where(good, head.vel[2], np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)    # all-NaN ensemble slices
+        wref = np.nanmedian(w[:_WRANGE], axis=0)           # medianan over near bins
+        w_bad = np.abs(w - wref[None, :]) > wlim           # NaN-safe: NaN -> False
+        v_bad = ~w_bad & (np.hypot(u, v) > vlim)           # vlim counted on wlim survivors
+    return w_bad | v_bad, wref, int(w_bad.sum()), int(v_bad.sum())
+
+
 def screen(dh: DualHead, params: CastParams | None = None) -> ScreenResult:
     """Apply the loadrdi threshold edits and return masks + golden-comparable counts."""
     p = params or dh.params or CastParams(station=dh.station)
@@ -85,6 +120,17 @@ def screen(dh: DualHead, params: CastParams | None = None) -> ScreenResult:
         res.counts["pg_removed_up"] = pg_u
 
     res.counts["errvel_removed"] = ev_d + ev_u          # golden reports combined
+
+    # wlim + vlim velocity edits (legacy order: after pg/errvel, before tilt)
+    res.wv_bad_down, res.wref_down, n_w_d, n_v_d = _wv_bad(dh.down, good_d,
+                                                           p.wlim, p.vlim)
+    n_w_u = n_v_u = 0
+    if dh.has_up:
+        res.wv_bad_up, _wref_u, n_w_u, n_v_u = _wv_bad(dh.up, res.good_up,
+                                                       p.wlim, p.vlim)
+    res.counts["wlim_removed_down"] = n_w_d
+    res.counts["wlim_removed_up"] = n_w_u
+    res.counts["vlim_removed"] = n_v_d + n_v_u          # legacy reports the sum
 
     # tilt (down-looker) -> ensemble rejection
     tilt, tiltd = tilt_series(dh.down)
