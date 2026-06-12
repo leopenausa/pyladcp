@@ -62,7 +62,9 @@ ladcp-studio --help
 
 - **Left rail** — the processing state. *Pipeline* shows per-stage timings; *Solver*
   is `shear`/`inverse` plus the four weights of chapter 7; *Constraints* toggles
-  `--down-only` and the SADCP rows; *Editing* exposes the near-field bin mask and
+  `--down-only` and the SADCP rows; *Editing* exposes the near-field mask (a toggle,
+  off by default — nothing is masked unless you opt in; the input takes bins `3,4`
+  or a depth range `22-38m`, translated with the station's real bin geometry) and
   `dzbelow`. Hover any control for a condensed explanation.
 - **Center** — the live u/v profile with its ±1σ band, bottom-track points, the
   ship-ADCP constraint (white squares) when active, and the seabed line. The bar

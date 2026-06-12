@@ -28,8 +28,11 @@ class CastParams:
     edit_mask_up_bins: tuple[int, ...] = (1,)
     # extra down-looker near-field bins to NaN before super-ensembles, for a known
     # fixed-range target hung below the package (e.g. a corer on a short cable). 1-based
-    # like edit_mask_dn_bins. DEFAULT EMPTY -- opt in per cruise/station; on MORIA the
-    # preset sets (3, 4) (the 26 m + 34 m cells) for the monocorer block 03-28.
+    # like edit_mask_dn_bins. ALWAYS EMPTY unless the user opts in explicitly
+    # (--nearfield-dn-bins): no cruise preset sets it (user decision 2026-06-12 -- no
+    # silent station-specific edits). The nearfield_errvel_ratio QA WARN detects the
+    # situation and its note suggests the bins to mask (on the MORIA monocorer block
+    # 03-28 excl 07-10 that was bins 3,4 = the 26 m + 34 m cells).
     edit_nearfield_dn_bins: tuple[int, ...] = ()
     edit_sidelobes: bool = True     # legacy edit_data: drop side-lobe-contaminated cells
                                     # (surface up-reflection + range-dependent seabed wedge)
@@ -76,37 +79,15 @@ class CastParams:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def _station_number(station: str) -> int | None:
-    """Leading cast number of a station label (``MORIA-25f`` -> 25); None if none."""
-    digits = ""
-    for ch in station.split("-")[-1]:
-        if ch.isdigit():
-            digits += ch
-        elif digits:
-            break
-    return int(digits) if digits else None
-
-
-# MORIA monocorer block: a high-reflectivity corer hung ~25-28 m below the package
-# contaminated the down-looker 26 m + 34 m cells on the operational block 03-28 --
-# EXCEPT 07/08/09/10, verified clean in the raw-echo scan (2026-06-09).
-_MORIA_NEARFIELD_CLEAN = {7, 8, 9, 10}
-
-
-def _moria_nearfield(station: str) -> tuple[int, ...]:
-    n = _station_number(station)
-    if n is not None and 3 <= n <= 28 and n not in _MORIA_NEARFIELD_CLEAN:
-        return (3, 4)
-    return ()
-
-
 def _moria_params(station: str) -> CastParams:
     """Effective LDEO_IX parameters shared by the clean MORIA dual-head casts.
 
     These are the values resolved from ``set_cast_params.m`` merged over ``default.m``;
     none of the per-station override branches apply to the clean casts 05–08, so they
-    share one parameter set (see docs/VALIDATION_MORIA05.md §3). The only per-station
-    layer here is the monocorer near-field mask (:func:`_moria_nearfield`).
+    share one parameter set (see docs/VALIDATION_MORIA05.md §3). The monocorer
+    near-field mask is NOT applied here -- masking is always the user's explicit call
+    (``--nearfield-dn-bins``); the QA hung-device WARN points at the affected casts
+    (MORIA block 03-28 excl 07-10: bins 3,4).
     """
     return CastParams(
         station=station,
@@ -115,7 +96,6 @@ def _moria_params(station: str) -> CastParams:
         dz=8.0,
         edit_mask_dn_bins=(1,),
         edit_mask_up_bins=(1,),
-        edit_nearfield_dn_bins=_moria_nearfield(station),
         cut=7.0,
         pglim=50.0,
         elim=0.2,

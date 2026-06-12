@@ -53,10 +53,11 @@ options:
                         any up-looker (cross-check / single-instrument casts);
                         acquisition QA still covers both heads
   --nearfield-dn-bins LIST
-                        override the down-looker near-field device mask: comma
-                        1-based bins (e.g. 3,4) or 'none' to disable; default:
-                        the cruise preset (MORIA sets 3,4 on the monocorer
-                        block 03-28)
+                        mask down-looker near-field bins (a device hung below
+                        the package): comma 1-based bins, e.g. 3,4. Default:
+                        NO mask -- always your explicit call; the
+                        nearfield_errvel_ratio WARN names the bins to use when
+                        a hung device is detected
   --dzbelow METERS      below-/near-seabed cell rejection margin [m] (default:
                         cruise preset, 16 = 2 legacy bins). Raise on shallow
                         shelf casts when a bottom-depth underestimate lets a

@@ -235,8 +235,13 @@ def config_from_body(body: dict, state: StudioState) -> SessionConfig:
     sources = state.sadcp_sources
     key = body.get("sadcp_key")
     if key is None:                              # legacy boolean protocol
-        use = bool(body.get("use_sadcp", bool(sources)))
-        sadcp = next(iter(sources.values())) if use and sources else None
+        # default ON only when a source was explicitly flagged: discovered ("found")
+        # products are offered, never silently activated
+        flagged = [c for k, c in sources.items()
+                   if state.sadcp_origin.get(k, "flag") != "found"]
+        use = bool(body.get("use_sadcp", bool(flagged)))
+        pick = flagged[0] if flagged else (next(iter(sources.values())) if sources else None)
+        sadcp = pick if use else None
     elif key == "off":
         sadcp = None
     elif key in sources:
@@ -265,7 +270,11 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         t0 = time.perf_counter()
         result = ses.solve(cfg)
         ms = (time.perf_counter() - t0) * 1000.0
-        stages = dict(ses._prepared[cfg.edit].timings)
+        prep = ses._prepared[cfg.edit]
+        stages = dict(prep.timings)
+        dn = prep.dh.down                        # bins <-> metres for the near-field UI
+        dn_geom = {"first_m": round(float(prep.dh.bin_depth(dn)[0]), 2),
+                   "cell_m": float(dn.cell_m), "n_bins": int(dn.n_cells)}
         if cfg.solve.drot is not None:
             drot, drot_source = cfg.solve.drot, "explicit"
         else:
@@ -292,6 +301,7 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         "bt": bt,
         "sadcp": sadcp,
         "sadcp_bins": 0 if result.sadcp is None else int(result.sadcp.shape[0]),
+        "dn_geom": dn_geom,
         "panels": _available_panels(result),
         "cli": cfg.to_cli(label, **state.cli_context()),
     }

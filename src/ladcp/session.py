@@ -75,7 +75,8 @@ class EditConfig:
 
     ``None`` means "use the cruise preset" (see :class:`ladcp.config.CastParams`), so
     the resolved value can differ per cruise/station while the *configuration* stays
-    portable.
+    portable. No preset sets ``nearfield_dn_bins`` -- the mask is always the user's
+    explicit call -- so for it ``None`` and ``()`` both mean "no mask".
     """
 
     down_only: bool = False                              # --down-only

@@ -61,9 +61,11 @@
 
     <div class="sect">
       <h3>Editing <span class="rebuild-note">rebuilds ~1.5 s</span></h3>
+      <div class="tgl" id="tgl-nearfield" data-tip="Mask down-looker near-field cells for a device hung below the package (e.g. a corer on a short cable). OFF by default — nothing is ever masked unless you opt in; the QA hung-device WARN names the bins when it detects one."><span class="sw"></span>near-field mask<small>--nearfield-dn-bins</small></div>
       <div class="field">
-        <label for="in-nearfield" data-tip="1-based down-looker bins blanked at edit time, e.g. 3,4 to mask a near-field target such as a device hung below the rosette; 'none' disables the cruise preset.">near-field bins <small>e.g. 3,4 · none</small></label>
-        <input id="in-nearfield" type="text" placeholder="cruise preset" spellcheck="false">
+        <label for="in-nearfield" data-tip="Which cells to mask: 1-based bins (3,4) or a depth range below the package (22-38m) converted with this station's real bin geometry. The note below always shows both readings.">bins or range <small>e.g. 3,4 · 22-38m</small></label>
+        <input id="in-nearfield" type="text" placeholder="3,4 or 22-38m" spellcheck="false" disabled>
+        <small class="src-note" id="nearfield-note">no mask</small>
       </div>
       <div class="field">
         <label for="in-dzbelow" data-tip="Seabed cut margin [m] (legacy p.dzbelow, default 16 = 2×bin size): the flat cut on cells near the detected bottom when the range-dependent side-lobe wedge is disabled.">dzbelow <small>[m] seabed margin</small></label>

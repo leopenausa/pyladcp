@@ -98,9 +98,10 @@ legacy bins; go 24–32). Costs you the deepest bin or two; that's the trade.
 Symptom: `nearfield_errvel_ratio` WARN across consecutive stations; a band of bad
 velocity at fixed *range* (not fixed depth) in the down-looker.
 Recipe: mask the affected bins — `--nearfield-dn-bins 3,4` (1-based; geometry: each
-bin is `dz` metres, so a target at ~26 m with 8-m bins sits in bins 3–4). Register it
-in the cruise preset if the device was there for a whole leg. `none` clears a preset's
-mask for casts where the device was absent.
+bin is `dz` metres, so a target at ~26 m with 8-m bins sits in bins 3–4; the WARN's
+note names the hot bin for you). The mask is always your explicit call — no cruise
+preset applies it silently — so for a whole-leg device, pass the flag for the whole
+batch run. In Studio, the near-field toggle takes bins or a depth range (`22-38m`).
 
 **Weakly constrained shallow cast (`shallow_cast` WARN).**
 Don't fight it with weights — a 90-m cast yields a handful of super-ensembles and no
