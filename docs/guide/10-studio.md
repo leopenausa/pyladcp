@@ -70,8 +70,9 @@ ladcp-studio --help
   ship-ADCP constraint (white squares) when active, and the seabed line. The bar
   underneath always shows **the `ladcp-qa` command that reproduces the current
   state** — `copy CLI` puts it on the clipboard.
-- **Right** — pinned solutions and the QA panels (the same matplotlib figures as the
-  `ladcp-qa` report, rendered on demand for the *current* configuration).
+- **Right** — your manual edits (the brush journal, see below), pinned solutions, and
+  the QA panels (the same matplotlib figures as the `ladcp-qa` report, rendered on
+  demand for the *current* configuration).
 
 ## The two speeds
 
@@ -80,10 +81,58 @@ Controls are grouped by what they cost, and the grouping is the point:
 | tier | controls | cost |
 |---|---|---|
 | solve | solver, `botfac`, `barofac`, `smoofac`, `sadcpfac`, SADCP toggle | **~30 ms** — drag and watch |
-| build | `--down-only`, near-field bins, `dzbelow` | **~1.5 s** — rebuilds editing → bottom detect → super-ensembles |
+| build | `--down-only`, near-field bins, `dzbelow`, each brush edit | **~1.5 s** — rebuilds editing → bottom detect → super-ensembles |
 
 The first visit to a station pays raw ingest + build once (~1–2 s on the test
 station); after that, weight changes are effectively instantaneous.
+
+## Brush editing — the ✏ edit view
+
+The `profile | ✏ edit` switch above the plot opens the **raw ensemble matrix**: one
+head at a time (DN/UP), every bin against every ensemble of the cast, coloured by
+**|error velocity|** (the natural QC field on earth-coordinate data) or **echo
+amplitude** (where a hung device or interference is often most obvious to the eye).
+Grey cells are what the automatic screening already removed — you never need to
+re-flag those, and a brush can never bring them back.
+
+![the brush edit view: the hung-device band flagged on bins 3–4](assets/studio_edit_moria80.png)
+
+**Drag a rectangle** over bad cells to flag them. The rectangle becomes an entry in
+the **Manual edits** card, the profile re-solves immediately (a brush is a build-tier
+change, ~1.5 s), and the ✕ on an entry removes it again — the solution returns
+**bit-identically** to what it was. A brush wider than ~90 % of the cast snaps to
+*all ensembles*, i.e. a pure bin mask: flagging bins 3–4 across the whole cast is
+exactly `--nearfield-dn-bins 3,4`, bit for bit.
+
+This is the tool for the artifacts thresholds can't catch: a rigid device hung below
+the package reads the *package's* motion at |errvel| well under the 0.2 m/s edit
+limit (chapter 6) — coherent, biased, and invisible to a global threshold, but
+obvious as a fixed-range band on this screen. Same for wake bursts while the ship
+holds station, or another instrument's interference stripes.
+
+### The journal: recorded, replayable, never silent
+
+Brush edits persist to a per-station **journal** —
+`<root>/.ladcp_edits/<station>.json` — and that file is the single source of truth:
+it records each rectangle's geometry, your note, and fingerprints of the raw files
+it was drawn on. Nothing else changes on disk, and nothing is ever applied silently:
+
+- In batch, the journal applies **only** with an explicit flag —
+  `ladcp-qa 80 --edits .ladcp_edits/` (the directory, per-station lookup) or
+  `--edits .ladcp_edits/MORIA-80.json` (one file, one station). The CLI bar shows
+  this command whenever edits are active, and the replay is bit-identical to the
+  Studio solution.
+- When edits **are** applied, the QA report says so (`manual_edits`, with the count
+  and the journal path). When a journal exists but you ran *without* `--edits`, the
+  report WARNs (`manual_edits_unapplied`) and names the exact flag to add — the same
+  actionable-note contract as the hung-device detector.
+- If a raw file changes after the edits were drawn (re-downloaded, re-cut), the
+  fingerprints catch it: the journal is refused with a clear message rather than
+  letting the rectangles land on the wrong cells. Delete or re-create the journal.
+
+Hand-edit the JSON if you like (notes, removing entries) — bins are 1-based per
+head, ensembles 0-based; anything the loader doesn't fully understand is refused,
+never skipped.
 
 ## A workflow that works
 
@@ -99,6 +148,6 @@ station); after that, weight changes are effectively instantaneous.
    output).
 
 Studio is a *diagnosis* tool: it holds one station at a time (the three most recent
-stay cached) and writes nothing to disk by itself. Production outputs — reports,
-exports, the cruise aggregate — stay with `ladcp-qa` (chapter 5), fed by the command
-line Studio hands you.
+stay cached) and the only thing it writes to disk is the edit journal you brush.
+Production outputs — reports, exports, the cruise aggregate — stay with `ladcp-qa`
+(chapter 5), fed by the command line Studio hands you.
