@@ -210,3 +210,8 @@ input[type=range]::-moz-range-thumb{width:9px;height:9px;border-radius:50%;
 .badge.hidden{display:none}
 .edit-item .lbl{font-size:11px}
 .stale-warn{color:#ffb3b3}
+
+/* edit-view inset: live vs no-edits baseline */
+#edit-inset{position:absolute;top:10px;right:10px;left:auto;bottom:auto;
+  width:190px;height:265px;border-radius:8px;pointer-events:none;cursor:default}
+.ro-wide{grid-column:1 / -1}
