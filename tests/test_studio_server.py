@@ -479,7 +479,8 @@ def test_edits_skeleton_then_crud(eclient, estate):
     assert r.status_code == 200
     p = r.json()
     assert p["stale"] is None and _entries(p) == []
-    assert p["path"].endswith(".ladcp_edits/MORIA-80.json")
+    jp = pathlib.Path(p["path"])                         # separator-agnostic (Windows CI)
+    assert jp.name == "MORIA-80.json" and jp.parent.name == ".ladcp_edits"
 
     r = eclient.post("/api/station/MORIA-80/edits",
                      json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
@@ -511,7 +512,7 @@ def test_solve_attaches_journal_and_delete_restores(eclient):
 
     p, edited_u = _profile(eclient)
     assert p["manual_edits"] == 1
-    assert "--edits" in p["cli"] and ".ladcp_edits/MORIA-80.json" in p["cli"]
+    assert "--edits" in p["cli"] and "MORIA-80.json" in p["cli"]
     assert not np.array_equal(edited_u, base_u, equal_nan=True)
 
     assert eclient.delete(f"/api/station/MORIA-80/edits/{eid}").status_code == 200
@@ -638,7 +639,8 @@ def test_journal_uses_canonical_label_not_launch_token(tmp_path):
     assert r.status_code == 200
     p = r.json()
     assert p["station"] == "MORIA-80"
-    assert p["path"].endswith(".ladcp_edits/MORIA-80.json")
+    jp = pathlib.Path(p["path"])                         # separator-agnostic (Windows CI)
+    assert jp.name == "MORIA-80.json" and jp.parent.name == ".ladcp_edits"
     assert (root / ".ladcp_edits" / "MORIA-80.json").is_file()
     assert p["journal"]["station"] == "MORIA-80"
 
