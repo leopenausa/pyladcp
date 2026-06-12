@@ -40,25 +40,72 @@ log = logging.getLogger("ladcp.qa")
 
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
              solver="inverse", sadcp_opts=None, cruise="MORIA", formats=None, ctd_utc=None,
-             inv_opts=None):
+             inv_opts=None, edits=None, hint_root=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
     Returns ``(status, export)``: ``status`` is the QA verdict string (``"ok"``/``"warn"``/
     ``"fail"``) and ``export`` is a :class:`~ladcp.export.StationExport` when a velocity
     solution was produced (``None`` for acquisition-only stations).
+
+    ``edits`` is the ``--edits`` value (journal file or ``.ladcp_edits`` dir) and is the
+    single application point for manual edits -- resolved, staleness-verified and turned
+    into params here. ``hint_root`` (discovery mode only) lets the no-``--edits`` path
+    WARN about an existing unapplied journal.
     """
+    from ..edits import journal_path, load_journal, manual_flags, resolve_edits_arg, verify_journal
+    journal = jpath = None
+    if edits:
+        jpath = resolve_edits_arg(edits, station)
+        if jpath is not None:
+            journal = load_journal(jpath)
+            if journal.station != station:
+                raise ValueError(f"--edits: {jpath} is the journal for station "
+                                 f"{journal.station!r}, not {station!r}")
+            verify_journal(journal, jpath, down, up)
+
     overrides = {}
     if inv_opts and inv_opts.get("nearfield_dn_bins") is not None:
         overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
     if inv_opts and inv_opts.get("dzbelow") is not None:
         overrides["dzbelow"] = inv_opts["dzbelow"]
+    if journal is not None and journal.entries:
+        overrides["edit_manual_flags"] = manual_flags(journal)
     params = resolve_params(cruise, station, overrides=overrides or None)
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
+    if journal is not None:                     # second staleness tripwire, post-ingest
+        for name, head in (("down", dh.down), ("up", dh.up)):
+            fp = journal.raw.get(name) or {}
+            if head is not None and fp.get("n_ens") is not None \
+                    and fp["n_ens"] != head.n_ens:
+                raise ValueError(f"--edits: {jpath}: the {name} file now holds "
+                                 f"{head.n_ens} ensembles (journal recorded "
+                                 f"{fp['n_ens']}); delete or re-create the journal")
     ctd = read_ctd_cnv(ctd_path, params=params) if ctd_path else None
     if ctd is not None and ctd_utc and "utc_start" not in ctd.meta:
         ctd.meta["utc_start"] = ctd_utc         # index cast-start UTC -> sync prior
     qc = assess(dh, ctd=ctd)
+
+    from ..models import Metric, Status
+    if journal is not None and journal.entries:
+        n_dn = sum(1 for e in journal.entries if e["head"] == "down")
+        qc.add(Metric("manual_edits", journal.n_entries, "", Status.OK,
+                      source_stage="qa.edits",
+                      note=f"{journal.n_entries} manual rectangle(s) replayed from "
+                           f"{jpath} (down: {n_dn}, up: {journal.n_entries - n_dn})"))
+    elif not edits and hint_root:
+        cand = journal_path(hint_root, station)
+        if cand.is_file():
+            try:
+                unapplied = load_journal(cand)
+            except ValueError:
+                unapplied = None
+            if unapplied is not None and unapplied.entries:
+                qc.add(Metric("manual_edits_unapplied", unapplied.n_entries, "",
+                              Status.WARN, source_stage="qa.edits",
+                              note=f"a manual edit journal with {unapplied.n_entries} "
+                                   f"rectangle(s) exists but was NOT applied; re-run "
+                                   f"with --edits {cand}"))
 
     st_dir = Path(outdir) / "stations" / station
     fig_dir = st_dir / "figures"
@@ -327,7 +374,8 @@ def _pool_task(task: dict) -> tuple[int, str, str, object, str]:
                                   task["make_plots"], drot=task["drot"],
                                   solver=task["solver"], sadcp_opts=task["sadcp_opts"],
                                   cruise=task["cruise"], formats=task["formats"],
-                                  ctd_utc=sf.ctd_utc, inv_opts=task["inv_opts"])
+                                  ctd_utc=sf.ctd_utc, inv_opts=task["inv_opts"],
+                                  edits=task.get("edits"), hint_root=task["root"])
     except (Exception, SystemExit) as e:           # one bad cast must not abort the batch
         lg.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
     bh.flush()
@@ -408,6 +456,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "package): comma 1-based bins, e.g. 3,4. Default: NO mask -- "
                          "always your explicit call; the nearfield_errvel_ratio WARN "
                          "names the bins to use when a hung device is detected")
+    ap.add_argument("--edits", metavar="PATH", default=None,
+                    help="replay manual brush edits from a Studio journal: a "
+                         "<station>.json file (single station) or the .ladcp_edits "
+                         "directory (per-station files looked up by label; a station "
+                         "without a journal runs unedited). Edits are NEVER applied "
+                         "without this flag; the applied set is listed in the QA "
+                         "report")
     # ship-ADCP (SADCP) constraint (inverse solver only)
     ap.add_argument("--dzbelow", type=float, default=None, metavar="METERS",
                     help="below-/near-seabed cell rejection margin [m] (default: cruise "
@@ -507,6 +562,15 @@ def main(argv: list[str] | None = None) -> int:
         if not plan:
             ap.error("give one or more station ids, use --all-stations, or --down/--up/--ctd")
 
+    if args.edits:
+        edits_p = Path(args.edits)
+        if not edits_p.exists():
+            ap.error(f"--edits: {edits_p} does not exist (give a journal file or the "
+                     ".ladcp_edits directory)")
+        if edits_p.is_file() and len(plan) > 1:
+            ap.error("--edits FILE applies to a single station; give the .ladcp_edits "
+                     "directory to batch-replay per-station journals")
+
     n = len(plan)
     console_detail = args.verbose or n <= 1            # stream detail for -v or a single cast
     logfile = None if args.no_log else (args.log or str(Path(args.outdir) / "ladcp-qa.log"))
@@ -531,7 +595,7 @@ def main(argv: list[str] | None = None) -> int:
                         from_hex=args.from_hex, ctd_cache=args.ctd_cache,
                         outdir=args.outdir, make_plots=not args.no_plots, drot=args.drot,
                         solver=args.solver, sadcp_opts=sadcp_opts, formats=formats,
-                        inv_opts=inv_opts)
+                        inv_opts=inv_opts, edits=args.edits)
             # each worker must NOT spin up a full BLAS thread pool: 6 workers x 16
             # OpenBLAS threads thrash the cores (measured 3x slower on the 40-cast
             # MORIA soak: 465s vs 148s). The pool itself is the parallelism, so
@@ -586,7 +650,9 @@ def main(argv: list[str] | None = None) -> int:
                                               not args.no_plots, drot=args.drot,
                                               solver=args.solver, sadcp_opts=sadcp_opts,
                                               cruise=args.cruise, formats=formats,
-                                              ctd_utc=ctd_utc, inv_opts=inv_opts)
+                                              ctd_utc=ctd_utc, inv_opts=inv_opts,
+                                              edits=args.edits,
+                                              hint_root=None if explicit else str(root))
                     if export is not None:
                         exports.append(export)
                 except (Exception, SystemExit) as e:   # one bad cast must not abort the batch

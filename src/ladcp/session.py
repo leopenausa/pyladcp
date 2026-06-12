@@ -82,6 +82,10 @@ class EditConfig:
     down_only: bool = False                              # --down-only
     nearfield_dn_bins: tuple[int, ...] | None = None     # --nearfield-dn-bins; () = disable
     dzbelow: float | None = None                         # --dzbelow [m]
+    # manual journal rectangles (ladcp.edits.manual_flags): canonical geometry-only
+    # tuples, so a note edit in the journal never invalidates the prepare cache.
+    # Reproducing this on the CLI needs the journal file: to_cli(edits=<path>).
+    manual_flags: tuple[tuple[str, int, int, int, int], ...] = ()  # --edits
 
 
 @dataclass(frozen=True)
@@ -166,8 +170,17 @@ class SessionConfig:
         """
         nearfield = (None if args.nearfield_dn_bins is None
                      else parse_nearfield(args.nearfield_dn_bins))
+        # --edits FILE attaches the journal's geometry here (launch-time validation);
+        # a DIRECTORY is resolved per station later (qa.cli._run_one), so it cannot
+        # be represented in a single SessionConfig and stays empty here.
+        manual: tuple = ()
+        edits_arg = getattr(args, "edits", None)
+        if edits_arg and Path(edits_arg).is_file():
+            from .edits import load_journal
+            from .edits import manual_flags as _manual_flags
+            manual = _manual_flags(load_journal(edits_arg))
         edit = EditConfig(down_only=args.down_only, nearfield_dn_bins=nearfield,
-                          dzbelow=args.dzbelow)
+                          dzbelow=args.dzbelow, manual_flags=manual)
         sadcp = None
         if args.sadcp:
             sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
@@ -180,7 +193,8 @@ class SessionConfig:
         return cls(edit=edit, sadcp=sadcp, solve=solve)
 
     def to_cli(self, station: str, *, root: str | None = None, cruise: str | None = None,
-               index: str | None = None, outdir: str | None = None) -> str:
+               index: str | None = None, outdir: str | None = None,
+               edits: str | None = None) -> str:
         """The minimal ``ladcp-qa`` command line reproducing this configuration.
 
         Only non-default options are emitted, so the command reads like a recipe.
@@ -188,7 +202,15 @@ class SessionConfig:
         mode; the explicit ``--down/--up/--ctd`` mode is out of scope here), and the
         discovery context (``root``/``cruise``/``index``/``outdir``) is included only
         when given.
+
+        Manual edits live in a journal file, not in flags, so a config carrying
+        ``edit.manual_flags`` needs its journal path (``edits=``) to be expressible
+        -- and the emitted command reproduces this solve only while that journal is
+        unchanged (its staleness fingerprints make any divergence detectable).
         """
+        if self.edit.manual_flags and edits is None:
+            raise ValueError("this configuration carries manual edits; pass "
+                             "edits=<journal path> so the command can reproduce them")
         parts = ["ladcp-qa", shlex.quote(station)]
 
         def opt(flag: str, value) -> None:
@@ -224,6 +246,8 @@ class SessionConfig:
                 ",".join(str(b) for b in e.nearfield_dn_bins) or "none")
         if e.dzbelow is not None:
             opt("--dzbelow", e.dzbelow)
+        if edits is not None:
+            opt("--edits", edits)
 
         sa = self.sadcp
         if sa is not None:
@@ -296,6 +320,8 @@ def resolve_declination(lat: float, lon: float, when, *, logger=None) -> tuple[f
 # ---------------------------------------------------------------------------
 # StationSession: the staged solve cache (Studio PR 2)
 
+_PREPARED_MAX = 4               # _Prepared entries kept per session (each ~100 MB)
+
 
 @dataclass
 class _Prepared:
@@ -342,7 +368,12 @@ class StationSession:
         self.cruise = cruise
         self.ctd_utc = ctd_utc                  # index cast-start UTC -> sync prior
         self.dz = float(dz)
-        self._prepared: dict[EditConfig, _Prepared] = {}
+        # LRU-capped: every distinct EditConfig (e.g. each brush stroke in the Studio
+        # Edit view) holds its own ~100 MB _Prepared; unbounded, a long manual-editing
+        # session would exhaust RAM. 4 keeps the common toggles (baseline/down-only/
+        # current-edits) warm.
+        from collections import OrderedDict
+        self._prepared: OrderedDict[EditConfig, _Prepared] = OrderedDict()
         self._sadcp_profiles: dict[SadcpConfig, np.ndarray | None] = {}
         self._declination: tuple[float, str] | None = None
 
@@ -357,6 +388,7 @@ class StationSession:
         edit = edit if edit is not None else EditConfig()
         prep = self._prepared.get(edit)
         if prep is not None:
+            self._prepared.move_to_end(edit)
             return prep
         if self.ctd_path is None:
             raise ValueError("StationSession needs a CTD time series to solve "
@@ -379,6 +411,8 @@ class StationSession:
             overrides["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
         if edit.dzbelow is not None:
             overrides["dzbelow"] = edit.dzbelow
+        if edit.manual_flags:
+            overrides["edit_manual_flags"] = edit.manual_flags
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)
         dh = tick("load_ms", load_dualhead, self.down, self.up,
                   station=self.station, params=params)
@@ -396,6 +430,8 @@ class StationSession:
                          when=dh.down.time[0].astype("datetime64[s]").item(),
                          timings=timings)
         self._prepared[edit] = prep
+        while len(self._prepared) > _PREPARED_MAX:
+            self._prepared.popitem(last=False)
         return prep
 
     # -- hot tier --------------------------------------------------------------------
@@ -439,7 +475,7 @@ class StationSession:
 def _check_field_coverage() -> None:   # pragma: no cover - import-time self-check
     """Guard against silently adding config fields ``to_cli`` does not emit."""
     known = {
-        EditConfig: {"down_only", "nearfield_dn_bins", "dzbelow"},
+        EditConfig: {"down_only", "nearfield_dn_bins", "dzbelow", "manual_flags"},
         SadcpConfig: {"folder", "source", "filetype", "xducer", "timeoff", "nav",
                       "reingest"},
         SolveConfig: {"solver", "drot", "botfac", "barofac", "smoofac", "sadcpfac"},

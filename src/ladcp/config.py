@@ -34,6 +34,11 @@ class CastParams:
     # situation and its note suggests the bins to mask (on the MORIA monocorer block
     # 03-28 excl 07-10 that was bins 3,4 = the 26 m + 34 m cells).
     edit_nearfield_dn_bins: tuple[int, ...] = ()
+    # manual brush edits replayed from a journal (ladcp.edits): rectangles
+    # (head, bin_first, bin_last, ens_first, ens_last); bins 1-based inclusive per
+    # head, ensembles 0-based inclusive in joint-trimmed space. NEVER set by a
+    # preset -- only --edits / the Studio brush populate it.
+    edit_manual_flags: tuple[tuple[str, int, int, int, int], ...] = ()
     edit_sidelobes: bool = True     # legacy edit_data: drop side-lobe-contaminated cells
                                     # (surface up-reflection + range-dependent seabed wedge)
                                     # from the velocity weights (golden default on)

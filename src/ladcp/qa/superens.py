@@ -394,6 +394,8 @@ def _edit_velocity_mask(
     izm_full: np.ndarray, z: np.ndarray, merged: MergedHeads, *,
     zbottom: float | None, edit_sidelobes: bool, dzbelow: float,
     mask_dn_bins: tuple[int, ...], mask_up_bins: tuple[int, ...],
+    manual_flags: tuple[tuple[str, int, int, int, int], ...] = (),
+    manual_counts: dict | None = None,
 ) -> np.ndarray:
     """Legacy ``edit_data.m`` velocity edits as a boolean ``[nbin, nens]`` removal mask.
 
@@ -404,6 +406,12 @@ def _edit_velocity_mask(
 
     * **bin masking** -- the nearest-transducer bin of each head (ringing), rows ``izu[0]`` /
       ``izd[0]`` (legacy ``edit_mask_up_bins`` / ``edit_mask_dn_bins``, golden = bin 1).
+    * **manual rectangles** (``manual_flags``, replayed from an edit journal --
+      see :mod:`ladcp.edits`): per-head ``(head, bin_first, bin_last, ens_first,
+      ens_last)`` cells, bins 1-based inclusive, ensembles 0-based inclusive in the
+      joint-trimmed space. Clamped here; out-of-range (or up-head on a single-head
+      merge) is a no-op. ``manual_counts``, when given, receives the per-head number
+      of finite velocity cells the rectangles *newly* removed.
     * **side-lobe contamination** (``edit_sidelobes``): cells the slanted-beam side lobe reaches
       a hard boundary through -- near the surface (up-looker reflection,
       ``< (1-cos B_up) z + 1.5*cell``) and, *range-dependently*, near the seabed (down-looker,
@@ -449,6 +457,23 @@ def _edit_velocity_mask(
         else:
             sl_bot = zbottom - margin
         mask |= fin & (izm_full > sl_bot)
+
+    # manual journal rectangles last, so the per-head "newly removed" count is
+    # honest w.r.t. every automatic edit above (the OR is order-independent).
+    # Head bin b (1-based) -> merged row izd[b-1]/izu[b-1], the rows ordered
+    # near->far exactly like the bin masks; columns are already joint-trimmed.
+    for head, b0, b1, e0, e1 in manual_flags:
+        rows_idx = merged.izd if head == "down" else merged.izu
+        lo, hi = max(int(b0), 1), min(int(b1), rows_idx.size)
+        c0, c1 = max(int(e0), 0), min(int(e1), nens - 1)
+        if rows_idx.size == 0 or lo > hi or c0 > c1:
+            continue                                    # clamped away: silent no-op
+        sub = np.ix_(rows_idx[lo - 1:hi], np.arange(c0, c1 + 1))
+        if manual_counts is not None:
+            newly = ~mask[sub] & np.isfinite(merged.ru[sub])
+            key = f"manual_removed_{head}"
+            manual_counts[key] = manual_counts.get(key, 0) + int(newly.sum())
+        mask[sub] = True
     return mask
 
 
@@ -457,7 +482,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
                         zbottom: float | None = None, dzbelow: float = 16.0,
                         edit_sidelobes: bool = True,
                         mask_dn_bins: tuple[int, ...] = (1,),
-                        mask_up_bins: tuple[int, ...] = (1,)) -> SuperEns:
+                        mask_up_bins: tuple[int, ...] = (1,),
+                        manual_flags: tuple[tuple[str, int, int, int, int], ...] = ()
+                        ) -> SuperEns:
     """Average merged ensembles into super-ensembles (``prepinv.m`` STEP 10).
 
     Groups by depth travel (:func:`group_ensembles`), removes the reference velocity
@@ -484,9 +511,11 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
                    dtype=int)
     izm_full = z[None, :] + merged.offset[:, None]
 
+    manual_counts: dict = {}
     edit = _edit_velocity_mask(izm_full, z, merged, zbottom=zbottom,
                                edit_sidelobes=edit_sidelobes, dzbelow=dzbelow,
-                               mask_dn_bins=mask_dn_bins, mask_up_bins=mask_up_bins)
+                               mask_dn_bins=mask_dn_bins, mask_up_bins=mask_up_bins,
+                               manual_flags=manual_flags, manual_counts=manual_counts)
     n_edit = int(edit.sum())
     ru_src = np.where(edit, np.nan, merged.ru)
     rv_src = np.where(edit, np.nan, merged.rv)
@@ -518,6 +547,9 @@ def form_superensembles(merged: MergedHeads, z: np.ndarray, *, avdz: float = 8.0
 
     counts = _outlier(ru, rv, rw, weight, izd, izu, nblock=_SE_OUTLIER_NBLOCK)
     counts["edit_removed"] = n_edit
+    if manual_flags:                       # keys present only when a journal applied
+        counts["manual_removed_down"] = manual_counts.get("manual_removed_down", 0)
+        counts["manual_removed_up"] = manual_counts.get("manual_removed_up", 0)
 
     with _quiet_nan():
         warnings.simplefilter("ignore", RuntimeWarning)
