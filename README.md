@@ -56,7 +56,7 @@ real-data fixture — one full MORIA station, raw PD0s + CTD + the legacy golden
 
 ```bash
 pip install pytest
-pytest -q          # expect ~246 passed, ~21 skipped (skips = local-only cruise data)
+pytest -q          # expect ~320 passed, ~22 skipped (skips = local-only cruise data)
 ```
 
 If you prefer conda, `conda env create -f environment.yml` builds a ready `pyladcp` env
