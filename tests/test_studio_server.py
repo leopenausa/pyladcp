@@ -436,3 +436,217 @@ def test_found_sources_are_never_the_default_constraint(tmp_path):
     assert cfg.sadcp is None                     # offered in the dropdown, not active
     on = config_from_body({"use_sadcp": True}, st)   # explicit boolean = explicit intent
     assert on.sadcp is not None
+
+
+# ---------------------------------------------------------------------------
+# brush Edit view: journal CRUD, heatmaps, attach-everywhere (PR: studio-brush-edit)
+
+
+@pytest.fixture(scope="module")
+def estate(tmp_path_factory):
+    """A state with a writable root, so journals live under <root>/.ladcp_edits."""
+    root = tmp_path_factory.mktemp("edit_root")
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    return StudioState(["MORIA-80"], root=str(root), cruise="MORIA",
+                       explicit={"MORIA-80": entry})
+
+
+@pytest.fixture(scope="module")
+def eclient(estate):
+    return TestClient(create_app(estate))
+
+
+def _entries(payload):
+    return payload["journal"]["entries"]
+
+
+def _profile(client, body=None):
+    r = client.post("/api/station/MORIA-80/solve",
+                    json=dict({"solve": {"drot": -9.878379}}, **(body or {})))
+    assert r.status_code == 200
+    p = r.json()
+    u = np.array([np.nan if x is None else x for x in p["profile"]["u"]])
+    return p, u
+
+
+def _clear_journal(client):
+    for e in list(_entries(client.get("/api/station/MORIA-80/edits").json())):
+        assert client.delete(f"/api/station/MORIA-80/edits/{e['id']}").status_code == 200
+
+
+def test_edits_skeleton_then_crud(eclient, estate):
+    r = eclient.get("/api/station/MORIA-80/edits")
+    assert r.status_code == 200
+    p = r.json()
+    assert p["stale"] is None and _entries(p) == []
+    jp = pathlib.Path(p["path"])                         # separator-agnostic (Windows CI)
+    assert jp.name == "MORIA-80.json" and jp.parent.name == ".ladcp_edits"
+
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
+                                     "ens_first": 0, "ens_last": 10 ** 9,
+                                     "view": "errvel", "note": "band"}})
+    assert r.status_code == 200
+    p = r.json()
+    [e] = _entries(p)
+    assert e["id"] == 1 and e["head"] == "down"
+    assert e["ens_last"] < 10 ** 9                       # clamped to the real cast
+    assert p["journal"]["joint_n_ens"] == e["ens_last"] + 1
+    assert p["journal"]["raw"]["down"]["n_ens"] >= p["journal"]["joint_n_ens"]
+    assert pathlib.Path(p["path"]).is_file()             # persisted (atomically)
+
+    assert eclient.delete("/api/station/MORIA-80/edits/99").status_code == 404
+    r = eclient.delete("/api/station/MORIA-80/edits/1")
+    assert r.status_code == 200 and _entries(r.json()) == []
+
+
+def test_solve_attaches_journal_and_delete_restores(eclient):
+    _clear_journal(eclient)
+    _, base_u = _profile(eclient)
+
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
+                                     "ens_first": 0, "ens_last": 10 ** 9}})
+    assert r.status_code == 200
+    eid = _entries(r.json())[0]["id"]
+
+    p, edited_u = _profile(eclient)
+    assert p["manual_edits"] == 1
+    assert "--edits" in p["cli"] and "MORIA-80.json" in p["cli"]
+    assert not np.array_equal(edited_u, base_u, equal_nan=True)
+
+    assert eclient.delete(f"/api/station/MORIA-80/edits/{eid}").status_code == 200
+    p, restored_u = _profile(eclient)
+    assert p["manual_edits"] == 0 and "--edits" not in p["cli"]
+    np.testing.assert_array_equal(restored_u, base_u)
+
+
+def test_edited_cli_roundtrips_through_from_args(eclient, estate):
+    _clear_journal(eclient)
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
+                                     "ens_first": 5, "ens_last": 400}})
+    assert r.status_code == 200
+    p, _u = _profile(eclient)
+    args = build_parser().parse_args(shlex.split(p["cli"])[1:])
+    cfg = SessionConfig.from_args(args)
+    assert cfg.edit.manual_flags == (("down", 3, 4, 5, 400),)
+    _clear_journal(eclient)
+
+
+def test_heatmap_views_cached_and_brush_does_not_invalidate(eclient):
+    _clear_journal(eclient)
+    pngs = {}
+    for view in ("errvel", "echo"):
+        r = eclient.post(f"/api/station/MORIA-80/edit/heatmap/down/{view}", json={})
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+        assert r.content[:4] == b"\x89PNG"
+        pngs[view] = r.content
+    assert pngs["errvel"] != pngs["echo"]
+
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 2, "bin_last": 2,
+                                     "ens_first": 0, "ens_last": 50}})
+    assert r.status_code == 200
+    r = eclient.post("/api/station/MORIA-80/edit/heatmap/down/errvel", json={})
+    assert r.status_code == 200 and r.content == pngs["errvel"]   # base PNG untouched
+    _clear_journal(eclient)
+
+    assert eclient.post("/api/station/MORIA-80/edit/heatmap/down/nope",
+                        json={}).status_code == 404
+    assert eclient.post("/api/station/MORIA-80/edit/heatmap/sideways/errvel",
+                        json={}).status_code == 404
+    r = eclient.post("/api/station/MORIA-80/edit/heatmap/up/errvel",
+                     json={"edit": {"down_only": True}})
+    assert r.status_code == 404                          # no up-looker in this config
+
+
+def test_edit_meta_geometry(eclient):
+    r = eclient.post("/api/station/MORIA-80/edit/meta", json={})
+    assert r.status_code == 200
+    m = r.json()
+    assert m["joint_n_ens"] > 0
+    assert m["heads"]["down"]["n_bins"] > 0 and m["heads"]["down"]["cell_m"] > 0
+    assert m["heads"]["up"]["n_bins"] > 0
+    assert m["journal"]["station"] == "MORIA-80"
+    r = eclient.post("/api/station/MORIA-80/edit/meta",
+                     json={"edit": {"down_only": True}})
+    assert r.json()["heads"]["up"] is None
+
+
+def test_post_clamps_to_grid_and_rejects_bad_entries(eclient):
+    _clear_journal(eclient)
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 1, "bin_last": 999,
+                                     "ens_first": -5, "ens_last": 7}})
+    assert r.status_code == 200
+    [e] = _entries(r.json())
+    meta = eclient.post("/api/station/MORIA-80/edit/meta", json={}).json()
+    assert e["bin_last"] == meta["heads"]["down"]["n_bins"]
+    assert e["ens_first"] == 0
+    _clear_journal(eclient)
+
+    assert eclient.post("/api/station/MORIA-80/edits",
+                        json={"entry": {"head": "sideways", "bin_first": 1,
+                                        "bin_last": 1, "ens_first": 0,
+                                        "ens_last": 1}}).status_code == 400
+    assert eclient.post("/api/station/MORIA-80/edits",
+                        json={"entry": {"head": "down"}}).status_code == 400
+    assert eclient.post(
+        "/api/station/MORIA-80/edits",
+        json={"entry": {"head": "down", "bin_first": 5, "bin_last": 3,
+                        "ens_first": 0, "ens_last": 1}}).status_code == 400
+
+
+def test_stale_journal_blocks_solve_and_post(eclient, estate):
+    import json as _json
+    _clear_journal(eclient)
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 3, "bin_last": 3,
+                                     "ens_first": 0, "ens_last": 9}})
+    assert r.status_code == 200
+    jp = pathlib.Path(r.json()["path"])
+    doc = _json.loads(jp.read_text())
+    doc["raw"]["down"]["size"] = 1                       # the raw file "changed"
+    jp.write_text(_json.dumps(doc), encoding="utf-8")
+
+    r = eclient.post("/api/station/MORIA-80/solve", json={})
+    assert r.status_code == 400 and "delete or re-create" in r.json()["detail"]
+    r = eclient.post("/api/station/MORIA-80/edits",
+                     json={"entry": {"head": "down", "bin_first": 4, "bin_last": 4,
+                                     "ens_first": 0, "ens_last": 9}})
+    assert r.status_code == 400                          # never grow a stale journal
+    assert eclient.get("/api/station/MORIA-80/edits").json()["stale"] is not None
+
+    jp.unlink()                                          # the documented remedy
+    assert eclient.post("/api/station/MORIA-80/solve", json={}).status_code == 200
+
+
+def test_journal_uses_canonical_label_not_launch_token(tmp_path):
+    """Launched as `ladcp-studio 80`, the journal must be MORIA-80.json: the emitted
+    `ladcp-qa --edits` replay resolves the canonical label through discovery, and its
+    station-match guard rejects a token-named journal (caught live, 2026-06-12)."""
+    import shutil
+    root = tmp_path / "root"
+    for sub in ("LADCP", "CTD"):
+        shutil.copytree(GOOD / sub, root / sub)
+    st = StudioState(["80"], root=str(root), cruise="MORIA")
+    c = TestClient(create_app(st))
+    r = c.post("/api/station/80/edits",
+               json={"entry": {"head": "down", "bin_first": 3, "bin_last": 4,
+                               "ens_first": 0, "ens_last": 10 ** 9}})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["station"] == "MORIA-80"
+    jp = pathlib.Path(p["path"])                         # separator-agnostic (Windows CI)
+    assert jp.name == "MORIA-80.json" and jp.parent.name == ".ladcp_edits"
+    assert (root / ".ladcp_edits" / "MORIA-80.json").is_file()
+    assert p["journal"]["station"] == "MORIA-80"
+
+    solved = c.post("/api/station/80/solve", json={}).json()
+    assert solved["manual_edits"] == 1
+    assert "MORIA-80.json" in solved["cli"]
+    # the emitted command parses and carries the journal's geometry
+    args = build_parser().parse_args(shlex.split(solved["cli"])[1:])
+    assert SessionConfig.from_args(args).edit.manual_flags[0][:3] == ("down", 3, 4)

@@ -10,6 +10,14 @@ Endpoints (all JSON; profile arrays are NaN-sanitised to ``null`` for the browse
   command line that reproduces it.
 * ``POST /api/station/{label}/qa/{panel}`` -- one QA figure (the existing matplotlib
   panels: raw/depth/edit/velocity/weights/...) rendered as PNG for the posted config.
+* ``POST /api/station/{label}/edit/meta`` / ``edit/heatmap/{head}/{view}`` -- the brush
+  Edit view: grid geometry + the raw ensemble matrix (|errvel| or echo) as a full-bleed
+  PNG the client maps fractionally.
+* ``GET/POST/DELETE /api/station/{label}/edits[/{id}]`` -- the manual-edit journal
+  (``<root>/.ladcp_edits/<station>.json``). The journal is the single source of truth:
+  request bodies never carry rectangles; every config-consuming endpoint attaches the
+  journal's flags server-side, so Studio solves, QA panels and the emitted
+  ``ladcp-qa --edits`` command can never disagree.
 
 The static single-page UI (no build step) is served from ``static/`` at ``/``.
 """
@@ -33,6 +41,17 @@ try:                                  # optional extra: pip install 'pyladcp[gui
 except ImportError:                   # core install: module imports, create_app refuses
     FastAPI = HTTPException = Request = Response = StaticFiles = None
 
+from dataclasses import replace as _dc_replace
+
+from ..edits import (
+    Journal,
+    journal_path,
+    load_journal,
+    manual_flags,
+    new_journal,
+    save_journal,
+    verify_journal,
+)
 from ..session import (
     EditConfig,
     SadcpConfig,
@@ -191,6 +210,35 @@ class StudioState:
                 log.info("studio: evicted session %s (LRU cap %d)", old, MAX_SESSIONS)
         return ses
 
+    # -- manual-edit journals ---------------------------------------------------------
+    #
+    # Journals are keyed by the CANONICAL station label (ses.station, the label
+    # discovery resolves -- "MORIA-80"), never by the launch token ("80"): the
+    # emitted `ladcp-qa --edits` command replays through discovery, and its
+    # station-match guard would reject a token-named journal.
+
+    def edits_path(self, ses: StationSession) -> Path:
+        return journal_path(self.root, ses.station)
+
+    def load_edits(self, ses: StationSession) -> Journal | None:
+        """The station's journal, or ``None`` when no file exists (ValueError when
+        the file is unreadable/foreign -- mapped to HTTP 400 by the endpoints)."""
+        p = self.edits_path(ses)
+        return load_journal(p) if p.is_file() else None
+
+    def attach_edits(self, cfg: SessionConfig, ses: StationSession) -> SessionConfig:
+        """Return ``cfg`` with the journal's rectangles attached (verified fresh).
+
+        The journal is the single source of truth for manual edits -- the request
+        body never carries rectangles -- so every config-consuming endpoint MUST
+        route through here or its solve/PNG cache keys silently diverge.
+        """
+        j = self.load_edits(ses)
+        if j is None or not j.entries:
+            return cfg
+        verify_journal(j, self.edits_path(ses), ses.down, ses.up)
+        return _dc_replace(cfg, edit=_dc_replace(cfg.edit, manual_flags=manual_flags(j)))
+
     def cli_context(self) -> dict:
         """Non-default discovery args for :meth:`SessionConfig.to_cli` (minimal commands)."""
         ctx: dict = {}
@@ -289,6 +337,9 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         sa = np.asarray(result.sadcp, float)     # [m,4] rows: z, u, v, verr (true frame)
         sadcp = {"z": _arr(sa[:, 0]), "u": _arr(sa[:, 1]), "v": _arr(sa[:, 2]),
                  "verr": _arr(sa[:, 3])}
+    cli_kwargs = state.cli_context()
+    if cfg.edit.manual_flags:                    # journal-backed solve: --edits replays it
+        cli_kwargs["edits"] = str(state.edits_path(ses))
     return {
         "station": label,
         "solver": cfg.solve.solver,
@@ -302,8 +353,9 @@ def solve_payload(state: StudioState, label: str, cfg: SessionConfig) -> dict:
         "sadcp": sadcp,
         "sadcp_bins": 0 if result.sadcp is None else int(result.sadcp.shape[0]),
         "dn_geom": dn_geom,
+        "manual_edits": len(cfg.edit.manual_flags),
         "panels": _available_panels(result),
-        "cli": cfg.to_cli(label, **state.cli_context()),
+        "cli": cfg.to_cli(label, **cli_kwargs),
     }
 
 
@@ -390,6 +442,87 @@ def render_panel(state: StudioState, label: str, panel: str,
 
 
 # ---------------------------------------------------------------------------
+# Edit view: grid geometry + the raw ensemble matrix as a full-bleed heatmap PNG
+
+HEAT_VIEWS = ("errvel", "echo")
+
+
+def _joint_n(dh) -> int:
+    """Ensembles the merge will use: joint-trimmed when both heads are present."""
+    return dh.down.n_ens if dh.up is None else min(dh.down.n_ens, dh.up.n_ens)
+
+
+def _head_geom(dh, head) -> dict | None:
+    h = dh.down if head == "down" else dh.up
+    if h is None:
+        return None
+    return {"n_bins": int(h.n_cells), "cell_m": float(h.cell_m),
+            "first_m": round(float(dh.bin_depth(h)[0]), 2)}
+
+
+def render_heatmap(state: StudioState, label: str, head: str, view: str,
+                   cfg: SessionConfig) -> bytes:
+    """The per-head raw matrix (bins x joint-trimmed ensembles) as a PNG.
+
+    Full-bleed (no axes/margins): the client maps pixels to (ensemble, bin)
+    purely fractionally from ``edit/meta``. Auto-screened cells are dimmed so
+    the user sees what the pipeline already rejects. Cached with the manual
+    flags STRIPPED from the key -- a brush stroke never changes the base image
+    (rectangles draw client-side), so brushing stays snappy.
+    """
+    key = (label, "_heatmap", head, view, _dc_replace(cfg.edit, manual_flags=()))
+    cached = _PNG_CACHE.get(key)
+    if cached is not None:
+        _PNG_CACHE.move_to_end(key)
+        return cached
+
+    with state.lock_for(label):
+        ses = state.session(label)
+        prep = ses.prepare(cfg.edit)
+        dh = prep.dh
+        h = dh.down if head == "down" else dh.up
+        if h is None:
+            raise KeyError(f"no {head}-looker in this configuration")
+        n = _joint_n(dh)
+        if view == "errvel":
+            mat = np.abs(np.asarray(h.vel[3][:, :n], float))
+        elif view == "echo":
+            mat = np.nanmean(np.asarray(h.echo[:, :, :n], float), axis=0)
+        else:
+            raise KeyError(f"unknown heatmap view {view!r} (have: {', '.join(HEAT_VIEWS)})")
+        from ..qa.screen import screen
+        sr = screen(dh, prep.params)
+        good = sr.good_down if head == "down" else sr.good_up
+        auto = None if good is None else ~good[:, :n]
+
+    import io as _io
+    with _MPL_LOCK:
+        import matplotlib
+        matplotlib.use("Agg", force=False)
+        import matplotlib.pyplot as plt
+        fin = mat[np.isfinite(mat)]
+        vmin, vmax = (np.percentile(fin, [2, 98]) if fin.size else (0.0, 1.0))
+        fig = plt.figure(figsize=(10.0, 4.2), dpi=110)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_axis_off()
+        ax.imshow(mat, aspect="auto", origin="upper", interpolation="nearest",
+                  cmap="magma" if view == "errvel" else "viridis",
+                  vmin=vmin, vmax=vmax)
+        if auto is not None and auto.any():      # dim what auto-screening already removed
+            dim = np.zeros((*auto.shape, 4))
+            dim[auto] = (0.55, 0.58, 0.62, 0.75)
+            ax.imshow(dim, aspect="auto", origin="upper", interpolation="nearest")
+        buf = _io.BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+    png = buf.getvalue()
+    _PNG_CACHE[key] = png
+    while len(_PNG_CACHE) > _PNG_CACHE_MAX:
+        _PNG_CACHE.popitem(last=False)
+    return png
+
+
+# ---------------------------------------------------------------------------
 # app factory + entry point
 
 
@@ -429,14 +562,25 @@ def create_app(state: StudioState):
                                    "origin": state.sadcp_origin.get(k, "flag")}
                                   for k, c in state.sadcp_sources.items()]}
 
-    @app.post("/api/station/{label}/prepare")
-    async def prepare(label: str, request: Request) -> dict:
-        _check(label)
+    async def _body_config(label: str, request: Request) -> SessionConfig:
+        """Request JSON -> config WITH the station's journal attached.
+
+        Every config-consuming endpoint routes through here: the journal is the
+        single source of truth for manual edits, so a request body never carries
+        rectangles and no endpoint can solve/render a different edit set.
+        """
         body = await request.json() if int(request.headers.get("content-length") or 0) else {}
         try:
             cfg = config_from_body(body, state)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
+        with _data_errors():
+            return state.attach_edits(cfg, state.session(label))
+
+    @app.post("/api/station/{label}/prepare")
+    async def prepare(label: str, request: Request) -> dict:
+        _check(label)
+        cfg = await _body_config(label, request)
         with _data_errors(), state.lock_for(label):
             ses = state.session(label)
             cached = cfg.edit in ses._prepared
@@ -448,11 +592,7 @@ def create_app(state: StudioState):
     @app.post("/api/station/{label}/solve")
     async def solve(label: str, request: Request) -> dict:
         _check(label)
-        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
-        try:
-            cfg = config_from_body(body, state)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, str(e)) from None
+        cfg = await _body_config(label, request)
         with _data_errors():
             return solve_payload(state, label, cfg)
 
@@ -460,11 +600,7 @@ def create_app(state: StudioState):
     async def lad(label: str, request: Request) -> Response:
         """The current solution as an LDEO ``.lad`` text file (download)."""
         _check(label)
-        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
-        try:
-            cfg = config_from_body(body, state)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, str(e)) from None
+        cfg = await _body_config(label, request)
         import tempfile
 
         from ..qa.export import write_lad
@@ -487,17 +623,137 @@ def create_app(state: StudioState):
     @app.post("/api/station/{label}/qa/{panel}")
     async def qa_panel(label: str, panel: str, request: Request) -> Response:
         _check(label)
-        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
-        try:
-            cfg = config_from_body(body, state)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, str(e)) from None
+        cfg = await _body_config(label, request)
         try:
             with _data_errors():
                 png = render_panel(state, label, panel, cfg)
         except KeyError as e:
             raise HTTPException(404, str(e.args[0])) from None
         return Response(content=png, media_type="image/png")
+
+    # -- brush Edit view ---------------------------------------------------------
+
+    def _edits_payload(label: str) -> dict:
+        """Journal + freshness for the UI (skeleton when no file exists yet)."""
+        ses = state.session(label)
+        p = state.edits_path(ses)
+        j = state.load_edits(ses) or new_journal(ses.station)
+        stale = None
+        if j.entries:
+            try:
+                verify_journal(j, p, ses.down, ses.up)
+            except ValueError as e:
+                stale = str(e)
+        return {"station": ses.station, "path": str(p), "stale": stale,
+                "journal": j.to_dict()}
+
+    @app.post("/api/station/{label}/edit/meta")
+    async def edit_meta(label: str, request: Request) -> dict:
+        """Grid geometry for the Edit view: the client maps pixels fractionally."""
+        _check(label)
+        cfg = await _body_config(label, request)
+        with _data_errors(), state.lock_for(label):
+            ses = state.session(label)
+            prep = ses.prepare(cfg.edit)
+            dh = prep.dh
+            meta = {"station": label, "joint_n_ens": _joint_n(dh),
+                    "heads": {"down": _head_geom(dh, "down"),
+                              "up": _head_geom(dh, "up")}}
+        meta.update(_edits_payload(label))
+        return meta
+
+    @app.post("/api/station/{label}/edit/heatmap/{head}/{view}")
+    async def edit_heatmap(label: str, head: str, view: str,
+                           request: Request) -> Response:
+        _check(label)
+        if head not in ("down", "up"):
+            raise HTTPException(404, f"head must be 'down' or 'up', got {head!r}")
+        cfg = await _body_config(label, request)
+        try:
+            with _data_errors():
+                png = render_heatmap(state, label, head, view, cfg)
+        except KeyError as e:
+            raise HTTPException(404, str(e.args[0])) from None
+        return Response(content=png, media_type="image/png")
+
+    @app.get("/api/station/{label}/edits")
+    def edits_get(label: str) -> dict:
+        _check(label)
+        with _data_errors(), state.lock_for(label):
+            return _edits_payload(label)
+
+    @app.post("/api/station/{label}/edits")
+    async def edits_add(label: str, request: Request) -> dict:
+        """Append one rectangle (creating the journal on first use) and persist.
+
+        The body carries the entry plus the usual config keys (for ``down_only``
+        geometry); rectangles are clamped to the station's real grid here so a
+        persisted journal is in-range by construction.
+        """
+        _check(label)
+        body = await request.json() if int(request.headers.get("content-length") or 0) else {}
+        entry = dict(body.get("entry") or {})
+        try:
+            cfg = config_from_body(body, state)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
+        with _data_errors(), state.lock_for(label):
+            ses = state.session(label)
+            prep = ses.prepare(cfg.edit)
+            dh = prep.dh
+            head = entry.get("head")
+            geom = _head_geom(dh, head) if head in ("down", "up") else None
+            if geom is None:
+                raise HTTPException(
+                    400, f"entry head must be a present head, got {entry.get('head')!r}")
+            n = _joint_n(dh)
+            try:
+                b0 = max(int(entry["bin_first"]), 1)
+                b1 = min(int(entry["bin_last"]), geom["n_bins"])
+                e0 = max(int(entry["ens_first"]), 0)
+                e1 = min(int(entry["ens_last"]), n - 1)
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(
+                    400, "entry needs integer bin_first/bin_last/ens_first/ens_last") \
+                    from None
+            if b0 > b1 or e0 > e1:
+                raise HTTPException(400, "rectangle is empty after clamping to the grid")
+            p = state.edits_path(ses)
+            j = state.load_edits(ses) or new_journal(ses.station)
+            if j.entries:                         # never grow a stale journal
+                verify_journal(j, p, ses.down, ses.up)
+            from datetime import datetime, timezone
+            j.entries.append({
+                "id": j.next_id, "kind": "rect", "head": head,
+                "bin_first": b0, "bin_last": b1, "ens_first": e0, "ens_last": e1,
+                "view": str(entry.get("view", "")), "note": str(entry.get("note", "")),
+                "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+            j.next_id += 1
+            for name, hh, path in (("down", dh.down, ses.down), ("up", dh.up, ses.up)):
+                if path is None:
+                    continue
+                fp = dict(j.raw.get(name) or {})
+                fp["file"] = Path(path).name
+                fp["size"] = Path(path).stat().st_size
+                if hh is not None:                # n_ens only when this head is loaded
+                    fp["n_ens"] = int(hh.n_ens)
+                j.raw[name] = fp
+            if dh.up is not None or ses.up is None:
+                j.joint_n_ens = n                 # down_only never records a false joint
+            save_journal(j, p)
+            return _edits_payload(label)
+
+    @app.delete("/api/station/{label}/edits/{entry_id}")
+    def edits_delete(label: str, entry_id: int) -> dict:
+        _check(label)
+        with _data_errors(), state.lock_for(label):
+            ses = state.session(label)
+            j = state.load_edits(ses)
+            if j is None or not any(e["id"] == entry_id for e in j.entries):
+                raise HTTPException(404, f"no edit #{entry_id} in {label}'s journal")
+            j.entries = [e for e in j.entries if e["id"] != entry_id]
+            save_journal(j, state.edits_path(ses))
+            return _edits_payload(label)
 
     static = Path(__file__).parent / "static"
     app.mount("/", StaticFiles(directory=str(static), html=True), name="static")
