@@ -358,7 +358,9 @@ def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
         dzbelow=getattr(params, "dzbelow", 16.0) if params is not None else 16.0,
         edit_sidelobes=getattr(params, "edit_sidelobes", True) if params is not None else True,
         mask_dn_bins=mask_dn,
-        mask_up_bins=getattr(params, "edit_mask_up_bins", (1,)) if params is not None else (1,))
+        mask_up_bins=getattr(params, "edit_mask_up_bins", (1,)) if params is not None else (1,),
+        manual_flags=tuple(getattr(params, "edit_manual_flags", ()) or ())
+        if params is not None else ())
     zmax = sync.maxdepth if np.isfinite(sync.maxdepth) else float(np.nanmax(se.izm))
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom
 
