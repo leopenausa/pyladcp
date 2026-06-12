@@ -42,14 +42,16 @@ ladcp-studio 80 --sadcp "$B/sADCP/DATA" \
 the folder doesn't directly hold the `.STA` files, the error tells you which subfolder
 does.
 
-`--sadcp-codas` (repeatable) adds CODAS-processed products (chapter 8 / the CODAS
-guide) to a **source dropdown** in the Constraints section, so you can switch the
-constraint between the raw averages and any processed product per solve — pin one,
-switch, and the Δ-strip shows what the processing chain is worth at this station.
-Each choice is still a single `ladcp-qa` command (`--sadcp <path> --sadcp-source
-codas`), shown in the CLI bar as always. If products exist under the conventional
-`<root>/codas/` but you didn't pass any, launch prints which ones it found — nothing
-is ever fed to a solve implicitly. The full flag list:
+The **SADCP constraint toggle** turns the ship-ADCP rows on and off; the **source
+dropdown** under it picks which product feeds them. It lists every `--sadcp` folder
+(repeatable — e.g. the 75 and 150 kHz instruments), every `--sadcp-codas` product
+(chapter 8 / the CODAS guide), and any CODAS products **found automatically** under
+the conventional `<root>/codas/` — those are marked *(found)* and never become the
+default constraint; selecting one is your explicit choice. Pin a solution, switch
+the source, and the Δ-strip shows what the instrument or the processing chain is
+worth at this station. Each choice is still a single `ladcp-qa` command
+(`--sadcp <path> [--sadcp-source codas]`), shown in the CLI bar as always. The
+full flag list:
 
 <!-- guide-test -->
 ```bash

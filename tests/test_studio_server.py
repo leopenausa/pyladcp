@@ -368,3 +368,51 @@ def test_launch_missing_root_gets_a_hint(tmp_path, capsys):
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "station '80'" in err and "pass --root <cruise folder>" in err
+
+
+# ------------------------------------------------- toggle + multi-source dropdown
+
+def test_two_raw_sources_get_folder_labels(tmp_path):
+    from ladcp.session import SadcpConfig
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    st = StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                     sadcp=[SadcpConfig(folder="sADCP/sadcp_75/DATA"),
+                            SadcpConfig(folder="sADCP/sadcp_150/DATA")])
+    info = TestClient(create_app(st)).get("/api/stations").json()
+    assert [s["key"] for s in info["sadcp_sources"]] == ["sadcp_75", "sadcp_150"]
+    assert all(s["origin"] == "flag" for s in info["sadcp_sources"])
+
+
+def test_found_products_are_marked(tmp_path):
+    from ladcp.session import SadcpConfig
+    entry = StationEntry(label="MORIA-80", down=str(DOWN), up=str(UP), ctd=str(CTD))
+    st = StudioState(["MORIA-80"], cruise="MORIA", explicit={"MORIA-80": entry},
+                     sadcp=SadcpConfig(folder="sADCP/DATA"),
+                     sadcp_found=[SadcpConfig(folder=str(tmp_path / "os75nb_enr"),
+                                              source="codas")])
+    info = TestClient(create_app(st)).get("/api/stations").json()
+    assert [(s["key"], s["origin"]) for s in info["sadcp_sources"]] == \
+        [("raw", "flag"), ("os75nb_enr", "found")]
+
+
+def test_merge_discovered_codas_dedupes_flagged(tmp_path):
+    from ladcp.session import SadcpConfig
+    from ladcp.studio.server import merge_discovered_codas
+    base = tmp_path / "codas"
+    for tree in ("os150nb_enr", "os75nb_enr"):
+        (base / tree / "contour").mkdir(parents=True)
+        (base / tree / "contour" / f"{tree.split('_')[0]}.nc").write_bytes(b"")
+    flagged = [SadcpConfig(folder=str(base / "os150nb_enr"), source="codas")]
+    merged = merge_discovered_codas(tmp_path, flagged)
+    assert len(merged) == 2                       # flagged + the one genuinely new
+    assert merged[0] is flagged[0]
+    assert merged[1].folder.endswith("os75nb_enr")
+    # no codas/ at all: flagged pass through untouched
+    assert merge_discovered_codas(tmp_path / "elsewhere", flagged) == flagged
+
+
+def test_raw_label_skips_generic_data_dir():
+    from ladcp.studio.server import raw_label
+    assert raw_label("sADCP/sadcp_75/DATA") == "sadcp_75"
+    assert raw_label("sADCP/sadcp_150") == "sadcp_150"
+    assert raw_label("DATA") == "raw"
