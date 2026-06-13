@@ -59,6 +59,7 @@ CONFIGS = [
     SessionConfig(edit=EditConfig(down_only=True)),
     SessionConfig(edit=EditConfig(nearfield_dn_bins=(3, 4), dzbelow=24.0)),
     SessionConfig(edit=EditConfig(nearfield_dn_bins=())),          # explicit 'none'
+    SessionConfig(edit=EditConfig(soundcorr=False)),               # --no-soundcorr
     SessionConfig(sadcp=SadcpConfig(folder="sADCP/OS150")),
     SessionConfig(sadcp=SadcpConfig(folder="sADCP/OS150", source="codas",
                                     filetype="LTA", xducer=7.0, timeoff=42.5,
@@ -90,7 +91,8 @@ def test_roundtrip_with_context():
 def test_inv_opts_shape_default():
     assert SessionConfig().inv_opts() == {
         "botfac": 1.0, "barofac": 1.0, "smoofac": 0.0,
-        "down_only": False, "nearfield_dn_bins": None, "dzbelow": None}
+        "down_only": False, "nearfield_dn_bins": None, "dzbelow": None,
+        "soundcorr": True}
 
 
 def test_inv_opts_from_args():
@@ -99,7 +101,8 @@ def test_inv_opts_from_args():
          "--nearfield-dn-bins", "3,4", "--dzbelow", "24"])
     assert SessionConfig.from_args(args).inv_opts() == {
         "botfac": 0.5, "barofac": 1.0, "smoofac": 0.1,
-        "down_only": True, "nearfield_dn_bins": (3, 4), "dzbelow": 24.0}
+        "down_only": True, "nearfield_dn_bins": (3, 4), "dzbelow": 24.0,
+        "soundcorr": True}
 
 
 def test_sadcp_opts_none_without_sadcp():

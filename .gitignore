@@ -59,3 +59,6 @@ guide/__pycache__/
 CCC_ladcp_test/
 quick_run.log
 wetransfer_*/
+
+# deep legacy-vs-pyladcp audit workspace (JSONs, evidence, PDF report) -- local only
+legacy_audit_work/
