@@ -12,15 +12,16 @@ usage: ladcp-qa [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                 [-o OUTDIR] [--no-plots] [--drot DROT]
                 [--solver {shear,inverse}] [--botfac BOTFAC]
                 [--barofac BAROFAC] [--smoofac SMOOFAC] [--down-only]
-                [--nearfield-dn-bins LIST] [--edits PATH] [--dzbelow METERS]
-                [--sadcp PATH] [--sadcp-source {vmdas,codas}]
-                [--sadcpfac SADCPFAC] [--sadcp-filetype {STA,LTA}]
-                [--sadcp-xducer SADCP_XDUCER] [--sadcp-reingest]
-                [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
-                [--down DOWN] [--up UP] [--ctd CTD] [--from-hex]
-                [--ctd-cache CTD_CACHE] [--station STATION] [--no-export]
-                [--formats FORMATS] [--all-stations] [--cruise-export] [-v]
-                [--log FILE] [--no-log] [--no-progress] [-j N]
+                [--nearfield-dn-bins LIST] [--edits PATH] [--no-soundcorr]
+                [--dzbelow METERS] [--sadcp PATH]
+                [--sadcp-source {vmdas,codas}] [--sadcpfac SADCPFAC]
+                [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
+                [--sadcp-reingest] [--sadcp-timeoff SECONDS|auto]
+                [--sadcp-nav PATH] [--down DOWN] [--up UP] [--ctd CTD]
+                [--from-hex] [--ctd-cache CTD_CACHE] [--station STATION]
+                [--no-export] [--formats FORMATS] [--all-stations]
+                [--cruise-export] [-v] [--log FILE] [--no-log] [--no-progress]
+                [-j N]
                 [stations ...]
 
 LADCP acquisition quality assessment
@@ -64,6 +65,10 @@ options:
                         label; a station without a journal runs unedited).
                         Edits are NEVER applied without this flag; the applied
                         set is listed in the QA report
+  --no-soundcorr        disable the sound-speed correction of water velocities
+                        (legacy p.soundcorr, ON by default): rescales ru/rv/rw
+                        per ensemble by c_in-situ/c_firmware before super-
+                        ensembles
   --dzbelow METERS      below-/near-seabed cell rejection margin [m] (default:
                         cruise preset, 16 = 2 legacy bins). Raise on shallow
                         shelf casts when a bottom-depth underestimate lets a
