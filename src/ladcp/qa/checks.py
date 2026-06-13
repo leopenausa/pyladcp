@@ -85,6 +85,23 @@ def consistency_checks(r: VelocityResult) -> list[Metric]:
                 source_stage="qa.checks",
                 note=f"RMS(LADCP − ship-ADCP) over shared depths, {len(r.sadcp)} bins"))
 
+    # bottom-track vs solution consistency (legacy checkbtrk): the BT measures the package
+    # velocity near the seabed; if it disagrees with what the inverse solved for the package,
+    # the BT was untrustworthy. The solve already dropped the worst rows and re-solved (2-pass);
+    # this surfaces the pre-discard bias and how many rows were removed.
+    bc = r.bt_consistency
+    if bc is not None:
+        ubias, vbias, n_bt, n_drop = bc
+        bias = float(np.hypot(ubias, vbias))
+        status = Status.WARN if (n_drop > 0 or bias > 0.1) else Status.OK
+        out.append(Metric(
+            "bottom_track_solution_consistency", round(bias, 3), "m/s", status,
+            source_stage="qa.checks",
+            note=(f"BT vs solved package velocity: bias u {ubias:+.3f} v {vbias:+.3f} m/s over "
+                  f"{n_bt} BT super-ens; "
+                  + (f"{n_drop} dropped as inconsistent and the inverse re-solved"
+                     if n_drop else "all consistent"))))
+
     # shear-vs-inverse disagreement (legacy getshear2.m:143-158): the inverse and shear
     # method are independent estimators of the baroclinic shear; legacy WARNs (and has
     # already inflated the delivered uerr) when they disagree by more than 1.5x the formal

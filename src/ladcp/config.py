@@ -54,6 +54,12 @@ class CastParams:
     # bottom track: 0 off, 1/2/3 modes per legacy getbtrack
     btrk_mode: int = 3
 
+    # bottom-track vs solution consistency (legacy checkbtrk + STEP-12 re-form): max anomaly
+    # [m/s] between a BT super-ensemble and the first solution's package velocity before that
+    # BT is dropped and the inverse re-solved. Guards shallow casts where few BT
+    # super-ensembles (50-300 m above seabed) can over-pull the barotropic reference. 0 = off.
+    bt_consistency_max: float = 0.05
+
     # super-ensemble outlier removal (legacy ps.outlier; process_cast STEP 11 lanarrow):
     # number of 1%-worst-residual rejection passes. 0 disables (single solve).
     outlier: float = 1.0

@@ -19,7 +19,7 @@ corr 0.98 (u) / 0.97 (v), RMS ~0.03 / 0.015 m/s.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -130,6 +130,11 @@ class VelocityProfile:
 # the upper water column was never sampled (ADCP began mid-descent on a fragmented cast) and
 # must stay NaN rather than be padded with a fake constant velocity.
 _SURFACE_FILL_MAX = 250.0
+
+# Max bottom-track-vs-solution anomaly (m/s) a BT super-ensemble may carry before it is
+# dropped and the inverse re-solved (legacy checkbtrk consistency). Tuned on FDCCC t98-01
+# (anomaly ~5.5 cm/s, dropped) vs MORIA-80 (~2 cm/s, kept). Override via CastParams.
+_BT_CONSISTENCY_MAX = 0.05
 
 
 def velocity_profile(se: SuperEns, *, dz: float = 8.0, drot: float = 0.0,
@@ -404,6 +409,39 @@ def _shear_inverse_consistency(vp: VelocityProfile,
     return uvds, mean_uerr
 
 
+def _bt_solution_anomaly(se: SuperEns, aux, z_mag: np.ndarray,
+                         u_mag: np.ndarray, v_mag: np.ndarray) -> np.ndarray:
+    """Per-super-ensemble bottom-track vs solved-package-velocity anomaly (legacy checkbtrk).
+
+    For each super-ensemble carrying a bottom track, the solved package velocity is
+    ``mean_cells(u_oce(cell depth) - se.ru(cell))`` (because ``se.ru = u_oce - u_package``);
+    the BT measures ``-bvel`` of the same package velocity. The complex anomaly
+    ``(-bvel) - u_pkg_solved`` is legacy's ``checkbtrk`` "bottom track against U_ctd solution"
+    consistency. Everything is in the magnetic frame (``bvel``/``se.ru`` are magnetic, so the
+    ocean profile is rotated back by ``-drot`` before being passed in). Returns a complex
+    ``[nse]`` array, NaN where no usable BT or too few cells.
+    """
+    nse = se.ru.shape[1]
+    anom = np.full(nse, np.nan, dtype=complex)
+    if aux.bvel is None:
+        return anom
+    with np.errstate(invalid="ignore"):
+        for i in range(nse):
+            if not np.isfinite(aux.bvel[i]):
+                continue
+            zc = se.izm[:, i]
+            ru = se.ru[:, i]
+            rv = se.rv[:, i]
+            good = np.isfinite(ru) & np.isfinite(rv) & np.isfinite(zc)
+            if good.sum() < 2:
+                continue
+            uo = np.interp(zc[good], z_mag, u_mag)
+            vo = np.interp(zc[good], z_mag, v_mag)
+            upkg = np.nanmean(uo - ru[good]) + 1j * np.nanmean(vo - rv[good])
+            anom[i] = (-aux.bvel[i]) - upkg
+    return anom
+
+
 def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     """Shared front end: sync + bottom detect + filtered bottom track + super-ensembles.
 
@@ -508,6 +546,9 @@ class VelocityResult:
     weights: ConstraintWeights | None = None  # inverse constraint weights -- Figure 12
     # legacy getshear2 shear-vs-inverse consistency (uvds, mean_uerr) m/s; inverse only
     shear_inverse: tuple[float, float] | None = None
+    # legacy checkbtrk BT-vs-solution consistency (u_bias, v_bias, n_bt, n_dropped) m/s;
+    # inverse only -- n_dropped BT super-ensembles were re-solved out as inconsistent
+    bt_consistency: tuple[float, float, int, int] | None = None
 
     @property
     def resid_rms(self) -> float:
@@ -725,6 +766,7 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     sp_mag = shear_method(se, dz=dz, drot=0.0, z=z)         # magnetic baroclinic shape
     bp_mag = bottom_referenced_profile(merged, bt, sync, zbottom=bottom.zbottom, dz=dz,
                                        drot=0.0)
+    bt_cons = None
     if solver == "inverse":
         from .inverse_full import inverse_inputs, invert
         # weightmin here is the inverse data cut on velerr/scatter (golden ps.weightmin
@@ -732,6 +774,43 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
         # inverse keeps its own legacy default rather than the shear-oriented argument.
         aux = inverse_inputs(se, bt=bt, sync=sync, ctd=ctd, ping_dt=_ping_dt(dh),
                              zbottom=bottom.zbottom)
+        # bottom-track consistency (legacy checkbtrk + STEP-12 re-form): a thin or biased
+        # bottom track -- typical on shallow casts, where few super-ensembles sit 50-300 m
+        # above the seabed -- can over-pull the barotropic reference. Judge each BT
+        # super-ensemble against an INDEPENDENT, BT-free reference solution (botfac=0, so the
+        # BT cannot have shaped what it is checked against), drop those whose package-velocity
+        # anomaly exceeds ``bt_consistency_max``, and solve with the survivors. Inert on
+        # well-sampled casts (BT agrees with the nav/baroclinic reference); on FDCCC t98-01 it
+        # removes a +2.7 cm/s ubar bias (-> legacy +15.3).
+        bt_cons_max = (getattr(params, "bt_consistency_max", _BT_CONSISTENCY_MAX)
+                       if params is not None else _BT_CONSISTENCY_MAX)
+        if botfac > 0 and aux.bvel is not None and bt_cons_max > 0:
+            ref_vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom,
+                            botfac=0.0, barofac=barofac, smoofac=smoofac,
+                            svel=sadcp, sadcpfac=sadcpfac if sadcp is not None else 0.0,
+                            diag={})
+            u_mag, v_mag = _uvrot(ref_vp.u, ref_vp.v, -drot)   # reference back to magnetic
+            anom = _bt_solution_anomaly(se, aux, ref_vp.z, u_mag, v_mag)
+            usable = np.isfinite(anom)
+            n_bt = int(usable.sum())
+            if n_bt:
+                ubias = float(np.nanmedian(np.real(anom[usable])))
+                vbias = float(np.nanmedian(np.imag(anom[usable])))
+                drop = usable & (np.abs(anom) > bt_cons_max)
+                n_drop = int(drop.sum())
+                # Only act when a MAJORITY of the BT disagrees with the independent reference
+                # -- i.e. the bottom track is *systematically* biased (the shallow-cast case).
+                # A few inconsistent rows on a well-sampled cast are outliers the inverse's own
+                # robust weighting already handles, so dropping them would needlessly perturb a
+                # good solution (keeps MORIA-80 bit-inert: 3/42 inconsistent -> no discard).
+                have_baro = barofac > 0 and np.isfinite(aux.uship)
+                if n_drop > 0.5 * n_bt and (n_drop < n_bt or have_baro):
+                    bvel2 = aux.bvel.copy()
+                    bvel2[drop] = np.nan
+                    aux = replace(aux, bvel=bvel2)
+                else:
+                    n_drop = 0
+                bt_cons = (ubias, vbias, n_bt, n_drop)
         inv_diag: dict = {}
         vp = invert(se, aux, dz=dz, drot=drot, zbottom=bottom.zbottom,
                     botfac=botfac, barofac=barofac, smoofac=smoofac,
@@ -769,7 +848,7 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
                           resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used,
                           btrk=btrk, err=err, drift=drift, weights=weights,
-                          shear_inverse=shear_inv)
+                          shear_inverse=shear_inv, bt_consistency=bt_cons)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:
