@@ -85,4 +85,22 @@ def consistency_checks(r: VelocityResult) -> list[Metric]:
                 source_stage="qa.checks",
                 note=f"RMS(LADCP − ship-ADCP) over shared depths, {len(r.sadcp)} bins"))
 
+    # shear-vs-inverse disagreement (legacy getshear2.m:143-158): the inverse and shear
+    # method are independent estimators of the baroclinic shear; legacy WARNs (and has
+    # already inflated the delivered uerr) when they disagree by more than 1.5x the formal
+    # error AND by more than 0.1 m/s in absolute terms.
+    si = r.shear_inverse
+    if si is not None:
+        uvds, mean_uerr = si
+        if np.isfinite(uvds) and np.isfinite(mean_uerr) and mean_uerr > 0:
+            status = Status.WARN if (uvds > 1.5 * mean_uerr and uvds > 0.1) else Status.OK
+            inflated = uvds > mean_uerr
+            out.append(Metric(
+                "shear_vs_inverse_consistency", round(uvds, 3), "m/s", status,
+                source_stage="qa.checks",
+                note=(f"baroclinic shear vs inverse disagree by {uvds:.3f} m/s "
+                      f"(mean formal err {mean_uerr:.3f} m/s"
+                      + ("; delivered uerr inflated to uvds/1.5 per legacy getshear2)"
+                         if inflated else "; within formal error)"))))
+
     return out

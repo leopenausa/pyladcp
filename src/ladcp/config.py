@@ -58,6 +58,17 @@ class CastParams:
     # number of 1%-worst-residual rejection passes. 0 disables (single solve).
     outlier: float = 1.0
 
+    # sound-speed correction of water velocities (legacy p.soundcorr, ON by default in
+    # prepinv.m:35). RDI computes Doppler velocity with the single fixed sound speed
+    # configured at deployment; when that value is wrong every velocity carries a
+    # proportional scale error. We rescale ru/rv/rw per ensemble by
+    # c_in-situ(package depth) / c_firmware before super-ensemble formation, mirroring
+    # prepinv.m:419-444. c_in-situ comes from the CTD (TEOS-10); with no CTD it falls
+    # back to the legacy estimate sounds(P, ADCP_temp, S=34.5). On MORIA-80 the firmware
+    # ran a fixed 1450 m/s vs an in-situ median 1492 -> a ~2.9 % scale (legacy audit
+    # 2026-06-13: this was the one material un-ported default-ON mechanism).
+    soundcorr: bool = True
+
     # timing / geomagnetism
     timoff: float = 0.0             # clock offset [decimal days]
     drot: float | None = None       # magnetic declination [deg]; None -> compute IGRF

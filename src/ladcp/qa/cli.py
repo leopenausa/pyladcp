@@ -68,6 +68,8 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
         overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
     if inv_opts and inv_opts.get("dzbelow") is not None:
         overrides["dzbelow"] = inv_opts["dzbelow"]
+    if inv_opts and inv_opts.get("soundcorr") is False:
+        overrides["soundcorr"] = False
     if journal is not None and journal.entries:
         overrides["edit_manual_flags"] = manual_flags(journal)
     params = resolve_params(cruise, station, overrides=overrides or None)
@@ -464,6 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "without this flag; the applied set is listed in the QA "
                          "report")
     # ship-ADCP (SADCP) constraint (inverse solver only)
+    ap.add_argument("--no-soundcorr", action="store_true",
+                    help="disable the sound-speed correction of water velocities "
+                         "(legacy p.soundcorr, ON by default): rescales ru/rv/rw per "
+                         "ensemble by c_in-situ/c_firmware before super-ensembles")
     ap.add_argument("--dzbelow", type=float, default=None, metavar="METERS",
                     help="below-/near-seabed cell rejection margin [m] (default: cruise "
                          "preset, 16 = 2 legacy bins). Raise on shallow shelf casts when "

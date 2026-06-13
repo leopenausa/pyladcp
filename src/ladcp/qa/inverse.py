@@ -316,6 +316,94 @@ def bottom_referenced_profile(merged, bt, sync, *, zbottom: float, dz: float = 8
     return BottomProfile(z=z, u=u, v=v, uerr=uerr, n=n)
 
 
+def _insitu_soundspeed(ctd: CTDTimeSeries, z_on_ping: np.ndarray) -> np.ndarray | None:
+    """In-situ sound speed [m/s] at each ping's package depth, from the CTD (TEOS-10).
+
+    Builds the CTD sound-speed-vs-depth profile (``gsw.sound_speed``) and interpolates
+    it to each ping's package depth ``z_on_ping`` (clamped to the profile range, like the
+    legacy package-depth ``d.ss``). Returns ``None`` when the CTD lacks the fields needed
+    (no salinity/pressure) -- the caller then skips the correction rather than guess.
+    """
+    if ctd is None or ctd.pressure is None or ctd.salinity is None:
+        return None
+    try:
+        import gsw
+    except Exception:
+        return None
+    P = np.asarray(ctd.pressure, float)
+    SP = np.asarray(ctd.salinity, float)
+    T = np.asarray(ctd.temperature, float)
+    if not np.any(np.isfinite(P) & np.isfinite(SP) & np.isfinite(T)):
+        return None
+    lat = float(np.nanmedian(ctd.lat)) if ctd.lat is not None else 0.0
+    lon = float(np.nanmedian(ctd.lon)) if ctd.lon is not None else 0.0
+    if not np.isfinite(lat):
+        lat = 0.0
+    if not np.isfinite(lon):
+        lon = 0.0
+    SA = gsw.SA_from_SP(SP, P, lon, lat)
+    CT = gsw.CT_from_t(SA, T, P)
+    c = gsw.sound_speed(SA, CT, P)
+    zc = -gsw.z_from_p(P, lat)                      # depth [m, +down]
+    ok = np.isfinite(zc) & np.isfinite(c)
+    if ok.sum() < 2:
+        return None
+    order = np.argsort(zc[ok])
+    zs, cs = zc[ok][order], c[ok][order]
+    zop = np.asarray(z_on_ping, float)
+    ci = np.interp(np.clip(zop, zs[0], zs[-1]), zs, cs)
+    ci[~np.isfinite(zop)] = float(np.nanmedian(cs))
+    return ci
+
+
+def _soundspeed_scale(dh: DualHead, ctd: CTDTimeSeries, sync, n: int) -> np.ndarray | None:
+    """Per-ensemble velocity scale ``c_in-situ(package depth) / c_firmware`` (legacy p.soundcorr).
+
+    RDI computes Doppler velocity with the single fixed sound speed configured at
+    deployment (PD0 variable-leader ``sound_speed``); when that value is wrong, every
+    velocity carries a proportional scale error. Legacy ``prepinv.m:419-444`` removes it by
+    multiplying ``ru/rv/rw`` per ensemble by the ratio of in-situ to firmware sound speed.
+    Returns an ``[n]`` array (1.0 where undeterminable, clamped to +-15 %), or ``None`` when
+    neither a firmware sound speed nor a CTD profile is available (correction skipped).
+    """
+    fw = np.asarray(dh.down.sound_speed, float)[:n]
+    if not np.any(np.isfinite(fw)):
+        return None
+    ci = _insitu_soundspeed(ctd, np.asarray(sync.z_on_ping, float)[:n])
+    if ci is None:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sc = ci / fw
+    sc[~np.isfinite(sc)] = 1.0
+    return np.clip(sc, 0.85, 1.15)
+
+
+def _shear_inverse_consistency(vp: VelocityProfile,
+                               shear: ShearProfile) -> tuple[float, float] | None:
+    """Disagreement between the inverse and shear baroclinic profiles (legacy getshear2.m:143-154).
+
+    ``uvds = sqrt(std(u_inv_baroclinic - u_shear)^2 + std(v...)^2)`` with both profiles
+    demeaned to their baroclinic part, paired with ``mean(uerr)``. The inverse and the shear
+    method are two independent estimators of the same baroclinic shear; when they disagree by
+    more than the formal error the solution is less trustworthy than ``uerr`` claims. Returns
+    ``(uvds, mean_uerr)`` in m/s, or ``None`` if the grids differ or are all-NaN.
+    """
+    u_inv = np.asarray(vp.u, float)
+    v_inv = np.asarray(vp.v, float)
+    u_sh = np.asarray(shear.u, float)
+    v_sh = np.asarray(shear.v, float)
+    if u_inv.shape != u_sh.shape or u_inv.size == 0:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        du = (u_inv - np.nanmean(u_inv)) - (u_sh - np.nanmean(u_sh))
+        dv = (v_inv - np.nanmean(v_inv)) - (v_sh - np.nanmean(v_sh))
+        uvds = float(np.sqrt(np.nanstd(du) ** 2 + np.nanstd(dv) ** 2))
+        mean_uerr = float(np.nanmean(vp.uerr)) if vp.uerr.size else np.nan
+    if not (np.isfinite(uvds) and np.isfinite(mean_uerr)):
+        return None
+    return uvds, mean_uerr
+
+
 def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     """Shared front end: sync + bottom detect + filtered bottom track + super-ensembles.
 
@@ -349,6 +437,19 @@ def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     # series) to that joint length so super-ensembles see matching arrays when the two heads
     # logged unequal counts (e.g. the fragmented MORIA-01..04 casts). No-op when equal.
     zop = sync.z_on_ping[:merged.ru.shape[1]]
+    # sound-speed correction (legacy p.soundcorr, ON by default in prepinv.m:35): rescale
+    # the water velocities per ensemble by c_in-situ(package depth)/c_firmware, mirroring
+    # prepinv.m:419-444. Applied AFTER bottom_track_velocity (legacy getbtrack precedes
+    # prepinv, so firmware/own BT keeps the firmware sound speed) and BEFORE
+    # form_superensembles. The same per-ensemble sc scales both heads (izd + izu), as in
+    # legacy. RDI Doppler velocity is proportional to the configured sound speed; a wrong
+    # fixed value (MORIA-80: 1450 m/s vs in-situ ~1492) biases every cell by that ratio.
+    if (getattr(params, "soundcorr", True) if params is not None else True):
+        sc = _soundspeed_scale(dh, ctd, sync, merged.ru.shape[1])
+        if sc is not None:
+            merged.ru = merged.ru * sc[None, :]
+            merged.rv = merged.rv * sc[None, :]
+            merged.rw = merged.rw * sc[None, :]
     # near-field device mask (e.g. MORIA monocorer) joins the ringing-bin mask
     mask_dn = (tuple(getattr(params, "edit_mask_dn_bins", (1,)))
                + tuple(getattr(params, "edit_nearfield_dn_bins", ()))) if params is not None \
@@ -405,6 +506,8 @@ class VelocityResult:
     err: ErrField | None = None     # per-cell misfit / velocity field -- Figure 3
     drift: DriftTrack | None = None  # ship + package horizontal tracks -- drift map
     weights: ConstraintWeights | None = None  # inverse constraint weights -- Figure 12
+    # legacy getshear2 shear-vs-inverse consistency (uvds, mean_uerr) m/s; inverse only
+    shear_inverse: tuple[float, float] | None = None
 
     @property
     def resid_rms(self) -> float:
@@ -643,6 +746,19 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
         weights = None
     bp = _rotate_bottom(bp_mag, drot) if bp_mag is not None else None
     shear = shear_method(se, dz=dz, drot=drot, z=z)        # true-frame baroclinic (Fig 3)
+    # shear-vs-inverse consistency (legacy getshear2.m:143-156): the inverse and the shear
+    # method are two estimators of the same baroclinic shape; if they disagree by more than
+    # the formal error, inflate the delivered uerr so its mean = uvds/1.5 (shape kept) and
+    # carry the metric so the QA report can WARN. Inverse solver only -- for solver="shear"
+    # vp IS the shear product, so there is nothing independent to compare against.
+    shear_inv = None
+    if solver == "inverse":
+        shear_inv = _shear_inverse_consistency(vp, shear)
+        if shear_inv is not None:
+            uvds, mean_uerr = shear_inv
+            if mean_uerr > 0 and uvds > mean_uerr and vp.uerr.size:
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    vp.uerr[:] = vp.uerr / mean_uerr * (uvds / 1.5)
     rz, ru, rv = _solution_residuals(se, sp_mag, drot=drot, weightmin=weightmin)
     sadcp_used = sadcp if (solver == "inverse" and sadcp is not None) else None
     from .bottom import btrk_diagnostics
@@ -652,7 +768,8 @@ def compute_velocity_full(dh: DualHead, ctd: CTDTimeSeries, *, drot: float = 0.0
     drift = _drift_track(se, ctd, vp, drot=drot, ping_dt=_ping_dt(dh))
     return VelocityResult(vp=vp, bp=bp, shear=shear, zbottom=bottom.zbottom,
                           resid_z=rz, resid_u=ru, resid_v=rv, sadcp=sadcp_used,
-                          btrk=btrk, err=err, drift=drift, weights=weights)
+                          btrk=btrk, err=err, drift=drift, weights=weights,
+                          shear_inverse=shear_inv)
 
 
 def _rotate_bottom(bp: BottomProfile, drot: float) -> BottomProfile:
