@@ -159,10 +159,12 @@ def test_bottom_track_reference_ubar(velocity_and_bottom):
     # Bottom-track reference -> small negative barotropic offset (golden ubar -0.065). Adding the
     # legacy medianan(na=0) reference (refmed) lands this compute_velocity_and_bottom path at
     # ubar ~ -0.036 -- an accepted small regression vs without refmed (-0.042, which beat the
-    # -0.041 package-return). The production compute_velocity_full inverse ubar (~-0.053) still
-    # improves toward golden. See memory ladcp-editing-rootcause-2026-06.
+    # -0.041 package-return). See memory ladcp-editing-rootcause-2026-06.
+    # 2026-06-12 (loadrdi wlim/vlim wired): the w-deviation + hspeed cell edits legacy always
+    # applied move this path to ubar ~ -0.063 -- right on the golden -0.065 (the production
+    # inverse lands at -0.0633 vs golden, residual 0.17 cm/s, u rms halved 1.32 -> 0.68 cm/s).
     vp, _, _, dr = velocity_and_bottom
-    assert -0.055 < vp.ubar < -0.02              # small & negative, in the golden ballpark
+    assert -0.075 < vp.ubar < -0.02              # small & negative, golden is -0.065
 
 
 def test_bottom_depth_detected(velocity_and_bottom):

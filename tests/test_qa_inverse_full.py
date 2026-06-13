@@ -109,10 +109,14 @@ def test_shear_path_unchanged(both_solvers):
     # on MORIA too, btrk_used=1). MORIA-80's RDI and own tracks differ ~1 cm/s, moving the
     # BT-referenced shear bias 0.031 -> 0.0397; the inverse (the product path) is golden-
     # validated unchanged by the tighter tests above.
+    # 2026-06-12 (loadrdi wlim/vlim wired): the missing legacy cell edits HALVE the shear
+    # rms/bias vs golden (u rms 3.97 -> 2.21, bias 3.78 -> 1.74 cm/s; ubar -2.73 -> -4.77
+    # toward golden -6.50) at a trivial shape-corr dip (0.9978 -> 0.9960) -- corr is
+    # scale-blind; rms/bias are the fidelity metrics here. Pins updated to the new state.
     out, _ = both_solvers
     _, s = out["shear"]
-    assert s["u"].corr > 0.997
-    assert s["u"].rms < 0.045
+    assert s["u"].corr > 0.995
+    assert s["u"].rms < 0.03
 
 
 def test_lainsadcp_weight_math():

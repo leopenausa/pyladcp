@@ -490,6 +490,14 @@ def bottom_track_velocity(dh: DualHead, merged, *, btrk_mode: int = 3,
     rdi = _rdi_bottom_track(dh, n) if btrk_mode in (1, 3) else None
     if rdi is not None:
         rvel, rw, rhbot = rdi
+        # NOTE (2026-06-12, wlim/vlim wiring): legacy loadrdi ALSO applies its
+        # wlim/vlim edits to the firmware track (loadrdi.m:219-225, 267-271).
+        # That edit is deliberately NOT ported: our BT chain differs from
+        # legacy's (RDI-preferred source, the 50-300 m height gates, _boutlier),
+        # and layering the wb-edit on top double-screens it -- validated on
+        # FDCCC1 it biased shallow casts (t1-99 u rms vs legacy 2.8 -> 9.3 cm/s
+        # in isolation) while adding nothing on the MORIA-80 golden (0.64 vs
+        # 0.68). The water-cell wlim/vlim edits (screen.py) are ported in full.
         # legacy keeps RDI's distances and only fills gaps from the echo fit
         rhbot = np.where(np.isfinite(rhbot), rhbot, np.where(np.isfinite(zpeak), zpeak, np.nan))
         return BottomTrack(bvel=rvel, bw=rw, hbot=rhbot,
