@@ -68,6 +68,10 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
         overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
     if inv_opts and inv_opts.get("dzbelow") is not None:
         overrides["dzbelow"] = inv_opts["dzbelow"]
+    if inv_opts and inv_opts.get("zbottom") is not None:
+        overrides["zbottom"] = inv_opts["zbottom"]
+    if inv_opts and inv_opts.get("guessbottom") is not None:
+        overrides["guessbottom"] = inv_opts["guessbottom"]
     if inv_opts and inv_opts.get("soundcorr") is False:
         overrides["soundcorr"] = False
     if journal is not None and journal.entries:
@@ -475,6 +479,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "preset, 16 = 2 legacy bins). Raise on shallow shelf casts when "
                          "a bottom-depth underestimate lets a contaminated near-bottom "
                          "cell through (e.g. 24-32)")
+    ap.add_argument("--zbottom", type=float, default=None, metavar="METERS",
+                    help="operator seabed-depth override [m] (legacy p.zbottom): use this "
+                         "depth verbatim and skip auto detection. For fixing a detect_bottom "
+                         "false-lock when the true depth is known (echo-sounder/logsheet). "
+                         "Single-station runs only.")
+    ap.add_argument("--guessbottom", type=float, default=None, metavar="METERS",
+                    help="operator seabed seed [m] (legacy p.guessbottom): keep auto detection "
+                         "but restrict the echo-stack search to within 50 m of this depth, "
+                         "steering it off a far multiple. Single-station runs only.")
     ap.add_argument("--sadcp", metavar="PATH",
                     help="shipboard-ADCP data for the inverse constraint: a VmDAS folder "
                          "(STA/LTA; ingested once and cached as sadcp_cache.npz) or, with "
@@ -576,6 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         if edits_p.is_file() and len(plan) > 1:
             ap.error("--edits FILE applies to a single station; give the .ladcp_edits "
                      "directory to batch-replay per-station journals")
+
+    if (args.zbottom is not None or args.guessbottom is not None) and len(plan) > 1:
+        ap.error("--zbottom/--guessbottom are per-cast seabed overrides; run one station "
+                 f"at a time (got {len(plan)} stations)")
 
     n = len(plan)
     console_detail = args.verbose or n <= 1            # stream detail for -v or a single cast

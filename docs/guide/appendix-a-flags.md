@@ -13,15 +13,15 @@ usage: ladcp-qa [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                 [--solver {shear,inverse}] [--botfac BOTFAC]
                 [--barofac BAROFAC] [--smoofac SMOOFAC] [--down-only]
                 [--nearfield-dn-bins LIST] [--edits PATH] [--no-soundcorr]
-                [--dzbelow METERS] [--sadcp PATH]
-                [--sadcp-source {vmdas,codas}] [--sadcpfac SADCPFAC]
-                [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
-                [--sadcp-reingest] [--sadcp-timeoff SECONDS|auto]
-                [--sadcp-nav PATH] [--down DOWN] [--up UP] [--ctd CTD]
-                [--from-hex] [--ctd-cache CTD_CACHE] [--station STATION]
-                [--no-export] [--formats FORMATS] [--all-stations]
-                [--cruise-export] [-v] [--log FILE] [--no-log] [--no-progress]
-                [-j N]
+                [--dzbelow METERS] [--zbottom METERS] [--guessbottom METERS]
+                [--sadcp PATH] [--sadcp-source {vmdas,codas}]
+                [--sadcpfac SADCPFAC] [--sadcp-filetype {STA,LTA}]
+                [--sadcp-xducer SADCP_XDUCER] [--sadcp-reingest]
+                [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
+                [--down DOWN] [--up UP] [--ctd CTD] [--from-hex]
+                [--ctd-cache CTD_CACHE] [--station STATION] [--no-export]
+                [--formats FORMATS] [--all-stations] [--cruise-export] [-v]
+                [--log FILE] [--no-log] [--no-progress] [-j N]
                 [stations ...]
 
 LADCP acquisition quality assessment
@@ -73,6 +73,15 @@ options:
                         cruise preset, 16 = 2 legacy bins). Raise on shallow
                         shelf casts when a bottom-depth underestimate lets a
                         contaminated near-bottom cell through (e.g. 24-32)
+  --zbottom METERS      operator seabed-depth override [m] (legacy p.zbottom):
+                        use this depth verbatim and skip auto detection. For
+                        fixing a detect_bottom false-lock when the true depth
+                        is known (echo-sounder/logsheet). Single-station runs
+                        only.
+  --guessbottom METERS  operator seabed seed [m] (legacy p.guessbottom): keep
+                        auto detection but restrict the echo-stack search to
+                        within 50 m of this depth, steering it off a far
+                        multiple. Single-station runs only.
   --sadcp PATH          shipboard-ADCP data for the inverse constraint: a
                         VmDAS folder (STA/LTA; ingested once and cached as
                         sadcp_cache.npz) or, with --sadcp-source codas, a

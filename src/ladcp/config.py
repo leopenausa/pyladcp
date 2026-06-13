@@ -43,6 +43,12 @@ class CastParams:
                                     # (surface up-reflection + range-dependent seabed wedge)
                                     # from the velocity weights (golden default on)
     dzbelow: float = 16.0           # below-bottom margin [m] (legacy p.dzbelow(1)=2*bin)
+    # operator seabed override (legacy p.zbottom / p.guessbottom). zbottom: hard override --
+    # take this seabed depth verbatim, skip detect_bottom (fixes a false-lock when the true
+    # depth is known). guessbottom: soft seed -- bias the echo-stack search to a window around
+    # this depth (steers off a far multiple). NaN = auto-detect (the default).
+    zbottom: float = float("nan")
+    guessbottom: float = float("nan")
     cut: float = 0.0                # surface cut / draft trim [ensembles or m, per legacy]
     pglim: float = 0.0              # percent-good minimum
     elim: float = 0.2               # error-velocity limit [m/s]
