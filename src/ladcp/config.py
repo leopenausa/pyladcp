@@ -82,7 +82,7 @@ class CastParams:
     # depth: 1 = integrate W; 2 = inverse + bottom reflection (default)
     getdepth: int = 2
 
-    # sADCP (designed-for; see DATA_CONTRACT §2.3 / VALIDATION §7)
+    # sADCP (designed-for; see docs/ARCHITECTURE.md §2.3 / §6)
     sadcp: int = 0                  # selector id (0 = none requested)
     sadcpfac: float = 0.0           # constraint weight (0 = compare-only)
     sadcp_mismatch_policy: str = "reject"   # reject | downweight | operator_override
