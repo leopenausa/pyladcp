@@ -60,6 +60,8 @@ CONFIGS = [
     SessionConfig(edit=EditConfig(nearfield_dn_bins=(3, 4), dzbelow=24.0)),
     SessionConfig(edit=EditConfig(nearfield_dn_bins=())),          # explicit 'none'
     SessionConfig(edit=EditConfig(soundcorr=False)),               # --no-soundcorr
+    SessionConfig(edit=EditConfig(zbottom=101.5)),                 # --zbottom override
+    SessionConfig(edit=EditConfig(guessbottom=300.0)),             # --guessbottom seed
     SessionConfig(sadcp=SadcpConfig(folder="sADCP/OS150")),
     SessionConfig(sadcp=SadcpConfig(folder="sADCP/OS150", source="codas",
                                     filetype="LTA", xducer=7.0, timeoff=42.5,
@@ -80,7 +82,7 @@ def test_roundtrip(cfg):
 
 
 def test_roundtrip_with_context():
-    cfg = CONFIGS[7]
+    cfg = CONFIGS[9]
     assert roundtrip(cfg, station="MORIA-80", root="New_golden/Good",
                      cruise="MORIA", index="i.json", outdir="out") == cfg
 
@@ -92,7 +94,7 @@ def test_inv_opts_shape_default():
     assert SessionConfig().inv_opts() == {
         "botfac": 1.0, "barofac": 1.0, "smoofac": 0.0,
         "down_only": False, "nearfield_dn_bins": None, "dzbelow": None,
-        "soundcorr": True}
+        "soundcorr": True, "zbottom": None, "guessbottom": None}
 
 
 def test_inv_opts_from_args():
@@ -102,7 +104,7 @@ def test_inv_opts_from_args():
     assert SessionConfig.from_args(args).inv_opts() == {
         "botfac": 0.5, "barofac": 1.0, "smoofac": 0.1,
         "down_only": True, "nearfield_dn_bins": (3, 4), "dzbelow": 24.0,
-        "soundcorr": True}
+        "soundcorr": True, "zbottom": None, "guessbottom": None}
 
 
 def test_sadcp_opts_none_without_sadcp():
@@ -160,6 +162,15 @@ def test_cli_maps_config_errors_to_argparse_exit(capsys):
         main(["80", "--nearfield-dn-bins", "x,y", "--no-log"])
     assert exc.value.code == 2
     assert "--nearfield-dn-bins: expected" in capsys.readouterr().err
+
+
+def test_zbottom_rejects_multistation(capsys):
+    # --zbottom/--guessbottom are per-cast: refuse a multi-station run before any work
+    with pytest.raises(SystemExit) as exc:
+        from ladcp.qa.cli import main
+        main(["80", "82", "--zbottom", "1000", "--no-log"])
+    assert exc.value.code == 2
+    assert "per-cast seabed overrides" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------- hashability (cache keys)

@@ -71,6 +71,14 @@
         <label for="in-dzbelow" data-tip="Seabed cut margin [m] (legacy p.dzbelow, default 16 = 2×bin size): the flat cut on cells near the detected bottom when the range-dependent side-lobe wedge is disabled.">dzbelow <small>[m] seabed margin</small></label>
         <input id="in-dzbelow" type="number" step="8" min="0" placeholder="cruise preset">
       </div>
+      <div class="field">
+        <label for="in-zbottom" data-tip="Operator seabed-depth override [m] (legacy p.zbottom): use this depth verbatim and skip auto-detection. For fixing a detect_bottom false-lock when the true depth is known (echo-sounder/logsheet). The seabed readout below shows the depth actually used.">seabed override <small>[m] --zbottom</small></label>
+        <input id="in-zbottom" type="number" step="1" min="0" placeholder="auto-detect">
+      </div>
+      <div class="field">
+        <label for="in-guessbottom" data-tip="Operator seabed seed [m] (legacy p.guessbottom): keep auto-detection but restrict the echo-stack search to within 50 m of this depth, steering it off a far multiple. Blank = auto-detect.">seabed seed <small>[m] --guessbottom</small></label>
+        <input id="in-guessbottom" type="number" step="1" min="0" placeholder="auto-detect">
+      </div>
     </div>
 
     <div class="sect">

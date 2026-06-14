@@ -64,8 +64,12 @@ ladcp-studio --help
   is `shear`/`inverse` plus the four weights of chapter 7; *Constraints* toggles
   `--down-only` and the SADCP rows; *Editing* exposes the near-field mask (a toggle,
   off by default — nothing is masked unless you opt in; the input takes bins `3,4`
-  or a depth range `22-38m`, translated with the station's real bin geometry) and
-  `dzbelow`. Hover any control for a condensed explanation.
+  or a depth range `22-38m`, translated with the station's real bin geometry),
+  `dzbelow`, and the **seabed override / seed** (`--zbottom` takes a depth verbatim
+  when `detect_bottom` false-locks; `--guessbottom` keeps auto-detection but steers
+  it to within 50 m of your seed — both blank by default and cleared on station
+  change, since a seabed depth is a per-cast fact). The *Solution* readout shows the
+  seabed actually used. Hover any control for a condensed explanation.
 - **Center** — the live u/v profile with its ±1σ band, bottom-track points, the
   ship-ADCP constraint (white squares) when active, and the seabed line. The bar
   underneath always shows **the `ladcp-qa` command that reproduces the current
@@ -81,7 +85,7 @@ Controls are grouped by what they cost, and the grouping is the point:
 | tier | controls | cost |
 |---|---|---|
 | solve | solver, `botfac`, `barofac`, `smoofac`, `sadcpfac`, SADCP toggle | **~30 ms** — drag and watch |
-| build | `--down-only`, near-field bins, `dzbelow`, each brush edit | **~1.5 s** — rebuilds editing → bottom detect → super-ensembles |
+| build | `--down-only`, near-field bins, `dzbelow`, seabed override/seed, each brush edit | **~1.5 s** — rebuilds editing → bottom detect → super-ensembles |
 
 The first visit to a station pays raw ingest + build once (~1–2 s on the test
 station); after that, weight changes are effectively instantaneous.

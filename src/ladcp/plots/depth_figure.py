@@ -20,7 +20,9 @@ def depth_figure(dh: DualHead, ctd: CTDTimeSeries, *, fig=None, savepath: str | 
     import matplotlib.pyplot as plt
 
     sync = synchronize(dh, ctd)
-    bottom = detect_bottom(dh, sync)
+    bottom = detect_bottom(dh, sync,
+                           zbottom=getattr(dh.params, "zbottom", float("nan")),
+                           guessbottom=getattr(dh.params, "guessbottom", float("nan")))
     z = sync.z_on_ping
     ens = np.arange(z.size)
     i0, i1 = water_window(z)

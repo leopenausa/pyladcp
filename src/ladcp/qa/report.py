@@ -89,7 +89,10 @@ def assess(dh: DualHead, params: CastParams | None = None,
             qc.add(m)
         for m in _depth_sanity_metrics(sync):
             qc.add(m)
-        qc.add(bottom_metric(detect_bottom(dh, sync, ctd=ctd)))
+        qc.add(bottom_metric(detect_bottom(
+            dh, sync, ctd=ctd,
+            zbottom=getattr(p, "zbottom", float("nan")),
+            guessbottom=getattr(p, "guessbottom", float("nan")))))
 
     return qc
 

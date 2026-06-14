@@ -416,7 +416,10 @@ def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     from .bottom import bottom_track_velocity, detect_bottom
 
     sync = synchronize(dh, ctd)
-    bottom = detect_bottom(dh, sync, ctd=ctd)
+    bottom = detect_bottom(dh, sync, ctd=ctd,
+                           zbottom=getattr(params, "zbottom", float("nan")) if params else None,
+                           guessbottom=getattr(params, "guessbottom", float("nan")) if params
+                           else None)
     merged = merge_heads(dh, params=params,
                          window=water_window(sync.z_on_ping))
     bt = bottom_track_velocity(

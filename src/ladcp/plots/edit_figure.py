@@ -20,7 +20,9 @@ def edit_figure(dh: DualHead, ctd: CTDTimeSeries, *, fig=None, savepath: str | N
     import matplotlib.pyplot as plt
 
     sync = synchronize(dh, ctd)
-    bottom = detect_bottom(dh, sync)
+    bottom = detect_bottom(dh, sync,
+                           zbottom=getattr(dh.params, "zbottom", float("nan")),
+                           guessbottom=getattr(dh.params, "guessbottom", float("nan")))
     er = edit_data(dh, sync, bottom)
 
     ens = np.arange(er.ts_before.shape[1])

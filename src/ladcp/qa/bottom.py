@@ -66,6 +66,8 @@ _SEABED_XCHECK = 25.0    # |stack - legacy-polyfit| above this [m] -> flag disag
 _STACK_COVER_MIN = 0.4   # min package-depth support span (fraction of the geometrically visible
                          # range) for a stack lock to be a real bed and not a constant-range
                          # artifact -- see _support_cover / detect_bottom
+_GUESS_WINDOW = 50.0     # operator guessbottom seed: restrict the echo-stack search to within this
+                         # of the guess [m], so a far multiple/false-lock is steered to the seed
 _BTRK_BELOW = 0.5        # bins below the target-strength max used for bottom velocity
 _BTRK_WLIM = 0.05        # max |W_btrk - W_ref| [m/s] to accept a bottom velocity
 
@@ -78,6 +80,8 @@ class BottomResult:
     n_valid: int
     is_fallback: bool = False   # True when the stack failed and zbottom is the zmax near-touch
                                 # lower bound (or NaN) rather than a stacked echo lock
+    operator_set: bool = False  # True when zbottom came from an operator override (--zbottom) or
+                                # a guessbottom seed (--guessbottom), not pure auto-detection
     zbottom_legacy: float = np.nan   # faithful getdpthi.m polyfit seabed -- DIAGNOSTIC cross-check
                                      # only, never the reported value (see _legacy_seabed)
     legacy_error: float = np.nan     # legacy self-reported zbottomerror [m]
@@ -168,8 +172,24 @@ def soundspeed_scale(dh: DualHead, sync: SyncResult, ctd: CTDTimeSeries) -> np.n
 
 
 def detect_bottom(dh: DualHead, sync: SyncResult,
-                  ctd: CTDTimeSeries | None = None) -> BottomResult:
+                  ctd: CTDTimeSeries | None = None, *,
+                  zbottom: float | None = None,
+                  guessbottom: float | None = None) -> BottomResult:
     """Estimate seabed depth: a depth-stack echo lock, else a near-touch ``zmax`` fallback.
+
+    Two operator inputs (legacy ``p.zbottom`` / ``p.guessbottom``) override the automatic
+    estimate when a cast's detection is wrong (e.g. a shallow false-lock):
+
+    * ``zbottom`` -- a **hard override**. The seabed is taken to be this depth verbatim and
+      auto-detection is skipped (``operator_set=True``, ``error=0``). Use it when the true
+      depth is known (echo-sounder / logsheet); it drives every downstream consumer (the
+      near-seabed velocity mask, the bottom-track height gate, the profile reach).
+    * ``guessbottom`` -- a **soft seed**. Auto-detection still runs but the echo-stack search
+      is restricted to within ``_GUESS_WINDOW`` of the seed, steering the lock off a far
+      multiple; if nothing stacks in that window the seed itself is returned as a flagged
+      ``operator_set`` value (instead of the deepest-package ``zmax`` lower bound).
+
+    A finite ``zbottom`` takes precedence over ``guessbottom``.
 
     The reported ``zbottom`` is the depth where bottom echoes reinforce across pings
     (:func:`_stack_seabed`), refined to ~metre precision by the per-ping seabed picks
@@ -194,11 +214,21 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
     # faithful legacy getdpthi polyfit, computed as a cross-check only (never reported)
     zb_leg, leg_err = _legacy_seabed(z, hbot_raw, zmax)
 
+    # operator hard override (legacy p.zbottom preset): take the seabed verbatim, skip detection.
+    if zbottom is not None and np.isfinite(zbottom):
+        zb = float(zbottom)
+        hbot = np.where(np.isfinite(botdepth), hbot_raw, np.nan)   # keep the measured echoes
+        return BottomResult(zb, 0.0, hbot, int(np.isfinite(hbot).sum()), operator_set=True,
+                            zbottom_legacy=zb_leg, legacy_error=leg_err)
+
+    guess = float(guessbottom) if (guessbottom is not None
+                                   and np.isfinite(guessbottom)) else None
+
     d = dh.down
     zd = (d.meta.get("dist_first_m", d.blank_m + d.cell_m / 2.0)
           + np.arange(d.n_cells) * d.cell_m).astype(float)
     ea = np.nanmedian(d.echo, axis=0) * 0.45
-    zstack, is_echo = _stack_seabed(z, ea, zd, sc)
+    zstack, is_echo = _stack_seabed(z, ea, zd, sc, guess=guess)
 
     if is_echo:
         # support-spread guard: a real bed at a constant depth is seen by pings spanning a wide
@@ -222,6 +252,17 @@ def detect_bottom(dh: DualHead, sync: SyncResult,
         error = float(np.median(np.abs(botdepth[near] - zbottom))) if near.any() else 0.0
         hbot = np.where(near, hbot_raw, np.nan)
         return BottomResult(zbottom, error, hbot, int(np.isfinite(hbot).sum()),
+                            zbottom_legacy=zb_leg, legacy_error=leg_err)
+
+    # stack failed in the guess window: honor the operator seed as a flagged soft value (the
+    # scatter of any echoes near it is the uncertainty) rather than the deepest-package bound.
+    if guess is not None:
+        near = np.isfinite(botdepth) & (np.abs(botdepth - guess) < _SEABED_REFINE_WIN)
+        error = (float(np.median(np.abs(botdepth[near] - guess))) if near.any()
+                 else float(_BOTTOM_ERR_WARN))
+        hbot = np.where(near, hbot_raw, np.nan)
+        return BottomResult(guess, error, hbot, int(np.isfinite(hbot).sum()),
+                            is_fallback=True, operator_set=True,
                             zbottom_legacy=zb_leg, legacy_error=leg_err)
 
     # stack failed (weak or dead-zone bottom echo). The package nearly touched, so the deepest
@@ -265,7 +306,7 @@ def _support_cover(z_support: np.ndarray, zbottom: float, zmax: float) -> float:
 
 
 def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
-                  sc: np.ndarray) -> tuple[float, bool]:
+                  sc: np.ndarray, *, guess: float | None = None) -> tuple[float, bool]:
     """Seabed depth by stacking raw echo amplitude along constant-depth loci.
 
     The seabed depth is constant across pings, so a true bottom return reinforces when the
@@ -285,6 +326,10 @@ def _stack_seabed(z: np.ndarray, ea: np.ndarray, zd: np.ndarray,
     lo, hi = _BTRK_RANGE
     bg = np.nanpercentile(ea, 25, axis=0)                  # per-ping background [dB]
     grid = np.arange(zmax - 20.0, zmax + hi, _SEABED_STACK_DD)
+    if guess is not None and np.isfinite(guess):           # operator seed: search near it only
+        grid = grid[(grid >= guess - _GUESS_WINDOW) & (grid <= guess + _GUESS_WINDOW)]
+        if grid.size < 3:
+            return zmax, False
     # Vectorized stack: zd (bin depths) is shared across pings, so the trial-depth x ping
     # double loop over np.interp becomes pure array ops. Bit-identical to the scalar loop;
     # ~2-3x faster, and this is 60-70% of a velocity solve (see ladcp-velocity-perf note).
@@ -542,16 +587,20 @@ def _rdi_bottom_track(dh: DualHead, n: int):
 def bottom_metric(b: BottomResult) -> Metric:
     disagree = (np.isfinite(b.zbottom) and np.isfinite(b.zbottom_legacy)
                 and abs(b.zbottom - b.zbottom_legacy) > _SEABED_XCHECK)
-    ok = (np.isfinite(b.zbottom) and not b.is_fallback and b.error <= _BOTTOM_ERR_WARN
-          and not disagree)
-    if not np.isfinite(b.zbottom):
+    ok = (np.isfinite(b.zbottom) and (b.operator_set or
+          (not b.is_fallback and b.error <= _BOTTOM_ERR_WARN and not disagree)))
+    if b.operator_set:
+        seed = "override" if not b.is_fallback else "guess seed (stack found nothing in window)"
+        note = (f"operator-set seabed ({seed}); auto-detect would give "
+                f"{b.zbottom_legacy:.0f} m (legacy-polyfit cross-check)")
+    elif not np.isfinite(b.zbottom):
         note = "no bottom echo found"
     elif b.is_fallback:
         note = (f"near-bottom lower bound (deepest package depth); "
                 f"+/- {b.error:.1f} m, {b.n_valid} echoes")
     else:
         note = f"+/- {b.error:.2f} m from {b.n_valid} bottom echoes"
-    if disagree:
+    if disagree and not b.operator_set:
         note += (f"; stack {b.zbottom:.0f} vs legacy-polyfit {b.zbottom_legacy:.0f} m differ by "
                  f"{abs(b.zbottom - b.zbottom_legacy):.0f} m -- near-bottom multiples (legacy "
                  f"biased deep) or shallow false-lock (stack); inspect")

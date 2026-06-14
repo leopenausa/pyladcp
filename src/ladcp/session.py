@@ -83,6 +83,8 @@ class EditConfig:
     nearfield_dn_bins: tuple[int, ...] | None = None     # --nearfield-dn-bins; () = disable
     dzbelow: float | None = None                         # --dzbelow [m]
     soundcorr: bool = True                                # --no-soundcorr disables (legacy ON)
+    zbottom: float | None = None                         # --zbottom [m]: hard seabed override
+    guessbottom: float | None = None                     # --guessbottom [m]: soft seabed seed
     # manual journal rectangles (ladcp.edits.manual_flags): canonical geometry-only
     # tuples, so a note edit in the journal never invalidates the prepare cache.
     # Reproducing this on the CLI needs the journal file: to_cli(edits=<path>).
@@ -182,7 +184,9 @@ class SessionConfig:
             manual = _manual_flags(load_journal(edits_arg))
         edit = EditConfig(down_only=args.down_only, nearfield_dn_bins=nearfield,
                           dzbelow=args.dzbelow, manual_flags=manual,
-                          soundcorr=not getattr(args, "no_soundcorr", False))
+                          soundcorr=not getattr(args, "no_soundcorr", False),
+                          zbottom=getattr(args, "zbottom", None),
+                          guessbottom=getattr(args, "guessbottom", None))
         sadcp = None
         if args.sadcp:
             sadcp = SadcpConfig(folder=args.sadcp, source=args.sadcp_source,
@@ -248,6 +252,10 @@ class SessionConfig:
                 ",".join(str(b) for b in e.nearfield_dn_bins) or "none")
         if e.dzbelow is not None:
             opt("--dzbelow", e.dzbelow)
+        if e.zbottom is not None:
+            opt("--zbottom", e.zbottom)
+        if e.guessbottom is not None:
+            opt("--guessbottom", e.guessbottom)
         if not e.soundcorr:
             parts.append("--no-soundcorr")
         if edits is not None:
@@ -278,7 +286,8 @@ class SessionConfig:
         return {"botfac": self.solve.botfac, "barofac": self.solve.barofac,
                 "smoofac": self.solve.smoofac, "down_only": self.edit.down_only,
                 "nearfield_dn_bins": self.edit.nearfield_dn_bins,
-                "dzbelow": self.edit.dzbelow, "soundcorr": self.edit.soundcorr}
+                "dzbelow": self.edit.dzbelow, "soundcorr": self.edit.soundcorr,
+                "zbottom": self.edit.zbottom, "guessbottom": self.edit.guessbottom}
 
     def sadcp_opts(self) -> dict | None:
         """The ``sadcp_opts`` dict ``ladcp-qa`` passes to ``_run_one`` (``None`` = no SADCP)."""
@@ -415,6 +424,10 @@ class StationSession:
             overrides["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
         if edit.dzbelow is not None:
             overrides["dzbelow"] = edit.dzbelow
+        if edit.zbottom is not None:
+            overrides["zbottom"] = edit.zbottom
+        if edit.guessbottom is not None:
+            overrides["guessbottom"] = edit.guessbottom
         if edit.manual_flags:
             overrides["edit_manual_flags"] = edit.manual_flags
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)
@@ -480,7 +493,7 @@ def _check_field_coverage() -> None:   # pragma: no cover - import-time self-che
     """Guard against silently adding config fields ``to_cli`` does not emit."""
     known = {
         EditConfig: {"down_only", "nearfield_dn_bins", "dzbelow", "manual_flags",
-                     "soundcorr"},
+                     "soundcorr", "zbottom", "guessbottom"},
         SadcpConfig: {"folder", "source", "filetype", "xducer", "timeoff", "nav",
                       "reingest"},
         SolveConfig: {"solver", "drot", "botfac", "barofac", "smoofac", "sadcpfac"},
