@@ -18,6 +18,7 @@ CHAPTERS=(
   "$G/07-solvers-weights.md"
   "$G/08-ship-adcp.md"
   "$G/09-troubleshooting.md"
+  "$G/10-studio.md"
   "$G/appendix-a-flags.md"
   "$G/appendix-b-legacy-map.md"
   "$G/appendix-c-formats.md"

@@ -116,6 +116,22 @@ depth-independent angle error in the upper ocean.
 samples use `--botfac 0`; if a contaminated near-bottom cell slips through a
 bottom-depth underestimate, raise `--dzbelow` (e.g. 24–32).
 
+**Symptom:** the seabed line sits at the wrong depth — the profile stops a cell or two
+short of the bottom, or `bottom_depth` WARNs that two estimates disagree by >25 m.
+**Cause:** automatic detection locked onto the wrong echo — a mid-water scattering
+layer, a bottom *multiple* (a re-reflection at ~2× or 3× the true depth), or, on a cast
+that barely reached the bed, a return too weak to pin. The depth figure shows it: the
+seabed line doesn't sit under the cluster of bottom-track points.
+**Fix:** give it the depth you trust from the echo-sounder or the logsheet.
+`--zbottom <m>` takes that depth verbatim and skips detection; `--guessbottom <m>` keeps
+auto-detection but confines it to within 50 m of your value (use this when you only know
+the depth roughly). Both are per-cast — run that one station on its own. A correct seabed
+fixes both the near-bottom side-lobe editing *and* the bottom-track reference. In
+[Studio](10-studio.md) the same two controls live in the left rail (*set seabed by
+hand → exact / hint*); set one and watch the seabed line and the near-bottom cells snap
+into place. (Detection is accurate to ~1 m on the great majority of casts — reach for
+this only on the handful the depth figure flags.)
+
 **Symptom:** a band of bad velocities at a fixed *distance below the package* on
 every cast of a leg (and `nearfield_errvel_ratio` WARNs).
 **Cause:** a device hung under the rosette (corer, extra bottle, transponder) — a

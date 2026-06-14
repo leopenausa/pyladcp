@@ -137,7 +137,7 @@ def _page1(pdf):
     s.body("L", "holds raw_ladcp/, raw_CTD/ and sADCP/. Set it once:", color=MUTE, size=7.6)
     s.gap("L", 0.004)
     s.code("L", [
-        "cd /path/to/cruise/MORIA   # folder with raw_*",
+        "cd /path/to/cruise/MYCRUISE # folder with raw_*",
         'B="$PWD"                    # = where you are now',
         'echo "$B"                   # MUST print that path',
     ])
@@ -169,7 +169,7 @@ def _page1(pdf):
     s.body("L", "bit. Beam-coord PD0s are rotated to earth on read.", color=MUTE, size=7.5)
     s.gap("L", 0.012)
 
-    s.head("L", "New / non-MORIA cruise")
+    s.head("L", "Any cruise  (registered or not)")
     s.body("L", "--cruise <NAME>: any name works. An unknown", color=MUTE, size=7.5)
     s.body("L", "cruise gets shared operator defaults (dz 8, bin-1", color=MUTE, size=7.5)
     s.body("L", "mask, tilt 22/4, RDI-firmware bottom track),", color=MUTE, size=7.5)
@@ -252,16 +252,16 @@ def _page2(pdf):
     s.head("L", "What you get  (under  $B/qa_out/)")
     s.code("L", [
         "qa_out/",
-        "├─ stations/<MORIA-xx>/",
+        "├─ stations/<station>/",
         "│   ├─ <st>_report.pdf    ★ scorecard+figs",
         "│   ├─ <st>.lad  <st>.bot velocity / b-track",
         "│   ├─ <st>.nc   <st>.xlsx NetCDF / Excel",
         "│   ├─ <st>_qa.txt/.json  QA metrics",
         "│   └─ figures/*.png",
         "├─ exports/               cruise-level",
-        "│   ├─ MORIA_ladcp.xlsx / .nc",
-        "│   ├─ MORIA_ladcp_odv.txt  (Ocean Data View)",
-        "│   └─ MORIA_summary.csv",
+        "│   ├─ <CRUISE>_ladcp.xlsx / .nc",
+        "│   ├─ <CRUISE>_ladcp_odv.txt  (Ocean Data View)",
+        "│   └─ <CRUISE>_summary.csv",
         "└─ ladcp-qa.log           run log",
     ])
     s.body("L", "exports/ is written by --all-stations (or add", color=MUTE, size=7.5)
@@ -341,8 +341,11 @@ def _page2(pdf):
         ("--barofac W", "GPS-barotropic weight (default 1)"),
         ("--smoofac W", "smoothing weight (default 0)"),
         ("--dzbelow M", "near-seabed reject margin [m]"),
+        ("--zbottom M", "operator seabed depth (override)"),
+        ("--guessbottom M", "seabed seed (auto within ±50 m)"),
         ("--down-only", "solve from the down-looker alone"),
         ("--nearfield-dn-bins", "device-band mask override / 'none'"),
+        ("--edits P", "apply a Studio brush journal (dir/file)"),
         ("--from-hex", "build CTD from raw .hex if no .cnv"),
         ("--ctd-cache D", "reuse dir for --from-hex"),
         ("--formats L", "xlsx,odv,nc,csv (default: all)"),
@@ -365,8 +368,11 @@ def _page2(pdf):
         "• battery is an uncalibrated estimate (0.33·xmv):",
         "  it can WARN but never FAILs a cast.",
         "• nearfield_errvel_ratio WARN >1.7 = a rigid target",
-        "  hung below the package (e.g. a corer); mask its",
-        "  bins per cruise (MORIA does 03–28 automatically).",
+        "  hung below the package (e.g. a corer). Masking is",
+        "  always explicit: the WARN names the bins to pass",
+        "  to --nearfield-dn-bins; no preset masks silently.",
+        "• seabed line wrong (bottom_depth WARN)? set it by",
+        "  hand: --zbottom <m> (exact) or --guessbottom <m>.",
         "• --down-only is a cross-check — don't deliver it",
         "  where the down-looker is contaminated.",
         "• Headless server? prefix  MPLBACKEND=Agg.",

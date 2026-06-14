@@ -128,7 +128,10 @@ figure — the descent/ascent "V" should look like a cast, not noise.
   **WARN when the scatter exceeds 10 m**, when the detection had to fall back to a
   weaker method, or when two independent estimates disagree by more than 25 m.
   A wrong seabed corrupts the near-bottom editing *and* the bottom-track reference —
-  on WARN, read the depth figure before using `.bot`.
+  on WARN, read the depth figure before using `.bot`. If the line is genuinely off,
+  set the depth by hand with `--zbottom`/`--guessbottom`
+  ([chapter 9](09-troubleshooting.md)). The note also flags when the value came from one
+  of those operator overrides rather than auto-detection.
 
 ### Post-solve consistency checks (`checkinv`)
 

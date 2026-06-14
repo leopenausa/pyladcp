@@ -24,6 +24,16 @@ data-driven, not constraint-driven (on the validation cruises they agree to 1–
 A cast where they *diverge* is telling you the constraints are doing heavy lifting —
 look at the weights figure to see which one.
 
+**Before either solver runs**, pyladcp applies the legacy **sound-speed correction**
+(`p.soundcorr`, on by default). A Doppler velocity scales with the sound speed the
+instrument assumed, so the water velocities are rescaled per ensemble by the in-situ
+sound speed (from the CTD profile at the package depth) over the value the firmware was
+configured with. When the firmware ran a fixed sound speed far from the real profile —
+e.g. 1450 m/s against an in-situ ~1492 — this is a few-percent correction to the whole
+column (on the bundled example station it moved the depth-mean by ~0.16 cm/s, onto the
+validated reference). It is a faithful default; `--no-soundcorr` only exists to reproduce
+a legacy run that omitted it.
+
 ## The four weights
 
 The inverse blends four information sources. Each weight scales how strongly that
