@@ -25,20 +25,14 @@ The work below is sequenced; each step gets its own detailed plan before executi
    error covariance. The VmDAS SADCP ingester (`io/sadcp_vmdas.py`) recovers absolute ocean
    velocity from raw STA/LTA; validated end-to-end on MORIA 79/80/82 — SADCP vs LADCP-inverse
    agree to 0.015–0.05 m/s (corr 0.86–0.97) over the upper 300 m.
-3. **Data-driven ingest/config (#4a)** — *in progress.* Built: header-derived instrument
-   config (`ingest.apply_header_config`), a cruise-keyed param resolver (`config.resolve_params`
-   + `CRUISES`), flexible file discovery (`discovery.py`) that pairs the up-looker to the
-   down-looker by **time overlap** (the VmDAS master/slave deployment indices are offset —
-   MORIA-10 = master `MLADC012` + slave `SLADC013`), and Seabird `.cnv` column auto-mapping.
-   First cross-val station unlocked: **MORIA-10** (Gulf of Biscay, 549 m) runs end-to-end from
-   the raw archive — u corr 0.91–0.94, v corr 0.89–0.97, rms 0.023–0.041, vbar within 0.007,
-   seabed exact (558 m). Then an **auto-built, incremental archive index** (`archive.py`,
-   `ladcp-index` CLI): the Seabird CTD `.hex`/`.hdr` header (`io/ctd_hex.py`) supplies station
-   + absolute NMEA UTC + GPS position, which matches the LADCP master by time-window and pairs
-   the slave by overlap; results cache to `.ladcp_archive.json`, re-scanning only new files.
-   Replaces the hard-coded manifest — `ladcp-qa <st> --index …` resolves raw files by station
-   with no naming convention. Validated on 79/80/82 (auto-resolved to MLADC036/037/039, matching
-   the curated files). Remaining: cruise-2 goldens (local-only + publication-gated).
+3. **Data-driven ingest/config (#4a)** — *in progress.* Header-derived instrument config
+   (`ingest.apply_header_config`), cruise-keyed param resolver (`config.resolve_params`),
+   time-overlap file discovery (`discovery.py`; VmDAS master/slave indices are offset), and
+   `.cnv` column auto-mapping. An auto-built incremental archive index (`archive.py`,
+   `ladcp-index`) anchors station/UTC/GPS off the Seabird `.hex`/`.hdr` header and resolves raw
+   files by station with no naming convention (cache `.ladcp_archive.json`). Cross-val: MORIA-10
+   runs end-to-end from the raw archive (u corr 0.91–0.94, seabed exact). Remaining: cruise-2
+   goldens (local-only + publication-gated).
 4. **Robustness (#4b)** — single-head casts, beam-vs-earth frames, acquisition-script
    variance, edge cases.
 5. **Outputs (#3)** ✅ — Excel + ODV + NetCDF + CSV export (per-station files and cruise-level
@@ -47,16 +41,36 @@ The work below is sequenced; each step gets its own detailed plan before executi
    versioning/CHANGELOG, **PyPI publish** (name `pyladcp` free as of 2026-06; plan:
    GitHub-Actions Trusted Publishing, TestPyPI dry-run first, Zenodo DOI on the
    same release; audit the sdist contents before the first upload).
-7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → the cleaned 6-col `.cnv`
-   the solver consumes, so casts without a pre-processed profile still run. The recipe
-   lives in CTD_project (`ctd_pipeline.convert_for_ladcp`: datcnv → ITS-90/PSS-78 derive →
-   SBE Wild Edit → 1 s time-bin → 6-col extract); pyladcp calls it through `io/ctd_raw.py`
-   as an **optional** dependency (located via `LADCP_CTD_PROJECT` or a sibling dir; pyladcp
-   does not require it). Wired into `discover(from_hex=, ctd_cache=)` and
-   `ladcp-qa --from-hex` (default off — a pre-processed `.cnv` always wins; conversion is
-   the fallback), caching converted files to a reuse folder. Validated **byte-for-byte vs
-   the operator on all 23 MORIA stations** (prDM ≤0.002 dbar, T/S ≤0.001); end-to-end on
-   MORIA-79/80/82, which had no operator CTD and now get it from their `.hex` anchor.
-   (The work also surfaced + fixed a real SBE-conformance bug in CTD_project's own Wild Edit
-   — see memory [[ctd-wildedit-sbe-fix]].) Future option: an *agentic* variant with
-   per-cast safety checks on top of this deterministic recipe.
+7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → cleaned 6-col `.cnv`, so casts
+   without a pre-processed profile still run. Recipe lives in CTD_project
+   (`ctd_pipeline.convert_for_ladcp`); pyladcp calls it via `io/ctd_raw.py` as an **optional**
+   dep, wired into `ladcp-qa --from-hex` (default off — a real `.cnv` always wins). Validated
+   byte-for-byte vs the operator on all 23 MORIA stations; MORIA-79/80/82 now get CTD from their
+   `.hex` anchor. (Surfaced + fixed an SBE Wild-Edit bug in CTD_project — [[ctd-wildedit-sbe-fix]].)
+   Future: an *agentic* variant with per-cast safety checks.
+
+### Legacy-port fidelity backlog — CLOSED 2026-06-14
+
+The 17-stage deep audit (legacy LDEO_IX `.m` ↔ pyladcp) catalogued every divergence and
+ranked the un-ported items. The high-value accuracy items were ported and merged:
+
+- **`p.soundcorr`** — in-situ sound-speed velocity rescale (PR #54; MORIA-80 ūbar −6.31→−6.47 vs golden −6.50).
+- **`loadrdi` wlim/vlim** — water-cell velocity edits (PR #53; golden u-rms 1.32→0.64).
+- **uship true→magnetic frame** — barotropic constraint frame fix (PR #56).
+- **operator seabed override** — `--zbottom` / `--guessbottom`, CLI + Studio (PR #57/#58).
+- **shear-vs-inverse consistency WARN** (PR #54).
+
+The remaining items were each **scoped and quantified on FDCCC (30) + MORIA (36)**, then
+declined — each for a distinct, *measured* reason (writeups in `legacy_audit_work/findings/`):
+
+| item | verdict | why (measured) |
+|---|---|---|
+| per-ping `outlier` edit | defer | accuracy-neutral; ~224k cells dropped for no net gain |
+| STEP-12 `offsetup2down` | defer | net-negative trade vs golden + fidelity gap (degrades the golden cast) |
+| `tilt_weight` | skip | structural no-op — the inverse weights by velocity *scatter* (`ruvs`), not the correlation weight legacy scales; faithful A/B bit-identical on all 66 casts |
+| `detect_bottom` shallow false-lock retune | no action | no real bug — sub-metre median vs the faithful poly; apparent false-locks are unreliable golden `p.zbottom`; genuine uncertain casts already self-flag |
+
+**Conclusion:** the legacy-port backlog is exhausted of high-value accuracy items. pyladcp's
+velocity + bottom path is in a solid, validated state. Remaining un-ported legacy items
+(no-CTD vertical-velocity-integration depth path, `.mat dr` writer) are feature-completeness,
+not accuracy, and belong to **#7 / #4b** rather than fidelity.
