@@ -19,6 +19,8 @@ const S = {                                     // mirrors SessionConfig
   nearfield: null,                              // 1-based bins when typed, e.g. [3,4]
   dn_geom: null,                                // {first_m, cell_m, n_bins} from the solve
   dzbelow: null,                                // null = preset
+  zbottom: null,                                // null = auto-detect (--zbottom override)
+  guessbottom: null,                            // null = auto-detect (--guessbottom seed)
   use_sadcp: false,                             // the constraint toggle
   sadcp_key: null,                              // selected key from sadcp_sources
   sadcp_sources: [],                            // [{key, source, folder, origin}] fixed at launch
@@ -40,7 +42,8 @@ function status(cls, text) {
 
 function editBody() {
   const nf = (S.use_nearfield && S.nearfield && S.nearfield.length) ? S.nearfield : null;
-  return { down_only: S.down_only, nearfield_dn_bins: nf, dzbelow: S.dzbelow };
+  return { down_only: S.down_only, nearfield_dn_bins: nf, dzbelow: S.dzbelow,
+           zbottom: S.zbottom, guessbottom: S.guessbottom };
 }
 
 function body() {
@@ -128,6 +131,8 @@ function pinLabel() {
   if (S.use_nearfield && S.nearfield && S.nearfield.length)
     parts.push(`nf ${S.nearfield.join(",")}`);
   if (S.dzbelow !== null) parts.push(`dzbelow ${S.dzbelow}`);
+  if (S.zbottom !== null) parts.push(`zbottom ${S.zbottom}`);
+  if (S.guessbottom !== null) parts.push(`guess ${S.guessbottom}`);
   return parts.join(" · ");
 }
 
@@ -585,12 +590,32 @@ bindEditField($("in-dzbelow"), text => {
   S.dzbelow = x;
 });
 
+/* operator seabed override (--zbottom hard / --guessbottom soft seed): blank = auto-detect.
+ * The seabed readout (Solution panel) shows the depth actually used after each solve. */
+bindEditField($("in-zbottom"), text => {
+  if (text === "") { S.zbottom = null; return; }
+  const x = Number(text);
+  if (!Number.isFinite(x) || x <= 0) throw new Error("bad zbottom");
+  S.zbottom = x;
+});
+
+bindEditField($("in-guessbottom"), text => {
+  if (text === "") { S.guessbottom = null; return; }
+  const x = Number(text);
+  if (!Number.isFinite(x) || x <= 0) throw new Error("bad guessbottom");
+  S.guessbottom = x;
+});
+
 $("station").addEventListener("change", () => {
   S.station = $("station").value;
   last = null;
   S.dn_geom = null;                              // refreshed by the station's first solve
   clearPins();                                   // pins are per-station (z grids differ)
   resetEditView();                               // journal + matrix are per-station too
+  S.zbottom = S.guessbottom = null;              // seabed override is a per-cast fact -- never carry it over
+  $("in-zbottom").value = $("in-guessbottom").value = "";
+  $("in-zbottom").classList.remove("bad");
+  $("in-guessbottom").classList.remove("bad");
   scheduleSolve(0);
 });
 

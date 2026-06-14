@@ -271,7 +271,9 @@ def config_from_body(body: dict, state: StudioState) -> SessionConfig:
     edit = EditConfig(
         down_only=bool(e.get("down_only", False)),
         nearfield_dn_bins=None if nearfield is None else tuple(int(b) for b in nearfield),
-        dzbelow=None if e.get("dzbelow") is None else float(e["dzbelow"]))
+        dzbelow=None if e.get("dzbelow") is None else float(e["dzbelow"]),
+        zbottom=None if e.get("zbottom") is None else float(e["zbottom"]),
+        guessbottom=None if e.get("guessbottom") is None else float(e["guessbottom"]))
     solver = s.get("solver", "inverse")
     if solver not in ("shear", "inverse"):
         raise ValueError(f"solver must be 'shear' or 'inverse', got {solver!r}")

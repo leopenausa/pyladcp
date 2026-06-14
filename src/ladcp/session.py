@@ -424,6 +424,10 @@ class StationSession:
             overrides["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
         if edit.dzbelow is not None:
             overrides["dzbelow"] = edit.dzbelow
+        if edit.zbottom is not None:
+            overrides["zbottom"] = edit.zbottom
+        if edit.guessbottom is not None:
+            overrides["guessbottom"] = edit.guessbottom
         if edit.manual_flags:
             overrides["edit_manual_flags"] = edit.manual_flags
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)

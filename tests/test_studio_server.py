@@ -100,6 +100,17 @@ def test_solve_weight_change_uses_cache(client):
     assert p["solve_ms"] < 1000                  # warm solve, not a rebuild
 
 
+def test_zbottom_override_changes_seabed(client):
+    auto = client.post("/api/station/MORIA-80/solve", json={}).json()["zbottom"]
+    body = {"edit": {"zbottom": 950.0}, "solve": {"drot": -9.878379}}
+    p = client.post("/api/station/MORIA-80/solve", json=body).json()
+    assert p["zbottom"] == 950.0 and p["zbottom"] != auto
+    assert "--zbottom 950" in p["cli"]
+    # config_from_body must reproduce the EditConfig the CLI string round-trips to
+    args = build_parser().parse_args(shlex.split(p["cli"])[1:])
+    assert SessionConfig.from_args(args) == config_from_body(body, StudioState([]))
+
+
 def test_bad_config_is_400(client):
     r = client.post("/api/station/MORIA-80/solve", json={"solve": {"botfac": "x"}})
     assert r.status_code == 400
