@@ -1,5 +1,11 @@
 """Command-line driver for the acquisition-QA stage.
 
+New to the code? This module is the pipeline's table of contents: ``_run_one`` wires
+every stage together in order (ingest → screen → depth/time-sync → bottom track →
+super-ensembles → solver → report/export). Read it alongside ``src/ladcp/README.md``,
+which gives the recommended reading order and a module-by-module map. Follow
+``_run_one``'s calls to jump into whichever stage you care about.
+
 Compact form — give one or more station ids and let it find the files under a root
 directory (expects ``<root>/LADCP`` and ``<root>/CTD`` with the usual MORIA names)::
 
