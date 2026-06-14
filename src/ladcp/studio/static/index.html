@@ -50,10 +50,10 @@
 
     <div class="sect">
       <h3>Constraints</h3>
-      <div class="tgl" id="tgl-downonly" data-tip="Solve from the down-looker alone (up-looker excluded from the velocity solve). Diagnostic for head disagreement; near-surface coverage is reduced."><span class="sw"></span>down-looker only<small>--down-only</small></div>
-      <div class="tgl" id="tgl-sadcp" data-tip="Add the ship-ADCP ocean-velocity rows to the inverse (weight = the sadcpfac slider). Pick which product feeds them in the source dropdown below."><span class="sw"></span>SADCP constraint<small>--sadcp</small></div>
+      <div class="tgl" id="tgl-downonly" data-tip="Solve using only the downward-looking head and ignore the up-looker. Mainly a diagnostic — use it to check whether the two heads disagree. It reduces coverage near the surface. Off (normal) uses both heads."><span class="sw"></span>down-looker only<small>--down-only</small></div>
+      <div class="tgl" id="tgl-sadcp" data-tip="Also pull the upper profile toward the vessel-mounted ADCP (the ship's own current profiler). Helps set the absolute speed where the ship-ADCP has good data. Pick which instrument below; its pull strength is the 'ship ADCP' slider above."><span class="sw"></span>use ship ADCP<small>--sadcp</small></div>
       <div class="field">
-        <label for="sel-sadcp" data-tip="Which ship-ADCP product feeds the constraint: raw VmDAS averages (--sadcp, repeatable — e.g. the 75 and 150 kHz instruments) or CODAS-processed products (--sadcp-codas; products under <root>/codas are offered automatically).">SADCP source</label>
+        <label for="sel-sadcp" data-tip="Which ship-ADCP dataset feeds the constraint. Only datasets you started the app with appear here (raw VmDAS via --sadcp, or CODAS-processed via --sadcp-codas).">ship-ADCP dataset</label>
         <select id="sel-sadcp" disabled></select>
         <small class="src-note" id="sadcp-note">launch with --sadcp / --sadcp-codas</small>
       </div>
@@ -61,23 +61,24 @@
 
     <div class="sect">
       <h3>Editing <span class="rebuild-note">rebuilds ~1.5 s</span></h3>
-      <div class="tgl" id="tgl-nearfield" data-tip="Mask down-looker near-field cells for a device hung below the package (e.g. a corer on a short cable). OFF by default — nothing is ever masked unless you opt in; the QA hung-device WARN names the bins when it detects one."><span class="sw"></span>near-field mask<small>--nearfield-dn-bins</small></div>
+      <div class="tgl" id="tgl-nearfield" data-tip="Throw out the first few down-looker cells when something hung below the package (e.g. a corer on a cable) is corrupting them. Off (normal) keeps every cell. The QA report warns and names the cells when it detects this."><span class="sw"></span>drop near-field cells<small>--nearfield-dn-bins</small></div>
       <div class="field">
-        <label for="in-nearfield" data-tip="Which cells to mask: 1-based bins (3,4) or a depth range below the package (22-38m) converted with this station's real bin geometry. The note below always shows both readings.">bins or range <small>e.g. 3,4 · 22-38m</small></label>
+        <label for="in-nearfield" data-tip="Which cells to drop: bin numbers (e.g. 3,4) or a depth range below the package (e.g. 22-38m). The note shows both readings for this station.">cells to drop <small>e.g. 3,4 · 22-38m</small></label>
         <input id="in-nearfield" type="text" placeholder="3,4 or 22-38m" spellcheck="false" disabled>
-        <small class="src-note" id="nearfield-note">no mask</small>
+        <small class="src-note" id="nearfield-note">no cells dropped</small>
       </div>
       <div class="field">
-        <label for="in-dzbelow" data-tip="Seabed cut margin [m] (legacy p.dzbelow, default 16 = 2×bin size): the flat cut on cells near the detected bottom when the range-dependent side-lobe wedge is disabled.">dzbelow <small>[m] seabed margin</small></label>
-        <input id="in-dzbelow" type="number" step="8" min="0" placeholder="cruise preset">
+        <label for="in-dzbelow" data-tip="How much to trim just above the seabed, in metres (default 16 ≈ two cells). Increase it if noisy cells are leaking in near the bottom. Blank = the cruise default.">trim above seabed <small>[m] · dzbelow</small></label>
+        <input id="in-dzbelow" type="number" step="8" min="0" placeholder="cruise default">
       </div>
+      <div class="tgl" id="tgl-seabed" data-tip="Set the seabed depth yourself instead of letting the software find it. Use this when auto-detection locks onto the wrong depth (an echo/multiple) and you know the real depth from the echo-sounder or logsheet. Off (normal) = auto-detect; the depth used is shown under Solution → seabed."><span class="sw"></span>set seabed by hand<small>--zbottom / --guessbottom</small></div>
       <div class="field">
-        <label for="in-zbottom" data-tip="Operator seabed-depth override [m] (legacy p.zbottom): use this depth verbatim and skip auto-detection. For fixing a detect_bottom false-lock when the true depth is known (echo-sounder/logsheet). The seabed readout below shows the depth actually used.">seabed override <small>[m] --zbottom</small></label>
-        <input id="in-zbottom" type="number" step="1" min="0" placeholder="auto-detect">
-      </div>
-      <div class="field">
-        <label for="in-guessbottom" data-tip="Operator seabed seed [m] (legacy p.guessbottom): keep auto-detection but restrict the echo-stack search to within 50 m of this depth, steering it off a far multiple. Blank = auto-detect.">seabed seed <small>[m] --guessbottom</small></label>
-        <input id="in-guessbottom" type="number" step="1" min="0" placeholder="auto-detect">
+        <label data-tip="Exact = use the depth you type as the seabed, as-is. Hint = let the software still detect the seabed but search only near your value — for when you know the depth only roughly.">how to apply <small>exact or hint</small></label>
+        <div class="seg sub disabled" id="seabed-mode">
+          <button data-v="exact" class="on" data-tip="Use the depth you type as the seabed, exactly (--zbottom).">exact depth</button><button data-v="hint" data-tip="Search for the seabed near the depth you type (--guessbottom). For when you only know it roughly.">rough hint</button>
+        </div>
+        <input id="in-seabed" type="number" step="1" min="0" placeholder="seabed depth [m]" disabled>
+        <small class="src-note" id="seabed-note">auto-detected</small>
       </div>
     </div>
 

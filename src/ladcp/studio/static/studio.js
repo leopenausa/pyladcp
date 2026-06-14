@@ -19,8 +19,9 @@ const S = {                                     // mirrors SessionConfig
   nearfield: null,                              // 1-based bins when typed, e.g. [3,4]
   dn_geom: null,                                // {first_m, cell_m, n_bins} from the solve
   dzbelow: null,                                // null = preset
-  zbottom: null,                                // null = auto-detect (--zbottom override)
-  guessbottom: null,                            // null = auto-detect (--guessbottom seed)
+  use_seabed: false,                            // "set seabed by hand" toggle (default OFF = auto)
+  seabed_mode: "exact",                         // "exact" -> --zbottom, "hint" -> --guessbottom
+  seabed_value: null,                           // the depth typed [m], null = none yet
   use_sadcp: false,                             // the constraint toggle
   sadcp_key: null,                              // selected key from sadcp_sources
   sadcp_sources: [],                            // [{key, source, folder, origin}] fixed at launch
@@ -42,8 +43,11 @@ function status(cls, text) {
 
 function editBody() {
   const nf = (S.use_nearfield && S.nearfield && S.nearfield.length) ? S.nearfield : null;
+  const on = S.use_seabed && S.seabed_value !== null;
+  const zb = on && S.seabed_mode === "exact" ? S.seabed_value : null;
+  const gb = on && S.seabed_mode === "hint" ? S.seabed_value : null;
   return { down_only: S.down_only, nearfield_dn_bins: nf, dzbelow: S.dzbelow,
-           zbottom: S.zbottom, guessbottom: S.guessbottom };
+           zbottom: zb, guessbottom: gb };
 }
 
 function body() {
@@ -131,8 +135,8 @@ function pinLabel() {
   if (S.use_nearfield && S.nearfield && S.nearfield.length)
     parts.push(`nf ${S.nearfield.join(",")}`);
   if (S.dzbelow !== null) parts.push(`dzbelow ${S.dzbelow}`);
-  if (S.zbottom !== null) parts.push(`zbottom ${S.zbottom}`);
-  if (S.guessbottom !== null) parts.push(`guess ${S.guessbottom}`);
+  if (S.use_seabed && S.seabed_value !== null)
+    parts.push(`${S.seabed_mode === "exact" ? "zbottom" : "guess"} ${S.seabed_value}`);
   return parts.join(" · ");
 }
 
@@ -590,20 +594,44 @@ bindEditField($("in-dzbelow"), text => {
   S.dzbelow = x;
 });
 
-/* operator seabed override (--zbottom hard / --guessbottom soft seed): blank = auto-detect.
- * The seabed readout (Solution panel) shows the depth actually used after each solve. */
-bindEditField($("in-zbottom"), text => {
-  if (text === "") { S.zbottom = null; return; }
-  const x = Number(text);
-  if (!Number.isFinite(x) || x <= 0) throw new Error("bad zbottom");
-  S.zbottom = x;
+/* set the seabed by hand: a toggle gates an exact/hint mode and a depth input.
+ * exact -> --zbottom (use verbatim); hint -> --guessbottom (search near it).
+ * OFF (default) = auto-detect. The Solution → seabed readout shows the depth used.
+ * A seabed depth is a per-cast fact, so this is cleared on station change. */
+function syncSeabedControls() {
+  $("tgl-seabed").classList.toggle("on", S.use_seabed);
+  $("seabed-mode").classList.toggle("disabled", !S.use_seabed);
+  $("in-seabed").disabled = !S.use_seabed;
+  let note;
+  if (!S.use_seabed) note = "auto-detected";
+  else if (S.seabed_value === null) note = "type a depth — auto-detect until you do";
+  else note = S.seabed_mode === "exact"
+    ? `seabed forced to ${S.seabed_value} m`
+    : `auto-detect, searching near ${S.seabed_value} m`;
+  $("seabed-note").textContent = note;
+}
+
+$("tgl-seabed").addEventListener("click", () => {
+  S.use_seabed = !S.use_seabed;
+  syncSeabedControls();
+  if (S.seabed_value !== null) scheduleSolve(0);   // a typed depth turns on/off
 });
 
-bindEditField($("in-guessbottom"), text => {
-  if (text === "") { S.guessbottom = null; return; }
+$("seabed-mode").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+  if (!S.use_seabed) return;
+  $("seabed-mode").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  S.seabed_mode = b.dataset.v;
+  syncSeabedControls();
+  if (S.seabed_value !== null) scheduleSolve(0);
+}));
+
+bindEditField($("in-seabed"), text => {
+  if (text === "") { S.seabed_value = null; syncSeabedControls(); return; }
   const x = Number(text);
-  if (!Number.isFinite(x) || x <= 0) throw new Error("bad guessbottom");
-  S.guessbottom = x;
+  if (!Number.isFinite(x) || x <= 0) throw new Error("bad seabed depth");
+  S.seabed_value = x;
+  syncSeabedControls();
 });
 
 $("station").addEventListener("change", () => {
@@ -612,10 +640,14 @@ $("station").addEventListener("change", () => {
   S.dn_geom = null;                              // refreshed by the station's first solve
   clearPins();                                   // pins are per-station (z grids differ)
   resetEditView();                               // journal + matrix are per-station too
-  S.zbottom = S.guessbottom = null;              // seabed override is a per-cast fact -- never carry it over
-  $("in-zbottom").value = $("in-guessbottom").value = "";
-  $("in-zbottom").classList.remove("bad");
-  $("in-guessbottom").classList.remove("bad");
+  S.use_seabed = false;                          // seabed depth is a per-cast fact -- never carry it over
+  S.seabed_mode = "exact";
+  S.seabed_value = null;
+  $("in-seabed").value = "";
+  $("in-seabed").classList.remove("bad");
+  $("seabed-mode").querySelectorAll("button").forEach(
+    x => x.classList.toggle("on", x.dataset.v === "exact"));
+  syncSeabedControls();
   scheduleSolve(0);
 });
 
@@ -1085,6 +1117,7 @@ $("heat").addEventListener("load", drawHeatOverlay);
     S.use_sadcp = Boolean(flagged);
     if (S.sadcp_key) srcSel.value = S.sadcp_key;
     syncSadcpControls();
+    syncSeabedControls();
     S.station = info.stations[0];
     sel.value = S.station;
     renderPins();
