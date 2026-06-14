@@ -65,7 +65,7 @@ log = logging.getLogger("ladcp.studio")
 
 MAX_SESSIONS = 3                      # LRU cap: a prepared session is order-100 MB
 _QA_ROOT_DEFAULT = "New_golden/Good"  # ladcp-qa --root default (for minimal cli strings)
-_QA_CRUISE_DEFAULT = "MORIA"
+_QA_CRUISE_DEFAULT = "LADCP"
 
 
 @dataclass

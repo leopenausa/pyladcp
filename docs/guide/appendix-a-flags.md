@@ -33,7 +33,9 @@ options:
   -h, --help            show this help message and exit
   --root ROOT           base dir for file discovery (default: New_golden/Good)
   --cruise CRUISE       cruise preset for params + raw-archive manifest
-                        (default: MORIA)
+                        (default: LADCP, the generic operator-community
+                        defaults; a registered name like MORIA adds cruise-
+                        specific layers)
   --index INDEX         archive index JSON (ladcp-index build); resolves raw
                         files by station
   -o OUTDIR, --out OUTDIR, --outdir OUTDIR
@@ -279,7 +281,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --root ROOT           base dir for file discovery (default: New_golden/Good)
-  --cruise CRUISE       cruise preset (default: MORIA)
+  --cruise CRUISE       cruise preset (default: LADCP)
   --index INDEX         archive index JSON (ladcp-index build); with no
                         station ids, serves every cast in the index
   --from-hex            build missing cleaned CTD from the index's raw .hex

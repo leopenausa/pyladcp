@@ -39,7 +39,7 @@ log = logging.getLogger("ladcp.qa")
 
 
 def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
-             solver="inverse", sadcp_opts=None, cruise="MORIA", formats=None, ctd_utc=None,
+             solver="inverse", sadcp_opts=None, cruise="LADCP", formats=None, ctd_utc=None,
              inv_opts=None, edits=None, hint_root=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
@@ -432,8 +432,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("stations", nargs="*", help="station id(s), e.g. 80 or 79 80 82")
     ap.add_argument("--root", default="New_golden/Good",
                     help="base dir for file discovery (default: New_golden/Good)")
-    ap.add_argument("--cruise", default="MORIA",
-                    help="cruise preset for params + raw-archive manifest (default: MORIA)")
+    ap.add_argument("--cruise", default="LADCP",
+                    help="cruise preset for params + raw-archive manifest (default: LADCP, "
+                         "the generic operator-community defaults; a registered name like MORIA "
+                         "adds cruise-specific layers)")
     ap.add_argument("--index", default=None,
                     help="archive index JSON (ladcp-index build); resolves raw files by station")
     ap.add_argument("-o", "--out", "--outdir", dest="outdir", default="qa_out",
