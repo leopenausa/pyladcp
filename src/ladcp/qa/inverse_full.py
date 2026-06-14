@@ -22,7 +22,7 @@ the two-pass ``velerr`` override and the ``lanarrow`` 1% outlier loop (``outlier
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import scipy.sparse as sp
@@ -479,6 +479,19 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
         svel_mag = np.asarray(svel, dtype=float).copy()
         su, sv = _uvrot(svel_mag[:, 1], svel_mag[:, 2], -drot)     # true -> magnetic
         svel_mag[:, 1], svel_mag[:, 2] = su, sv
+
+    # The GPS ship velocity (aux.uship) is built in the TRUE (geographic) frame, but the solve
+    # data/unknowns are MAGNETIC (se.ru/rv are rotated to true only at the end). Rotate uship
+    # true->magnetic so the lainbaro RHS is frame-consistent -- the same handling the SADCP
+    # constraint gets above. Legacy rotates all data to true at load (loadnav.m:178-179), so its
+    # lainbaro uship is already frame-consistent; pyladcp must rotate here. Error w/o this is
+    # ~|uship|*drot_rad: negligible on station-kept casts, real on drifting/steaming ones.
+    if drot and np.isfinite(aux.uship):
+        su, sv = _uvrot(aux.uship.real, aux.uship.imag, -drot)    # true -> magnetic
+        aux = replace(aux, uship=complex(su, sv))
+
+    if diag is not None:
+        diag["uship"] = aux.uship
 
     def solve(**kw):
         return _solve(se, aux, dz=dz, weightmin=weightmin, smoofac=smoofac, botfac=botfac,
