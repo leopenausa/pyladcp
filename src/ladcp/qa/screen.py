@@ -78,12 +78,40 @@ def _cell_good(head: RawADCP, pglim: float, elim: float) -> tuple[np.ndarray, in
 _WRANGE = 5     # loadrdi.m:183 d.wrange: near bins forming the per-ensemble w reference
 
 
+def _wref_medianan(w: np.ndarray) -> np.ndarray:
+    """Per-ensemble near-bin reference w, matching legacy ``medianan(.,na=1)``.
+
+    Legacy ``loadrdi.m:186`` references the near-bin w with ``medianan(l.w(izr,:),1)``,
+    which is NOT a median: it returns the mean of up to 3 central order statistics
+    (``indexav = round([-1:1] + L/2)``, clipped to ``[1,L]``; MATLAB round is
+    half-away-from-zero). This matches ``np.nanmedian`` only when 5 near bins
+    survive; with fewer (shallow casts) it diverges -- so we reproduce it exactly.
+    """
+    arr = w[:_WRANGE]                              # [R<=5, T]
+    srt = np.sort(arr, axis=0)                     # np.sort pushes NaN to the end
+    cnt = np.isfinite(arr).sum(axis=0)             # [T] finite near-bin count
+    c = np.floor(cnt / 2 + 0.5).astype(int)        # MATLAB round(L/2), half away from 0
+    nsum = np.zeros(cnt.shape)
+    ncnt = np.zeros(cnt.shape, dtype=int)
+    for off in (-1, 0, 1):                         # the [-na:na] = [-1,0,1] window
+        idx1 = c + off                             # 1-based order-stat index
+        valid = (idx1 >= 1) & (idx1 <= cnt)
+        idx0 = np.clip(idx1 - 1, 0, arr.shape[0] - 1)
+        vals = np.take_along_axis(srt, idx0[None, :], axis=0)[0]
+        nsum += np.where(valid, vals, 0.0)
+        ncnt += valid
+    out = np.full(cnt.shape, np.nan)
+    np.divide(nsum, ncnt, out=out, where=ncnt > 0)
+    return out
+
+
 def _wv_bad(head: RawADCP, good: np.ndarray, wlim: float,
             vlim: float) -> tuple[np.ndarray, np.ndarray, int, int]:
     """The loadrdi wlim + vlim velocity edits for one head (loadrdi.m:180-237).
 
     Water cells move with the package vertically, so a cell whose w deviates more
-    than ``wlim`` from the head's near-bin median w (``d.wrange=5``) is not water
+    than ``wlim`` from the head's near-bin medianan w (``d.wrange=5``; mean of the
+    3 central order stats, ``_wref_medianan``) is not water
     -- bottom/surface echo, interference, or noise; horizontal speed > ``vlim``
     is the same verdict. Legacy NaNs u/v/w for these cells (correlation and error
     velocity untouched). Computed on the pg/errvel survivors, BEFORE the tilt
@@ -98,7 +126,7 @@ def _wv_bad(head: RawADCP, good: np.ndarray, wlim: float,
     w = np.where(good, head.vel[2], np.nan)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)    # all-NaN ensemble slices
-        wref = np.nanmedian(w[:_WRANGE], axis=0)           # medianan over near bins
+        wref = _wref_medianan(w)                           # legacy medianan(.,na=1), loadrdi.m:186
         w_bad = np.abs(w - wref[None, :]) > wlim           # NaN-safe: NaN -> False
         v_bad = ~w_bad & (np.hypot(u, v) > vlim)           # vlim counted on wlim survivors
     return w_bad | v_bad, wref, int(w_bad.sum()), int(v_bad.sum())
