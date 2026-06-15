@@ -23,7 +23,7 @@ a genuine end-to-end verification:
 
 ```bash
 pip install pytest
-pytest -q     # expect ~246+ passed, ~21 skipped (skips = local-only cruise data)
+pytest -q     # expect ~355+ passed, ~22 skipped (skips = local-only cruise data)
 ```
 
 Then prove it to yourself properly: run the
