@@ -260,6 +260,45 @@ options:
   -o OUT, --out OUT     output PNG (default sadcp_section.png)
 ```
 
+## `ladcp-section`
+
+```text
+usage: ladcp-section [-h] [--component {both,cross-along,uv}]
+                     [--gridding {oa,linear}] [--anomaly]
+                     [--order {distance,station,time}] [--stations STATIONS]
+                     [--azimuth AZIMUTH] [--clim CLIM] [--lh LH] [--lv LV]
+                     [--max-depth MAX_DEPTH] [--title TITLE] [-o OUT]
+                     PATH
+
+Cruise velocity section from a processed cruise NetCDF
+
+positional arguments:
+  PATH                  cruise NetCDF (exports/<CRUISE>_ladcp.nc) or a cruise
+                        output dir
+
+options:
+  -h, --help            show this help message and exit
+  --component {both,cross-along,uv}
+                        velocity components to draw (default: both)
+  --gridding {oa,linear}
+                        objective-analysis (default) or linear interpolation
+  --anomaly             subtract each station's depth-mean (baroclinic
+                        section)
+  --order {distance,station,time}
+                        station ordering along the x-axis (default: distance)
+  --stations STATIONS   comma-separated subset of station labels (one
+                        transect/leg)
+  --azimuth AZIMUTH     fixed transect heading [deg from N] for cross/along
+                        rotation (default: per-segment from station positions)
+  --clim CLIM           symmetric colour range [m/s] (default: robust auto)
+  --lh LH               OA horizontal length [km]
+  --lv LV               OA vertical length [m]
+  --max-depth MAX_DEPTH
+                        crop depth axis [m]
+  --title TITLE         figure title
+  -o OUT, --out OUT     output figure path
+```
+
 ## `ladcp-studio`
 
 ```text

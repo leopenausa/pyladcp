@@ -159,6 +159,37 @@ Useful extras: `--alt-dir DIR --alt-stations a,b --alt-label "botfac=0"` substit
 named stations from an alternate run (clearly labelled everywhere); `--sadcp <dir>`
 overlays the ship-ADCP profile on each cast window as an independent third opinion.
 
+## Step 5 · the cruise section
+
+Turn the processed cruise into a depth-vs-distance velocity section straight from the
+cruise NetCDF — no re-solving:
+
+```bash
+ladcp-section "$B/qa_out/exports/MYCRUISE_ladcp.nc" -o "$B/qa_out/exports/section.pdf"
+```
+
+It reads the `(station, depth)` grids and renders four panels — **cross-track** and
+**along-track** (the transport-relevant pair, rotated onto a per-segment transect
+azimuth) plus earth **u/v**. Velocities are objective-analysis gridded: smooth where the
+survey sampled, **blank where it did not** (no extrapolation above the shallowest bin,
+below the real seabed line, or far from any cast). The seabed comes from each station's
+own `bottom_depth`, so no external bathymetry is needed.
+
+Key flags:
+
+- `--stations t1-01,t1-02,…` — pick **one leg**; a cruise file mixes transects, and a
+  section only makes sense along a single line. Stations are auto-ordered along the
+  transect (`--order distance`, the default).
+- `--component cross-along | uv | both` (default `both`).
+- `--anomaly` — subtract each station's depth-mean to expose the baroclinic structure
+  under a strong barotropic flow.
+- `--gridding linear` — swap the objective analysis for plain interpolation; `--lh/--lv`
+  set the OA correlation lengths (km / m) when you want manual control.
+
+> A single occupation is a **snapshot**: its depth-mean carries the barotropic tide, so
+> absolute cross-track transport from one pass is tide-aliased. The figure says so in a
+> footnote — read it before quoting a transport.
+
 ## The whole thing on one screen
 
 ```bash
