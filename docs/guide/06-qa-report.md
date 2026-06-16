@@ -146,8 +146,17 @@ These rows appear after the velocity solve and cross-check the *finished solutio
   Disagreement means the near-bottom reference is questionable — see the bottom-track
   figure, and chapter 7 for `--botfac 0`.
 - **`sadcp_consistency`** — RMS difference between the LADCP solution and the
-  ship-ADCP over their shared depths. **WARN above 0.1 m/s.** The ship-ADCP is an
-  independent instrument, so this is the headline external accuracy check.
+  ship-ADCP over their shared depths. **WARN above 0.1 m/s.** *In-sample:* when the
+  ship-ADCP is used as a constraint (the default `--sadcpfac 3`), the solution was
+  pulled toward it, so this number is optimistic — read it alongside the independent
+  row below.
+- **`sadcp_independent_rms`** — the same RMS, but from a second solve with the
+  **ship-ADCP withheld** (`sadcpfac=0`, GPS + bottom-track only), so the comparison is
+  truly independent. This is the **honest empirical velocity-uncertainty estimate** —
+  the field standard for high-quality data is ~0.02–0.06 m/s (Thurnherr 2010). It runs
+  automatically whenever a ship-ADCP constraint is active (a cheap re-solve reusing the
+  cached front end). The *gap* between this and `sadcp_consistency` shows how much the
+  constraint moved the solution: a small gap means the agreement is real, not imposed.
 - **`profile_surface_coverage`** — WARNs when no LADCP velocity exists in the upper
   water column (the ADCP began recording mid-cast): the missing range is **unsampled,
   not zero**.
@@ -281,7 +290,8 @@ carry the reference ([chapter 7](07-solvers-weights.md)).
 The ship-ADCP profile (points, with scatter) over the LADCP solution (lines), and
 their difference vs depth.
 
-**Healthy:** agreement within ~5 cm/s over the shared range (`sadcp_consistency`).
+**Healthy:** agreement within ~5 cm/s over the shared range (`sadcp_consistency` for the
+in-sample number, `sadcp_independent_rms` for the honest withheld one).
 **Red flags:** a constant offset (suspect the LADCP reference: bottom track, drift)
 vs a depth-dependent divergence (suspect the shear integration or the ship-ADCP's
 own data quality at range).

@@ -56,8 +56,8 @@ LONG_NAME = {
     "depth_m": "depth below sea surface",
     "u_ms": "eastward sea water velocity",
     "v_ms": "northward sea water velocity",
-    "uerr_ms": "velocity uncertainty",
-    "verr_ms": "velocity uncertainty",
+    "uerr_ms": "formal velocity uncertainty (inverse covariance, not a full error budget)",
+    "verr_ms": "formal velocity uncertainty (inverse covariance, not a full error budget)",
     "u_shear_1s": "eastward velocity shear",
     "v_shear_1s": "northward velocity shear",
     "n_vel": "velocity samples per bin",
@@ -68,6 +68,9 @@ STANDARD_NAME = {
     "depth_m": "depth",
     "u_ms": "eastward_sea_water_velocity",
     "v_ms": "northward_sea_water_velocity",
+    # CF "standard_error" name modifier: uerr/verr are the standard error of the velocity.
+    "uerr_ms": "eastward_sea_water_velocity standard_error",
+    "verr_ms": "northward_sea_water_velocity standard_error",
 }
 
 
@@ -200,4 +203,7 @@ def summary_row(export: StationExport) -> dict:
         "vbar_ms": float(r.vp.vbar),
         "bottom_depth_m": float(r.zbottom),
         "n_bins": int(np.isfinite(r.vp.u).sum()),
+        "sadcp_independent_rms_ms": (float(r.sadcp_independent_rms)
+                                     if r.sadcp_independent_rms is not None
+                                     else float("nan")),
     }

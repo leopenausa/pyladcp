@@ -31,8 +31,11 @@ near-bottom part of `.lad`.
 The profile with `z` as coordinate; `u`, `v`, `uerr`, `nvel` (samples per bin) as
 variables; scalar `latitude`, `longitude`, `time` coordinates; global attributes
 carrying station, cruise, solver, constraint weights, declination (+ provenance) and
-the SADCP source when one was used. Open with xarray:
-`xr.open_dataset("MORIA-80.nc")`.
+the SADCP source when one was used. `u`/`v` carry CF `ancillary_variables` pointing at
+`uerr`, which is a CF `standard_error` of the velocity — a *formal* uncertainty (the
+inverse covariance), **not** a full error budget (for the empirical error, see
+`sadcp_independent_rms` in [chapter 6](06-qa-report.md) / the summary CSV). Open with
+xarray: `xr.open_dataset("MORIA-80.nc")`.
 
 ## `<station>.xlsx` — Excel (needs `pyladcp[export]`)
 
@@ -64,7 +67,7 @@ One entry per scorecard row ([chapter 6](06-qa-report.md)); `status` ∈
 | `<CRUISE>_ladcp.nc` | all stations, station dimension + per-station coords |
 | `<CRUISE>_ladcp.xlsx` | one workbook, one sheet per product |
 | `<CRUISE>_ladcp_odv.txt` | Ocean Data View generic spreadsheet import (station, position, time, depth, u, v, err) |
-| `<CRUISE>_summary.csv` | one row per station: verdict, depths, key metrics — the triage entry point |
+| `<CRUISE>_summary.csv` | one row per station: verdict, depths, key metrics (incl. `sadcp_independent_rms_ms`, the withheld empirical uncertainty) — the triage entry point |
 
 ## Inputs (for reference)
 

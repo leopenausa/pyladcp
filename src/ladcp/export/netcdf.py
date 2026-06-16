@@ -73,6 +73,9 @@ def _station_dataset(export: StationExport) -> xr.Dataset:
         "uerr": _var(prof["uerr_ms"], "depth", "uerr_ms"),
         "nvel": _var(prof["n_vel"], "depth", "n_vel"),
     }
+    # CF ancillary_variables: point u/v at their standard-error variable (uerr).
+    data["u"].attrs["ancillary_variables"] = "uerr"
+    data["v"].attrs["ancillary_variables"] = "uerr"
 
     bt = bottomtrack_frame(export.result)
     if bt is not None:
@@ -82,6 +85,8 @@ def _station_dataset(export: StationExport) -> xr.Dataset:
             "v_bt": _var(bt["v_ms"], "depth_bt", "v_ms"),
             "uerr_bt": _var(bt["uerr_ms"], "depth_bt", "uerr_ms"),
         }
+        data["u_bt"].attrs["ancillary_variables"] = "uerr_bt"
+        data["v_bt"].attrs["ancillary_variables"] = "uerr_bt"
 
     sh = shear_frame(export.result)
     coords |= _depth_coord(sh["depth_m"], "depth_shear")
@@ -140,12 +145,17 @@ def write_cruise_nc(exports: list[StationExport], path: str, *, cruise: str = ""
         {
             "u": (("station", "depth"), u, {"units": "m s-1",
                                             "long_name": "eastward sea water velocity",
-                                            "standard_name": "eastward_sea_water_velocity"}),
+                                            "standard_name": "eastward_sea_water_velocity",
+                                            "ancillary_variables": "uerr"}),
             "v": (("station", "depth"), v, {"units": "m s-1",
                                             "long_name": "northward sea water velocity",
-                                            "standard_name": "northward_sea_water_velocity"}),
-            "uerr": (("station", "depth"), uerr, {"units": "m s-1",
-                                                  "long_name": "velocity uncertainty"}),
+                                            "standard_name": "northward_sea_water_velocity",
+                                            "ancillary_variables": "uerr"}),
+            "uerr": (("station", "depth"), uerr,
+                     {"units": "m s-1",
+                      "long_name": "formal velocity uncertainty (inverse covariance, "
+                                   "not a full error budget)",
+                      "standard_name": "eastward_sea_water_velocity standard_error"}),
             "bottom_depth": ("station", [m["bottom_depth_m"] for m in md],
                              {"units": "m", "long_name": "bottom depth"}),
         },

@@ -511,6 +511,10 @@ class VelocityResult:
     weights: ConstraintWeights | None = None  # inverse constraint weights -- Figure 12
     # legacy getshear2 shear-vs-inverse consistency (uvds, mean_uerr) m/s; inverse only
     shear_inverse: tuple[float, float] | None = None
+    # independent empirical uncertainty: RMS(LADCP - ship-ADCP) from a second solve with the
+    # SADCP *withheld* (sadcpfac=0), so the comparison is not circular. None when no SADCP
+    # constraint was active (the in-sample sadcp_consistency is then already independent).
+    sadcp_independent_rms: float | None = None
 
     @property
     def resid_rms(self) -> float:

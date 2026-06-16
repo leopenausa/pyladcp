@@ -185,8 +185,9 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
                       inv_opts=None):
     import numpy as np
 
+    from ..plots.sadcp_figure import sadcp_rms_discrepancy
     from ..qa.export import write_bot, write_lad
-    from ..qa.inverse import compute_velocity_full
+    from ..qa.inverse import build_solve_context, compute_velocity_full
 
     lat = float(np.nanmedian(ctd.lat))
     lon = float(np.nanmedian(ctd.lon))
@@ -200,17 +201,35 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
     sadcp = (_sadcp_profile(sadcp_opts, t_lad.min(), t_lad.max(), lat, lon, solver)
              if sadcp_opts else None)
     io = inv_opts or {}
+    sadcpfac = (sadcp_opts or {}).get("fac", 3.0)
+    # Build the expensive front end once so the SADCP-withheld validation solve below reuses
+    # it (~30 ms) instead of rebuilding (~1.2 s); the main solve stays bit-identical.
+    context = build_solve_context(dh, ctd, dz=8.0, params=dh.params)
     result = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver,
-                                   sadcp=sadcp,
-                                   sadcpfac=(sadcp_opts or {}).get("fac", 3.0),
+                                   sadcp=sadcp, sadcpfac=sadcpfac,
                                    botfac=io.get("botfac", 1.0),
                                    barofac=io.get("barofac", 1.0),
-                                   smoofac=io.get("smoofac", 0.0))
+                                   smoofac=io.get("smoofac", 0.0),
+                                   context=context)
+    # Independent empirical uncertainty: re-solve with the ship-ADCP withheld (sadcpfac=0) so
+    # the LADCP-vs-SADCP comparison is not circular, then RMS over the shared depth range. Only
+    # meaningful when the SADCP was actually pulling the main solve (inverse, sadcp, fac>0).
+    if solver == "inverse" and sadcp is not None and sadcpfac > 0:
+        withheld = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver,
+                                         sadcp=sadcp, sadcpfac=0.0,
+                                         botfac=io.get("botfac", 1.0),
+                                         barofac=io.get("barofac", 1.0),
+                                         smoofac=io.get("smoofac", 0.0),
+                                         context=context)
+        result.sadcp_independent_rms = sadcp_rms_discrepancy(withheld)
     vp, bp = result.vp, result.bp
     lad = out / f"{station}.lad"
     write_lad(vp, str(lad), station=station, lat=lat, lon=lon, drot=drot, time=when)
     log.info("        velocity: %s  (solver %s, drot %+.2f deg, ubar %+.3f)",
              lad, solver, drot, vp.ubar)
+    if result.sadcp_independent_rms is not None and np.isfinite(result.sadcp_independent_rms):
+        log.info("        empirical uncertainty: %.3f m/s  (RMS LADCP-SADCP, SADCP withheld)",
+                 result.sadcp_independent_rms)
 
     if bp is not None and bp.n_bins > 0:
         bot = out / f"{station}.bot"
