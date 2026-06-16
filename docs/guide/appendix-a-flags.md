@@ -299,6 +299,36 @@ options:
   -o OUT, --out OUT     output figure path
 ```
 
+## `ladcp-vectormap`
+
+```text
+usage: ladcp-vectormap [-h] [--layer Z0:Z1] [--reduce {mean,integral}]
+                       [--stations STATIONS] [--scale SCALE] [--coastline]
+                       [--title TITLE] [-o OUT]
+                       PATH
+
+Plan-view depth-integrated velocity vector map from a cruise NetCDF
+
+positional arguments:
+  PATH                  cruise NetCDF (exports/<CRUISE>_ladcp.nc) or a cruise
+                        output dir
+
+options:
+  -h, --help            show this help message and exit
+  --layer Z0:Z1         depth range [m] to integrate (repeatable; e.g. 0:200
+                        200:800; default: full column)
+  --reduce {mean,integral}
+                        arrow = depth-averaged velocity [m/s] (default) or
+                        depth-integrated transport per unit width [m2/s]
+  --stations STATIONS   comma-separated subset of station labels
+  --scale SCALE         quiver scale (larger = shorter arrows; default: robust
+                        auto)
+  --coastline           draw a coastline (needs cartopy; ignored if
+                        unavailable)
+  --title TITLE         figure title
+  -o OUT, --out OUT     output figure path
+```
+
 ## `ladcp-studio`
 
 ```text

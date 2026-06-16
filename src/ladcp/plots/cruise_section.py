@@ -15,8 +15,8 @@ CLI::
     ladcp-section exports/FDCCC1_ladcp.nc --component both -o section.pdf
 
 A single occupation is a snapshot whose depth-mean is tide-aliased; the figure says so. The
-plan-view vector-map tier (depth-/density-range-integrated arrows) is future work — see
-:func:`cruise_vector_map`.
+plan-view vector-map companion (depth-range-integrated arrows) is the ``ladcp-vectormap``
+command in :mod:`ladcp.plots.cruise_vectormap`.
 """
 
 from __future__ import annotations
@@ -235,16 +235,6 @@ def cruise_section_figure(sec: CruiseSection, *, component: str = "both",
     if savepath:
         fig.savefig(savepath, dpi=170)
     return fig
-
-
-def cruise_vector_map(*args, **kwargs):  # pragma: no cover - future tier
-    """Plan-view quiver of depth-/density-range-integrated velocity vectors (future).
-
-    Depth-range integration is straightforward from this cruise file; density-range
-    integration first needs a ``density(station, depth)`` variable added to the cruise
-    NetCDF (read from each station's CTD in ``write_cruise_nc``). Not implemented yet.
-    """
-    raise NotImplementedError("cruise vector map is a future tier; see the module docstring")
 
 
 def main(argv: list[str] | None = None) -> int:

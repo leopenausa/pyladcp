@@ -190,6 +190,28 @@ Key flags:
 > absolute cross-track transport from one pass is tide-aliased. The figure says so in a
 > footnote — read it before quoting a transport.
 
+### Plan view — `ladcp-vectormap`
+
+The map companion to the section: one velocity arrow per station, integrated over a depth
+range, on a lat/lon map.
+
+```bash
+ladcp-vectormap "$B/qa_out/exports/MYCRUISE_ladcp.nc" \
+    --layer 0:200 --layer 200:800 -o "$B/qa_out/exports/vectors.png"
+```
+
+- **`--layer z0:z1`** (repeatable) draws each depth band in its own colour on the same map, so
+  the **vertical shear of the horizontal flow** is visible at a glance (surface vs deep). Omit
+  it for the full-column mean.
+- **`--reduce mean`** (default) is the layer's depth-averaged velocity [m/s]; **`--reduce
+  integral`** is the depth-integrated transport per unit width [m²/s] (∫u dz). Arrows share one
+  scale, with a reference key per layer.
+- Stations whose layer is below the seabed or unsampled get no arrow (never a zero). The same
+  tide caveat applies — these are single-occupation snapshots.
+
+Integration is over **depth** ranges; density-range layers are future work (they need density
+added to the cruise NetCDF from each station's CTD).
+
 ## The whole thing on one screen
 
 ```bash

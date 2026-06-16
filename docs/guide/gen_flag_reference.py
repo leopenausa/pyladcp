@@ -24,6 +24,7 @@ COMMANDS: list[tuple[str, list[str]]] = [
     ("ladcp-compare", ["ladcp-compare", "--help"]),
     ("ladcp-sadcp-section", ["ladcp-sadcp-section", "--help"]),
     ("ladcp-section", ["ladcp-section", "--help"]),
+    ("ladcp-vectormap", ["ladcp-vectormap", "--help"]),
     ("ladcp-studio", ["ladcp-studio", "--help"]),
 ]
 
