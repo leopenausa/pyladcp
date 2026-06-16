@@ -23,6 +23,7 @@ COMMANDS: list[tuple[str, list[str]]] = [
     ("ladcp-index show", ["ladcp-index", "show", "--help"]),
     ("ladcp-compare", ["ladcp-compare", "--help"]),
     ("ladcp-sadcp-section", ["ladcp-sadcp-section", "--help"]),
+    ("ladcp-section", ["ladcp-section", "--help"]),
     ("ladcp-studio", ["ladcp-studio", "--help"]),
 ]
 
