@@ -39,7 +39,8 @@ _HEADLINE = [
     "dual_head_offset_est", "ctd_sync_corr", "bottom_depth",
 ]
 _A4 = (8.27, 11.69)
-_CONSISTENCY = ["velocity_error_vs_noise", "bottom_track_consistency", "sadcp_consistency"]
+_CONSISTENCY = ["velocity_error_vs_noise", "bottom_track_consistency", "sadcp_consistency",
+                "sadcp_independent_rms"]
 
 
 def build_report(dh: DualHead, qc: QCMetrics, outdir: str, station: str,

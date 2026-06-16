@@ -6,8 +6,14 @@ work it is two things at once:
 - an **absolute velocity constraint** on the upper ocean — the only reference that
   acts there (the bottom track acts at depth, GPS only on the depth-mean), and
 - an **independent instrument measuring the same water** — the headline external
-  accuracy check on your finished profiles (`sadcp_consistency`,
-  [chapter 6](06-qa-report.md)).
+  accuracy check on your finished profiles (`sadcp_consistency` and the withheld
+  `sadcp_independent_rms`, [chapter 6](06-qa-report.md)).
+
+> **In-sample vs independent.** When the ship-ADCP is used as a constraint (the default),
+> the LADCP is pulled toward it, so `sadcp_consistency` understates the true error.
+> pyladcp therefore also reports `sadcp_independent_rms` — the same RMS from an automatic
+> second solve with the ship-ADCP **withheld** (`sadcpfac=0`) — as the honest empirical
+> velocity-uncertainty estimate (~0.02–0.06 m/s for high-quality data; Thurnherr 2010).
 
 You can use it three ways, in increasing order of effort: feed the raw VmDAS averages
 straight in (sufficient for on-station work), fix a broken acquisition clock first,
@@ -69,6 +75,8 @@ With `--sadcp` active you get both roles at once:
 Don't skip the referee role even if you don't want the constraint: a run with
 `--sadcpfac 0 --sadcp <dir>` keeps the comparison while taking the SADCP out of the
 solve — useful when you need the two instruments to stay strictly independent.
+(When you *do* keep the constraint, `sadcp_independent_rms` already gives you this
+withheld comparison automatically, so you get both numbers from a single run.)
 
 ## Section plots — `ladcp-sadcp-section`
 

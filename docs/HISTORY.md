@@ -35,6 +35,15 @@ A condensed record of how the package evolved. Full detail lives in git history.
   the tree lean and version-controlled, and stood up the `pyladcp` package (MIT, CI,
   in-repo MORIA-80 fixtures).
 
+- **Independent empirical uncertainty (2026-06-16).** The `sadcp_consistency` check was
+  circular when the ship-ADCP was used as a constraint (default `--sadcpfac 3`): the LADCP
+  is pulled toward the SADCP it's then compared against. Added `sadcp_independent_rms` — the
+  same RMS from an automatic second solve with the SADCP **withheld** (`sadcpfac=0`, reusing
+  the cached front end), the honest field-standard empirical error (~0.02–0.06 m/s; Thurnherr
+  2010). Both rows are shown so the gap reveals how much the constraint moved the solution.
+  `uerr` relabelled a *formal* uncertainty (CF `standard_error`, `ancillary_variables`), not a
+  full error budget. Grounded in a cited literature scan; verified end-to-end on FDCCC1.
+
 ## Known fidelity walls (not bugs)
 - The golden raw weight archive (`da`) is **truncated** → exact per-cell edit / hspeed /
   weight counts are not bit-reproducible; profiles (`.lad`, `dr`) are validated at profile

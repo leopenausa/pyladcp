@@ -83,7 +83,20 @@ def consistency_checks(r: VelocityResult) -> list[Metric]:
             out.append(Metric(
                 "sadcp_consistency", round(rms, 3), "m/s", status,
                 source_stage="qa.checks",
-                note=f"RMS(LADCP − ship-ADCP) over shared depths, {len(r.sadcp)} bins"))
+                note=(f"RMS(LADCP − ship-ADCP) over shared depths, {len(r.sadcp)} bins; "
+                      f"in-sample (ship-ADCP used as a constraint, so optimistic)")))
+
+    # Independent empirical uncertainty: the same RMS from a solve with the ship-ADCP withheld
+    # (sadcpfac=0), so it is not circular. This is the honest velocity-error number; the field
+    # standard for high-quality data is ~0.02-0.06 m/s (Thurnherr 2010). Set in _velocity_outputs.
+    rms_i = r.sadcp_independent_rms
+    if rms_i is not None and np.isfinite(rms_i):
+        status = Status.OK if rms_i <= 0.1 else Status.WARN
+        out.append(Metric(
+            "sadcp_independent_rms", round(rms_i, 3), "m/s", status,
+            source_stage="qa.checks",
+            note=("RMS(LADCP − ship-ADCP) with ship-ADCP withheld from the solve (sadcpfac=0) "
+                  "-- independent empirical velocity uncertainty; typical 0.02-0.06 m/s")))
 
     # shear-vs-inverse disagreement (legacy getshear2.m:143-158): the inverse and shear
     # method are independent estimators of the baroclinic shear; legacy WARNs (and has

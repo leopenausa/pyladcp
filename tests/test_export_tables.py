@@ -69,5 +69,6 @@ def test_metadata_and_summary(synth_export):
 
     row = summary_row(synth_export)
     assert set(row) == {"station", "latitude_deg", "longitude_deg", "time_utc",
-                        "overall_status", "ubar_ms", "vbar_ms", "bottom_depth_m", "n_bins"}
+                        "overall_status", "ubar_ms", "vbar_ms", "bottom_depth_m", "n_bins",
+                        "sadcp_independent_rms_ms"}
     assert row["overall_status"] == "warn"
