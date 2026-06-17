@@ -41,12 +41,18 @@ The work below is sequenced; each step gets its own detailed plan before executi
    versioning/CHANGELOG, **PyPI publish** (name `pyladcp` free as of 2026-06; plan:
    GitHub-Actions Trusted Publishing, TestPyPI dry-run first, Zenodo DOI on the
    same release; audit the sdist contents before the first upload).
-   - **Shippable synthetic dataset** ✅ — `ladcp-synth` (`ladcp/synth/`) forward-models a
-     known ocean profile + seabed into real dual-head PD0 + CTD `.cnv` via a new PD0 writer
+   - **Shippable synthetic dataset** ✅ (PR #64) — `ladcp-synth` (`ladcp/synth/`) forward-models
+     a known ocean profile + seabed into real dual-head PD0 + CTD `.cnv` via a new PD0 writer
      (`io/pd0_write.py`), so anyone can run the pipeline end-to-end after `pip install` with
      **no private deps** (the public-demo gap). Doubles as a known-answer recovery test
      (`tests/test_synth_recovery.py`: u corr >0.99, v >0.95, seabed within ~1 bin). Committed
-     example under `tests/fixtures/synthetic/`. See [[ladcp-synthetic-dataset]].
+     example under `tests/fixtures/synthetic/`; documented in guide **Appendix F**. See
+     [[ladcp-synthetic-dataset]].
+   - **Inverse robustness — NaN-reference fix** ✅ (PR #65) — the known-answer probe immediately
+     paid off: it caught the two-pass inverse silently returning a **NaN barotropic reference**
+     on an exceptionally clean fit (unfloored `velerr2` → all data cut by `weightmin`). Fixed
+     with a `MIN_VELERR` floor + a degenerate-pass guard/WARN. MORIA-80 golden byte-unchanged;
+     full FDCCC1 rerun confirmed it inert on real data (median u_rms 1.29 cm/s, guard never fired).
 7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → cleaned 6-col `.cnv`, so casts
    without a pre-processed profile still run. Recipe lives in CTD_project
    (`ctd_pipeline.convert_for_ladcp`); pyladcp calls it via `io/ctd_raw.py` as an **optional**
