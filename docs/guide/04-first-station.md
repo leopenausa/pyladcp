@@ -11,6 +11,28 @@ nothing but the cloned repository.
     installation — see [chapter 3](03-installation.md) and
     [chapter 9](09-troubleshooting.md).
 
+## No real data yet? Generate a synthetic station
+
+If you just `pip install`ed pyladcp and don't have the repository fixtures (or any
+cast of your own), generate a **synthetic** dual-head station and process it — a
+self-contained demo with no external data:
+
+```bash
+ladcp-synth --out synthetic_station --seed 0
+ladcp-qa SYNTH-01 --root synthetic_station --out qa_out
+```
+
+`ladcp-synth` forward-models a known ocean velocity profile (a thermocline shear in
+*u* — an eastward surface layer over a counter-flowing deep layer — with *v* veering
+through it) and a seabed, then writes real PD0 + CTD files in the layout below. Because
+the truth is known, you can sanity-check the result — it prints the target `ubar`/`vbar`
+and seabed depth, and the solved profile should match. The same generator backs
+pyladcp's recovery accuracy test (`tests/test_synth_recovery.py`).
+[Appendix F](appendix-f-synthetic.md) covers what it generates, the use cases (demo,
+teaching, known-answer validation, CI), and its limits.
+
+The rest of this chapter uses the real **MORIA-80** fixture shipped in the repo.
+
 ## The data
 
 From the repository root, the tutorial station lives in the curated layout:

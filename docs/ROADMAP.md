@@ -41,6 +41,12 @@ The work below is sequenced; each step gets its own detailed plan before executi
    versioning/CHANGELOG, **PyPI publish** (name `pyladcp` free as of 2026-06; plan:
    GitHub-Actions Trusted Publishing, TestPyPI dry-run first, Zenodo DOI on the
    same release; audit the sdist contents before the first upload).
+   - **Shippable synthetic dataset** ✅ — `ladcp-synth` (`ladcp/synth/`) forward-models a
+     known ocean profile + seabed into real dual-head PD0 + CTD `.cnv` via a new PD0 writer
+     (`io/pd0_write.py`), so anyone can run the pipeline end-to-end after `pip install` with
+     **no private deps** (the public-demo gap). Doubles as a known-answer recovery test
+     (`tests/test_synth_recovery.py`: u corr >0.99, v >0.95, seabed within ~1 bin). Committed
+     example under `tests/fixtures/synthetic/`. See [[ladcp-synthetic-dataset]].
 7. **CTD-pipeline integration (#6)** ✅ — raw Seabird `.hex` → cleaned 6-col `.cnv`, so casts
    without a pre-processed profile still run. Recipe lives in CTD_project
    (`ctd_pipeline.convert_for_ladcp`); pyladcp calls it via `io/ctd_raw.py` as an **optional**

@@ -30,6 +30,7 @@ CHAPTERS=(
   "$G/appendix-c-formats.md"
   "$G/appendix-d-logsheets.md"
   "$G/appendix-e-glossary.md"
+  "$G/appendix-f-synthetic.md"
 )
 
 TITLE="Processing LADCP data with pyladcp"

@@ -54,6 +54,7 @@ ladcp-section = "ladcp.plots.cruise_section:main"
 ladcp-vectormap = "ladcp.plots.cruise_vectormap:main"
 ladcp-compare = "ladcp.qa.compare:main"
 ladcp-studio = "ladcp.studio.server:main"
+ladcp-synth = "ladcp.synth.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

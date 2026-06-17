@@ -329,6 +329,37 @@ options:
   -o OUT, --out OUT     output figure path
 ```
 
+## `ladcp-synth`
+
+```text
+usage: ladcp-synth [-h] [--out OUT] [--station STATION] [--seed SEED]
+                   [--noise NOISE] [--depth DEPTH] [--seabed SEABED] [--u0 U0]
+                   [--v0 V0] [--shear-amp SHEAR_AMP]
+                   [--shear-scale SHEAR_SCALE] [--n-cells N_CELLS]
+                   [--cell-m CELL_M] [--lat LAT] [--lon LON]
+
+Generate a synthetic dual-head LADCP station (PD0 + CTD .cnv).
+
+options:
+  -h, --help            show this help message and exit
+  --out OUT             output root directory
+  --station STATION     station label / file prefix
+  --seed SEED           RNG seed (determinism)
+  --noise NOISE         velocity noise std [m/s] (0 = clean recovery target)
+  --depth DEPTH         package max depth [m]
+  --seabed SEABED       seabed / water depth [m] (cast stops ~20 m above it)
+  --u0 U0               barotropic east velocity [m/s]
+  --v0 V0               barotropic north velocity [m/s]
+  --shear-amp SHEAR_AMP
+                        baroclinic shear amplitude [m/s]
+  --shear-scale SHEAR_SCALE
+                        shear e-folding scale [m]
+  --n-cells N_CELLS     bins per head
+  --cell-m CELL_M       bin length [m]
+  --lat LAT             station latitude [deg]
+  --lon LON             station longitude [deg]
+```
+
 ## `ladcp-studio`
 
 ```text
