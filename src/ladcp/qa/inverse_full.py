@@ -36,6 +36,10 @@ from .superens import SuperEns, _uvrot
 # constraint-normalisation defaults (legacy default.m / getinv.m)
 NAV_ERROR = 30.0              # m, p.nav_error (GPS fix uncertainty)
 BTRK_RANGE = (50.0, 300.0)    # p.btrk_range: package height above bottom to trust BT [m]
+# floor on the data velocity error [m/s]: ~ the single-ping precision. A velerr below this
+# is unphysical; without it, a very clean fit drives the two-pass velerr toward 0, the data
+# weights (velerr/scatter) collapse, and the absolute weightmin cut silently rejects ALL data.
+MIN_VELERR = 0.02
 
 
 # --------------------------------------------------------------------------- #
@@ -263,7 +267,8 @@ def _solve(se: SuperEns, aux: InverseAux, *, dz: float, weightmin: float,
         warnings.simplefilter("ignore", RuntimeWarning)   # DOF<=0 on sparse SE columns
         sw = np.nanstd(se.rw[se.izd[:nmax]], axis=0)
     sw = sw[sw > 0]
-    velerr = max(float(np.nanmedian(sw) / np.tan(np.deg2rad(20.0))), 0.02) if sw.size else 0.02
+    velerr = (max(float(np.nanmedian(sw) / np.tan(np.deg2rad(20.0))), MIN_VELERR)
+              if sw.size else MIN_VELERR)
     if velerr_override is not None and np.isfinite(velerr_override) and velerr_override > 0:
         velerr = float(velerr_override)
     wm = (velerr / se.ruvs).reshape(-1)                # data weight = velerr / scatter
@@ -502,11 +507,22 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
     n_pass = int(np.ceil(outlier)) if outlier and outlier > 0 else 0
     reject = None
     if n_pass > 0:
-        velerr2 = float(np.nanmedian(_ocean_error(sol)))
+        # Floor the two-pass velocity error like pass 1 (MIN_VELERR): a very clean fit yields a
+        # sub-mm/s median ocean error, which would shrink every data weight below ``weightmin``
+        # and silently reject all data (-> empty solve, NaN reference). Real noisy casts sit well
+        # above the floor, so this is byte-identical for them.
+        velerr2 = max(float(np.nanmedian(_ocean_error(sol))), MIN_VELERR)
         for _ in range(n_pass):
             rj = _lanarrow_reject(sol, se.ru.shape, frac=0.01)
             reject = rj if reject is None else (reject | rj)
-            sol = solve(velerr_override=velerr2, reject=reject)
+            sol2 = solve(velerr_override=velerr2, reject=reject)
+            if sol2.nvel.sum() == 0:                       # degenerate re-solve: keep the last
+                warnings.warn(                             # good pass rather than a NaN reference
+                    "inverse: a refinement pass rejected all data (degenerate weights); "
+                    "keeping the previous solution. The barotropic reference may be weak.",
+                    RuntimeWarning, stacklevel=2)
+                break
+            sol = sol2
 
     if diag is not None:
         diag["weights"] = sol.weights

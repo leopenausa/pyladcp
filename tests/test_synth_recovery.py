@@ -43,7 +43,7 @@ def _solve(tmp_path, **cfg_kw):
 def test_clean_recovery(tmp_path):
     res, truth, cfg, su, sv = _solve(tmp_path, seed=0, noise=0.0)
 
-    # the linear-shear u is the exactly-resolvable mode: recovered near-perfectly
+    # u (the thermocline shear) is the well-resolved mode: recovered near-perfectly
     assert su.corr > 0.99, f"u corr {su.corr}"
     assert su.rms < 0.02, f"u rms {su.rms}"
     # the curved v mode is mildly damped by the inverse smoothing -- still a strong recovery
@@ -86,6 +86,22 @@ def test_noisy_still_recovers(tmp_path):
     res, truth, cfg, su, sv = _solve(tmp_path, seed=0, noise=0.01)
     assert su.corr > 0.95, f"u corr {su.corr}"
     assert sv.corr > 0.95, f"v corr {sv.corr}"
+
+
+def test_clean_fit_keeps_finite_reference(tmp_path):
+    """Regression: a noise-free cast must not yield a NaN barotropic reference.
+
+    The inverse's two-pass refinement drove the velocity error toward zero on a clean fit,
+    collapsing the data weights below ``weightmin`` so the second pass rejected all data and
+    returned ``ubar = NaN`` (silently). ping_dt 1.0 reliably triggered the collapse before the
+    MIN_VELERR floor in ``inverse_full.invert``. Guards the floor + degenerate-pass fallback.
+    """
+    res, truth, cfg, su, sv = _solve(tmp_path, seed=0, noise=0.0, ping_dt=1.0)
+    assert np.isfinite(res.vp.ubar), "barotropic ubar collapsed to NaN"
+    assert np.isfinite(res.vp.vbar), "barotropic vbar collapsed to NaN"
+    assert (res.vp.nvel > 0).any(), "no data survived the weight cut"
+    assert su.corr > 0.99 and sv.corr > 0.95
+    assert abs(res.vp.ubar - truth.ubar) < 0.02
 
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "synthetic"
