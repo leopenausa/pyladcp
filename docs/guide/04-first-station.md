@@ -28,6 +28,8 @@ through it) and a seabed, then writes real PD0 + CTD files in the layout below. 
 the truth is known, you can sanity-check the result — it prints the target `ubar`/`vbar`
 and seabed depth, and the solved profile should match. The same generator backs
 pyladcp's recovery accuracy test (`tests/test_synth_recovery.py`).
+[Appendix F](appendix-f-synthetic.md) covers what it generates, the use cases (demo,
+teaching, known-answer validation, CI), and its limits.
 
 The rest of this chapter uses the real **MORIA-80** fixture shipped in the repo.
 
