@@ -57,7 +57,7 @@ guide/__pycache__/
 
 # raw cruise test datasets dropped into the workspace (never committed)
 CCC_ladcp_test/
-quick_run.log
+*_run.log
 wetransfer_*/
 
 # deep legacy-vs-pyladcp audit workspace (JSONs, evidence, PDF report) -- local only
