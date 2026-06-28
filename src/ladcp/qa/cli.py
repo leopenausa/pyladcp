@@ -329,6 +329,9 @@ def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
     if opts.get("source") == "codas":
         from ..io.sadcp_codas import read_codas_nc
         ds = read_codas_nc(opts["folder"])
+    elif opts.get("source") == "ek80":
+        from ..io.sadcp_ek80 import read_ek80
+        ds = read_ek80(opts["folder"], transducer_depth=opts.get("xducer", 5.0))
     else:
         from ..io.sadcp_vmdas import load_or_ingest
         ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
@@ -429,7 +432,7 @@ def _warm_sadcp(opts: dict) -> None:
     Without this every worker would race to parse the raw VmDAS tree and re-estimate
     the clock offset against the nav track.
     """
-    if opts.get("source") == "codas":
+    if opts.get("source") in ("codas", "ek80"):
         ds = None                                   # NetCDF read is cheap per worker
     else:
         from ..io.sadcp_vmdas import load_or_ingest
@@ -520,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "(STA/LTA; ingested once and cached as sadcp_cache.npz) or, with "
                          "--sadcp-source codas, a CODAS contour NetCDF (file or its "
                          "processing dir)")
-    ap.add_argument("--sadcp-source", choices=("vmdas", "codas"), default="vmdas",
+    ap.add_argument("--sadcp-source", choices=("vmdas", "codas", "ek80"), default="vmdas",
                     help="what --sadcp points at: raw VmDAS averages (default) or a "
                          "CODAS-processed (edited+calibrated) NetCDF product")
     ap.add_argument("--sadcpfac", type=float, default=3.0,
