@@ -55,6 +55,9 @@ def _cmd_timetable(a) -> int:
 
     if a.index:
         casts = ek.read_casts(a.index)
+        want = {s.strip() for s in a.station.split(",")} if a.station else None
+        if want:
+            casts = [c for c in casts if c[0] in want]
         mapping = ek.correlate(rows, casts, pre_min=a.pre, post_min=a.post)
         print(f"\n{'station':14} {'cast UTC':19}  EK80 files in window")
         print("-" * 60)
@@ -72,10 +75,18 @@ def _cmd_extract(a) -> int:
     if a.index:
         rows = ek.scan(a.paths, peek=False)        # filenames are enough to window
         mapping = ek.correlate(rows, ek.read_casts(a.index), pre_min=a.pre, post_min=a.post)
+        want = {s.strip() for s in a.station.split(",")} if a.station else None
+        if want:
+            missing = want - set(mapping)
+            if missing:
+                print(f"station(s) not in index: {', '.join(sorted(missing))}")
+                return 1
+            mapping = {s: f for s, f in mapping.items() if s in want}
         for station, files in mapping.items():
             jobs += [(station, f) for f in files]
         if not jobs:
-            print("no EK80 files fall in any cast window")
+            scope = f"station {a.station}" if a.station else "any cast window"
+            print(f"no EK80 files fall in {scope} (likely an EK80 logging gap over that cast)")
             return 1
     else:
         jobs = [("", f) for f in ek.collect(a.paths) if f.lower().endswith(".nc")]
@@ -110,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--no-peek", action="store_true",
                    help="filenames only (skip the nc/raw time-header peek)")
     t.add_argument("--index", help=".ladcp_archive.json: map each cast to its EK80 files")
+    t.add_argument("--station", help="with --index: restrict the cast map to this station "
+                                     "(comma-separated for several)")
     t.add_argument("--csv", help="also write the table to this CSV")
     t.add_argument("--pre", type=float, default=20.0,
                    help="cast-window start, minutes before cast UTC (default 20)")
@@ -122,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("paths", nargs="+", help="EK80 dirs or globs of .nc files (e.g. an SMB mount)")
     e.add_argument("--out", required=True, help="output root; files land in <out>/<station>/")
     e.add_argument("--index", help=".ladcp_archive.json: keep only on-station files, by station")
+    e.add_argument("--station", help="with --index: extract just this station "
+                                     "(comma-separated for several), into <out>/<station>/")
     e.add_argument("--pre", type=float, default=20.0, help="cast-window pre-minutes (default 20)")
     e.add_argument("--post", type=float, default=170.0, help="cast-window post-minutes (default 170)")
     e.set_defaults(func=_cmd_extract)

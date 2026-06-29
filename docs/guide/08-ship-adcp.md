@@ -183,6 +183,21 @@ transit doesn't spuriously "cover" a later cast).
 `ladcp-qa --sadcp` at one of those station folders. Tune the cast window with
 `--pre`/`--post` minutes (defaults 20/170, sized for a deep cast).
 
+**One station at a time.** Add `--station` to do just one cast (e.g. a late-arriving
+deployment) without re-copying the whole cruise:
+
+```bash
+# identify what covers it (low-IO), then copy only that station's files
+ladcp-ek80 timetable /mnt/ek80/Datos_procesados --index .ladcp_archive.json --station MORIA2_06
+ladcp-ek80 extract   /mnt/ek80/Datos_procesados --index .ladcp_archive.json --station MORIA2_06 \
+    --out adcp_local
+ladcp-qa 06 ... --sadcp adcp_local/MORIA2_06 --sadcp-source ek80
+```
+
+If the EK80 was off over that cast, `timetable` shows `0 file(s) — none` and `extract`
+refuses with a logging-gap notice (no constraint is possible — process that station
+without `--sadcp`).
+
 ### Before you trust it
 
 - **Coverage is upper-ocean only** — set expectations accordingly (above).
