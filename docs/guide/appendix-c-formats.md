@@ -81,3 +81,8 @@ One entry per scorecard row ([chapter 6](06-qa-report.md)); `status` ∈
   `--from-hex`.
 - **VmDAS `.STA`/`.LTA`**: ship-ADCP averages (PD0 dialect); `.ENR`+`.N1R/.N2R`
   single-ping raw is CODAS territory ([chapter 8](08-ship-adcp.md)).
+- **EK80 ADCP `.nc`**: Simrad echosounder current-mode product, ICES
+  **SONAR-netCDF4** (hierarchical groups; currents are ragged/vlen profiles in
+  `/Sonar/Beam_group*/ADCP/Mean_current`). Used as a shallow ship-ADCP substitute
+  via `--sadcp-source ek80`; `ladcp-ek80` slims and time-matches the big files
+  ([chapter 8](08-ship-adcp.md)).

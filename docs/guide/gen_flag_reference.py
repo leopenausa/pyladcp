@@ -27,6 +27,9 @@ COMMANDS: list[tuple[str, list[str]]] = [
     ("ladcp-vectormap", ["ladcp-vectormap", "--help"]),
     ("ladcp-synth", ["ladcp-synth", "--help"]),
     ("ladcp-studio", ["ladcp-studio", "--help"]),
+    ("ladcp-ek80", ["ladcp-ek80", "--help"]),
+    ("ladcp-ek80 timetable", ["ladcp-ek80", "timetable", "--help"]),
+    ("ladcp-ek80 extract", ["ladcp-ek80", "extract", "--help"]),
 ]
 
 HEADER = """\

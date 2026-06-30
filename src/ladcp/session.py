@@ -122,7 +122,7 @@ class SadcpConfig:
         been archived away) unless ``--sadcp-reingest`` forces a re-parse.
         """
         p = Path(self.folder)
-        if self.source == "codas":                  # NetCDF file or its directory
+        if self.source in ("codas", "ek80"):        # NetCDF file or its directory
             if not p.exists():
                 raise ValueError(f"--sadcp: {p} does not exist")
             return

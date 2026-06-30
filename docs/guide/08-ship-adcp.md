@@ -132,3 +132,79 @@ ladcp-qa 80 ... --sadcp <workdir>/os150nb_sta/contour/os150nb.nc --sadcp-source 
 
 `--sadcp` accepts the `contour/<sonar>.nc` file, its `contour/` dir, or the processing
 dir; exports record the provenance as `sadcp_source: codas:<path>`.
+
+## No ship-ADCP? An EK80 echosounder in ADCP mode
+
+Some vessels have no dedicated hull ADCP but run a **Simrad EK80 echosounder**, which
+can operate in an **ADCP/current mode** (e.g. 150 kHz). pyladcp can use that current
+product as the `--sadcp` constraint, exactly like a VmDAS or CODAS source:
+
+```bash
+ladcp-qa 06 ... --down-only --sadcp adcp_local/MORIA2_06 --sadcp-source ek80
+```
+
+The EK80 already outputs **absolute, earth-frame** currents, so no heading rotation is
+needed; pyladcp windows each cast's time/space slice and adds it with weight
+`--sadcpfac` (default 3), reporting `sadcp_consistency` and the withheld
+`sadcp_independent_rms` just like any other source.
+
+> **It is a *shallow* constraint.** A 150 kHz EK80 current profile reaches only the
+> **upper ~15–150 m** — it does not profile the deep water column. So it constrains the
+> top of the cast, not the bulk of it. That is most valuable exactly where the LADCP is
+> weakest near the surface: **single-head / `--down-only` casts** (a lost up-looker),
+> where the EK80 fills the near-surface gap. On dual-head casts it is mainly an
+> independent cross-check.
+
+### Preparing the data — `ladcp-ek80`
+
+EK80 ADCP files are ICES **SONAR-netCDF4** and large (~0.5 GB each, often hundreds per
+cruise), so they usually live on a ship share you can't fully copy. Two helpers make
+them usable without that:
+
+```bash
+# 1. What time span does each file cover, and which cast does it belong to?
+#    (reads only filenames + tiny time headers — safe over a slow/SMB mount)
+ladcp-ek80 timetable /mnt/ek80/Datos_procesados --index .ladcp_archive.json
+
+# 2. Slim every on-station file down to its ADCP current group (~30–100 MB) and
+#    sort it by station, so only the currents land on local disk:
+ladcp-ek80 extract /mnt/ek80/Datos_procesados --index .ladcp_archive.json --out adcp_local
+```
+
+`timetable` builds a low-IO `[start, end]` table — the start comes from the filename
+(`…-D<date>-T<time>`), the end from peeking only the time coordinate of a `.nc` or the
+first/last datagram header of a `.raw`. With `--index` it maps each LADCP cast to the
+EK80 file(s) overlapping its on-station window (gap-aware, so a logging gap during a
+transit doesn't spuriously "cover" a later cast).
+
+`extract` copies *only* the `/Sonar/Beam_group*/ADCP` group (vlen-faithful) into
+`<out>/<station>/`; the slim copies are read identically to the originals. With
+`--index` it keeps just the on-station files, organised per station — point
+`ladcp-qa --sadcp` at one of those station folders. Tune the cast window with
+`--pre`/`--post` minutes (defaults 20/170, sized for a deep cast).
+
+**One station at a time.** Add `--station` to do just one cast (e.g. a late-arriving
+deployment) without re-copying the whole cruise:
+
+```bash
+# identify what covers it (low-IO), then copy only that station's files
+ladcp-ek80 timetable /mnt/ek80/Datos_procesados --index .ladcp_archive.json --station MORIA2_06
+ladcp-ek80 extract   /mnt/ek80/Datos_procesados --index .ladcp_archive.json --station MORIA2_06 \
+    --out adcp_local
+ladcp-qa 06 ... --sadcp adcp_local/MORIA2_06 --sadcp-source ek80
+```
+
+If the EK80 was off over that cast, `timetable` shows `0 file(s) — none` and `extract`
+refuses with a logging-gap notice (no constraint is possible — process that station
+without `--sadcp`).
+
+### Before you trust it
+
+- **Coverage is upper-ocean only** — set expectations accordingly (above).
+- **Absolute referencing** — the currents must have ship motion removed (GPS/MRU; the
+  bottom track can't reach abyssal depths). The EK80 product reports geographic-frame
+  currents that already do this; a healthy `sadcp_consistency` (≲0.05 m/s) against the
+  independent LADCP is your confirmation.
+- **Per-station selection** — one `--sadcp` folder per cast. `ladcp-ek80 extract
+  --index` does the sorting for you; a single `--all-stations` run can instead point
+  `--sadcp` at the parent `adcp_local/` and let each cast pick its files by time window.
