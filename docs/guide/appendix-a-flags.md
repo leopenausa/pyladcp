@@ -14,7 +14,7 @@ usage: ladcp-qa [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                 [--barofac BAROFAC] [--smoofac SMOOFAC] [--down-only]
                 [--nearfield-dn-bins LIST] [--edits PATH] [--no-soundcorr]
                 [--dzbelow METERS] [--zbottom METERS] [--guessbottom METERS]
-                [--sadcp PATH] [--sadcp-source {vmdas,codas}]
+                [--sadcp PATH] [--sadcp-source {vmdas,codas,ek80}]
                 [--sadcpfac SADCPFAC] [--sadcp-filetype {STA,LTA}]
                 [--sadcp-xducer SADCP_XDUCER] [--sadcp-reingest]
                 [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
@@ -88,7 +88,7 @@ options:
                         VmDAS folder (STA/LTA; ingested once and cached as
                         sadcp_cache.npz) or, with --sadcp-source codas, a
                         CODAS contour NetCDF (file or its processing dir)
-  --sadcp-source {vmdas,codas}
+  --sadcp-source {vmdas,codas,ek80}
                         what --sadcp points at: raw VmDAS averages (default)
                         or a CODAS-processed (edited+calibrated) NetCDF
                         product
@@ -405,4 +405,64 @@ options:
   --host HOST           bind address (default: localhost)
   --port PORT           port (default: 8642)
   --no-browser          do not open the browser
+```
+
+## `ladcp-ek80`
+
+```text
+usage: ladcp-ek80 [-h] {timetable,extract} ...
+
+prep EK80 ADCP-mode currents for the --sadcp-source ek80 constraint
+
+positional arguments:
+  {timetable,extract}
+    timetable          low-IO start/end table; correlate casts with --index
+    extract            slim each file to its ADCP current group (~30-100 MB)
+                       under --out
+
+options:
+  -h, --help           show this help message and exit
+```
+
+## `ladcp-ek80 timetable`
+
+```text
+usage: ladcp-ek80 timetable [-h] [--no-peek] [--index INDEX]
+                            [--station STATION] [--csv CSV] [--pre PRE]
+                            [--post POST]
+                            paths [paths ...]
+
+positional arguments:
+  paths              EK80 dirs or globs (.nc and/or .raw)
+
+options:
+  -h, --help         show this help message and exit
+  --no-peek          filenames only (skip the nc/raw time-header peek)
+  --index INDEX      .ladcp_archive.json: map each cast to its EK80 files
+  --station STATION  with --index: restrict the cast map to this station
+                     (comma-separated for several)
+  --csv CSV          also write the table to this CSV
+  --pre PRE          cast-window start, minutes before cast UTC (default 20)
+  --post POST        cast-window end, minutes after cast UTC (default 170)
+```
+
+## `ladcp-ek80 extract`
+
+```text
+usage: ladcp-ek80 extract [-h] --out OUT [--index INDEX] [--station STATION]
+                          [--pre PRE] [--post POST]
+                          paths [paths ...]
+
+positional arguments:
+  paths              EK80 dirs or globs of .nc files (e.g. an SMB mount)
+
+options:
+  -h, --help         show this help message and exit
+  --out OUT          output root; files land in <out>/<station>/
+  --index INDEX      .ladcp_archive.json: keep only on-station files, by
+                     station
+  --station STATION  with --index: extract just this station (comma-separated
+                     for several), into <out>/<station>/
+  --pre PRE          cast-window pre-minutes (default 20)
+  --post POST        cast-window post-minutes (default 170)
 ```
