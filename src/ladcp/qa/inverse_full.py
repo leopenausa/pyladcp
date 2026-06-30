@@ -419,6 +419,28 @@ def _lanarrow_reject(sol: _Solution, shape: tuple[int, int],
     return reject
 
 
+def _blank_degenerate_tail(u: np.ndarray, v: np.ndarray, nvel: np.ndarray) -> None:
+    """Blank (NaN) the trailing run of under-sampled bins, in place.
+
+    The deepest grid cell can hold only 1-2 near-identical estimates right above the
+    seabed; with so little data the inverse leaves it unconstrained and it swings wildly
+    (e.g. -2.6 m/s with ``nvel=2`` while the cast is ~0.05 m/s). Blank the trailing run of
+    bins below the same low-coverage floor the shear path uses (``max(2, 0.15*median)``).
+    Only the trailing run is touched, so well-sampled deep bins are untouched, and the grid
+    length is preserved so the inverse profile stays aligned with the shear profile (the
+    ``shear_inverse`` consistency metric needs a shared grid). ``nvel`` is zeroed too, so
+    the bin reads as "no data" everywhere (``.lad``/figure skip it, ``ubar`` ignores it).
+    """
+    if not nvel.size or not np.any(nvel > 0):
+        return
+    min_good = max(2.0, 0.15 * float(np.median(nvel[nvel > 0])))
+    k = nvel.size - 1
+    while k >= 0 and 0 < nvel[k] < min_good:
+        u[k] = v[k] = np.nan
+        nvel[k] = 0
+        k -= 1
+
+
 def _surface_fill(u: np.ndarray, v: np.ndarray, uerr: np.ndarray, nvel: np.ndarray,
                   z: np.ndarray, *, frac: float = 0.4, floor: float = 3.0) -> None:
     """Fill the under-constrained surface bins from the first reliable bin (in place).
@@ -528,6 +550,9 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
         diag["weights"] = sol.weights
     uerr = _ocean_error(sol)
     uerr = np.where(np.isfinite(uerr), uerr, sol.velerr)
+    # A near-singular bin (1-2 near-identical estimates) collapses to uerr==0 and an
+    # unconstrained, wildly swinging velocity; never let a bin claim zero uncertainty.
+    uerr = np.where(uerr > 0, uerr, sol.velerr)
     u, v = _uvrot(np.real(sol.uocean), np.imag(sol.uocean), drot)   # magnetic -> true
 
     # trim the trailing unconstrained tail (empty bins between the deepest data and the
@@ -537,6 +562,7 @@ def invert(se: SuperEns, aux: InverseAux, *, dz: float = 8.0, drot: float = 0.0,
     if has.size:
         last = int(has[-1]) + 1
         z, u, v, uerr, nvel = z[:last], u[:last], v[:last], uerr[:last], nvel[:last]
+    _blank_degenerate_tail(u, v, nvel)                 # drop a wild under-sampled bottom bin
     _surface_fill(u, v, uerr, nvel, z)                 # repair the collapsed surface bins
     valid = nvel > 0
     return VelocityProfile(
