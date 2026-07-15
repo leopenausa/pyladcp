@@ -102,6 +102,10 @@ def peek_nc_time(path: str):
         la = float(lat[0]) if lat is not None and len(lat) else None
         lo = float(lon[0]) if lon is not None and len(lon) else None
         return t0, t1, len(tvar), la, lo
+    except (OSError, RuntimeError, KeyError, IndexError, ValueError):
+        # truncated / mid-write file (e.g. live remote share): fall back to
+        # filename-derived time in scan()
+        return None
     finally:
         ds.close()
 
