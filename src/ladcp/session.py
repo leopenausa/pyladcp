@@ -33,7 +33,7 @@ import numpy as np
 
 if TYPE_CHECKING:                                # heavy imports stay call-time
     from .io.ctd_cnv import CTDTimeSeries
-    from .models import DualHead
+    from .qa.ingest import DualHead
     from .qa.inverse import VelocityResult
 
 __all__ = ["EditConfig", "SadcpConfig", "SolveConfig", "SessionConfig", "StationSession",
@@ -358,7 +358,7 @@ class StationSession:
     declination) costs only the inverse. This is the backend of the Studio GUI and a
     convenient library front door::
 
-        ses = StationSession(down, up, ctd, station="MORIA-80")
+        ses = StationSession(down, up, ctd, station="MORIA-80", cruise="MORIA")
         base = ses.solve(SessionConfig())                                  # ~1.5 s
         nobt = ses.solve(SessionConfig(solve=SolveConfig(botfac=0.0)))     # ~30 ms
 
@@ -372,13 +372,14 @@ class StationSession:
     """
 
     def __init__(self, down, up=None, ctd=None, *, station: str = "",
-                 cruise: str = "MORIA", ctd_utc=None, dz: float = 8.0):
+                 cruise: str | None = None, ctd_utc=None, dz: float = 8.0):
         from pathlib import Path
         self.down = str(down)
         self.up = str(up) if up else None
         self.ctd_path = str(ctd) if ctd else None
+        from .config import DEFAULT_CRUISE
         self.station = station or Path(self.down).stem
-        self.cruise = cruise
+        self.cruise = cruise if cruise is not None else DEFAULT_CRUISE
         self.ctd_utc = ctd_utc                  # index cast-start UTC -> sync prior
         self.dz = float(dz)
         # LRU-capped: every distinct EditConfig (e.g. each brush stroke in the Studio
@@ -430,6 +431,8 @@ class StationSession:
             overrides["guessbottom"] = edit.guessbottom
         if edit.manual_flags:
             overrides["edit_manual_flags"] = edit.manual_flags
+        if not edit.soundcorr:                   # mirror qa.cli._run_one exactly
+            overrides["soundcorr"] = False
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)
         dh = tick("load_ms", load_dualhead, self.down, self.up,
                   station=self.station, params=params)

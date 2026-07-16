@@ -11,6 +11,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+# Fallback cruise label when none is given: unregistered, so it resolves to generic
+# params. Shared by qa/cli, discovery, session and studio so the API and the CLI
+# default identically.
+DEFAULT_CRUISE = "LADCP"
+
 
 @dataclass
 class CastParams:

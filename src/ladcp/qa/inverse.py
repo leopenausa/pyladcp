@@ -469,8 +469,6 @@ def build_solve_context(dh: DualHead, ctd: CTDTimeSeries, *, dz: float, params):
     return se, np.arange(dz, zmax, dz), merged, bt, sync, bottom
 
 
-_build = build_solve_context        # original (private) name
-
 
 @dataclass
 class ErrField:
