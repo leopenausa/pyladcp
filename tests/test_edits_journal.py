@@ -292,7 +292,7 @@ def test_manual_rect_bit_identical_to_nearfield_mask():
 def test_session_cache_keys_and_lru(monkeypatch):
     import ladcp.session as sess
     monkeypatch.setattr(sess, "_PREPARED_MAX", 2)
-    ses = sess.StationSession(str(DOWN), str(UP), str(CTD), station="MORIA-80")
+    ses = sess.StationSession(str(DOWN), str(UP), str(CTD), station="MORIA-80", cruise="MORIA")
     e0 = EditConfig()
     e1 = EditConfig(manual_flags=(("down", 3, 4, 0, 10),))
     ses.prepare(e0)

@@ -159,7 +159,7 @@ def read_pd0(path: str, head: str = "", facing_hint: str | None = None) -> RawAD
             bv[bv == _BADVEL] = np.nan
             bt_vel[:, it] = bv / 1000.0
 
-    serial = _read_serial(buf, p0, offs0, fl)
+    serial = _read_serial(buf, fl)
 
     # beam -> earth: rotate per-head at load (legacy loadrdi b2earth) so the rest of the pipeline,
     # which assumes earth-frame vel[0..3] = (u,v,w,e), runs unchanged. Earth-frame files skip this.
@@ -263,7 +263,7 @@ def _to_dt64(year, mo, da, hh, mm, ss, hs) -> np.datetime64:
         return np.datetime64("NaT")
 
 
-def _read_serial(buf, pos, offs, fl):
+def _read_serial(buf, fl):
     """Instrument serial is in the FL at offset 54 (uint32) on newer firmware; best-effort."""
     try:
         sn = struct.unpack_from("<I", buf, fl + 54)[0]

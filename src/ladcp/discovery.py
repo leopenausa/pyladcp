@@ -19,6 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .config import DEFAULT_CRUISE
+
 
 @dataclass(frozen=True)
 class StationFiles:
@@ -163,7 +165,7 @@ def _ctd_from_hex(rec: dict, label: str, cache_dir: str | Path | None) -> Path |
         return None
 
 
-def discover(station: str, *, root: Path, cruise: str = "MORIA",
+def discover(station: str, *, root: Path, cruise: str = DEFAULT_CRUISE,
              index: str | Path | dict | None = None,
              ctd_dir: Path | None = None,
              from_hex: bool = False,

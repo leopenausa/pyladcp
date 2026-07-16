@@ -38,6 +38,8 @@ def fresh_solve(cfg: SessionConfig):
         overrides["edit_nearfield_dn_bins"] = cfg.edit.nearfield_dn_bins
     if cfg.edit.dzbelow is not None:
         overrides["dzbelow"] = cfg.edit.dzbelow
+    if not cfg.edit.soundcorr:
+        overrides["soundcorr"] = False
     params = resolve_params("MORIA", "MORIA-80", overrides=overrides or None)
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=params)
     apply_header_config(params, dh)
@@ -89,12 +91,21 @@ CFGS = {
                                solve=SolveConfig(drot=DROT)),
     "edit": SessionConfig(edit=EditConfig(nearfield_dn_bins=(3, 4), dzbelow=24.0),
                           solve=SolveConfig(drot=DROT)),
+    "no-soundcorr": SessionConfig(edit=EditConfig(soundcorr=False),
+                                  solve=SolveConfig(drot=DROT)),
 }
 
 
 @pytest.mark.parametrize("name", CFGS, ids=CFGS.keys())
 def test_session_matches_fresh_solve(session, name):
     assert_results_identical(session.solve(CFGS[name]), fresh_solve(CFGS[name]))
+
+
+def test_soundcorr_toggle_reaches_params(session):
+    """Regression: StationSession used to drop EditConfig(soundcorr=False) on the floor,
+    silently solving with sound-speed correction on (unlike ladcp-qa --no-soundcorr)."""
+    prep = session.prepare(EditConfig(soundcorr=False))
+    assert prep.params.soundcorr is False
 
 
 def test_resolve_repeatable_after_other_configs(session):
@@ -142,7 +153,7 @@ def test_sadcp_profile_cached_per_config(session, monkeypatch):
 
 
 def test_session_requires_ctd():
-    ses = StationSession(DOWN, UP, None, station="MORIA-80")
+    ses = StationSession(DOWN, UP, None, station="MORIA-80", cruise="MORIA")
     with pytest.raises(ValueError, match="needs a CTD"):
         ses.solve(SessionConfig())
 

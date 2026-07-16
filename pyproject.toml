@@ -36,7 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "pytest", "pre-commit", "httpx"]    # httpx: fastapi TestClient (studio tests)
+dev = ["ruff==0.15.21", "pytest", "pre-commit", "httpx"]   # ruff pinned: unpinned CI went red on a new release (2026-06); httpx: fastapi TestClient (studio tests)
 export = ["openpyxl"]
 docs = ["mkdocs-material"]
 gui = ["fastapi", "uvicorn"]                       # ladcp-studio local web GUI

@@ -44,7 +44,8 @@ _NAV_FIRST_LON = 18
 _NAV_LAST_LAT = 26
 _NAV_LAST_LON = 30
 
-_M_PER_DEG_LAT = 111_320.0
+_M_PER_DEG_LAT = 111_320.0   # feeds ship-velocity magnitude (velocity-critical, golden-pinned);
+                             # io/nav.py + plots use 110_540 for coarse gating/axes only
 CACHE_NAME = "sadcp_cache.npz"
 
 
@@ -74,7 +75,7 @@ class SadcpDataset:
         return int(self.time.size)
 
 
-def _read_nav(buf: bytes, ensembles, transducer_depth: float):
+def _read_nav(buf: bytes, ensembles):
     """Per-ensemble ship position (mean of first/last GPS fix) from the 0x2000 block."""
     n = len(ensembles)
     lat = np.full(n, np.nan)
@@ -125,7 +126,7 @@ def read_vmdas_file(path: str, *, transducer_depth: float = 5.0,
     # cell-centre depth below surface: transducer depth + range to bin 1 + k * cell size
     dist1 = float(raw.meta.get("dist_first_m", raw.blank_m + raw.cell_m))
     depth = transducer_depth + dist1 + np.arange(nz) * raw.cell_m
-    lat, lon = _read_nav(buf, ensembles, transducer_depth)
+    lat, lon = _read_nav(buf, ensembles)
     return time, lat, lon, depth, u_water, v_water, raw.freq_khz
 
 

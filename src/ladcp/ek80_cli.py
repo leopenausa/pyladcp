@@ -138,7 +138,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--station", help="with --index: extract just this station "
                                      "(comma-separated for several), into <out>/<station>/")
     e.add_argument("--pre", type=float, default=20.0, help="cast-window pre-minutes (default 20)")
-    e.add_argument("--post", type=float, default=170.0, help="cast-window post-minutes (default 170)")
+    e.add_argument("--post", type=float, default=170.0,
+                   help="cast-window post-minutes (default 170)")
     e.set_defaults(func=_cmd_extract)
 
     args = ap.parse_args(argv)

@@ -112,6 +112,22 @@ def test_correlate_maps_cast_to_file(ek80_file):
     assert mapping["MORIA2_99"] == []                     # next day -> no coverage
 
 
+def test_correlate_is_gap_aware():
+    """A file's coverage ends at min(next_start, start + file_dur): a pre-gap file must
+    not span a transit gap, while a file starting just before the window still counts."""
+    from datetime import timedelta
+
+    t0 = _dt("2026-06-25T10:00:00")
+    rows = [{"file": "a.nc", "start": t0},
+            {"file": "b.nc", "start": t0 + timedelta(minutes=6)},
+            {"file": "c.nc", "start": t0 + timedelta(minutes=60)}]
+    # cast window opens at t0+63 (pre=20): a ends at next_start (t0+6), b at
+    # start+file_dur (t0+14, not the 54 min gap to c) -- only c (ends t0+68) covers it
+    casts = [("ST_1", t0 + timedelta(minutes=83), None, None)]
+    mapping = ek.correlate(rows, casts, pre_min=20, post_min=170, file_dur_min=8)
+    assert mapping["ST_1"] == ["c.nc"]
+
+
 def test_cli_timetable_runs(ek80_file, capsys):
     from ladcp.ek80_cli import main
     rc = main(["timetable", str(ek80_file)])

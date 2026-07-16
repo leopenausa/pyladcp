@@ -17,6 +17,7 @@ The ``ladcp-ek80`` command (:mod:`ladcp.ek80_cli`) wraps both.
 """
 from __future__ import annotations
 
+import bisect
 import glob
 import os
 import re
@@ -26,7 +27,6 @@ from datetime import datetime, timedelta, timezone
 FNAME_RE = re.compile(r"-D(\d{8})-T(\d{6})")
 EPOCH_1601 = datetime(1601, 1, 1, tzinfo=timezone.utc)   # SONAR-netCDF4 / FILETIME epoch
 _S_1601_TO_1970 = 11644473600
-ADCP_PATH = "/Sonar/Beam_group1/ADCP"
 _ADCP_CANDIDATES = [f"/Sonar/Beam_group{g}/ADCP" for g in range(1, 8)]
 
 # variables kept by the slim extract (everything sadcp_ek80.read_ek80 needs)
@@ -200,23 +200,30 @@ def read_casts(index_path: str) -> list[tuple]:
 
 def correlate(rows, casts, *, pre_min: float = 20.0, post_min: float = 170.0,
               file_dur_min: float = 8.0) -> dict[str, list[str]]:
-    """Map each cast to the EK80 files whose start is in ``[utc-pre, utc+post]``.
+    """Map each cast to the EK80 files overlapping its ``[utc-pre, utc+post]`` window.
 
     Gap-aware: a file's effective end is ``min(next_start, start + file_dur_min)``, so a
     long transit gap does not let a pre-transit file spuriously cover a later cast.
     """
-    starts = [r["start"] for r in rows if r["start"]]
+    starts = sorted(r["start"] for r in rows if r["start"])
+
+    def eff_end(start):
+        i = bisect.bisect_right(starts, start)
+        end = start + timedelta(minutes=file_dur_min)
+        return min(end, starts[i]) if i < len(starts) else end
+
     out: dict[str, list[str]] = {}
     for label, utc, *_ in casts:
         lo = utc - timedelta(minutes=pre_min)
         hi = utc + timedelta(minutes=post_min)
-        out[label] = [r["file"] for r in rows if r["start"] and lo <= r["start"] <= hi]
+        out[label] = [r["file"] for r in rows
+                      if r["start"] and r["start"] <= hi and eff_end(r["start"]) >= lo]
     return out
 
 
 # ----------------------------------------------------------------- slim extraction
 def _ensure_dims(src_v, dst_grp):
-    for dname, dlen in zip(src_v.dimensions, src_v.shape):
+    for dname, dlen in zip(src_v.dimensions, src_v.shape, strict=True):
         if dname not in dst_grp.dimensions:
             dst_grp.createDimension(dname, dlen)
 

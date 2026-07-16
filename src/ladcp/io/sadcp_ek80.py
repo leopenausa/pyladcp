@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import glob
 import os
-from pathlib import Path
 
 import numpy as np
 
@@ -172,7 +171,7 @@ if __name__ == "__main__":          # quick manual check
     with np.errstate(invalid="ignore"):
         print(f"u median {np.nanmedian(ds.u):+.3f}  v median {np.nanmedian(ds.v):+.3f} m/s")
         cov = np.isfinite(ds.u).mean(axis=1)
-    for z, c in zip(ds.depth, cov):
+    for z, c in zip(ds.depth, cov, strict=True):
         if c > 0:
             print(f"  z={z:6.1f} m  coverage={c*100:4.0f}%  "
                   f"u={np.nanmedian(ds.u[int(z//8)]):+.3f}")

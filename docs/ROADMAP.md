@@ -73,7 +73,8 @@ ranked the un-ported items. The high-value accuracy items were ported and merged
 - **shear-vs-inverse consistency WARN** (PR #54).
 
 The remaining items were each **scoped and quantified on FDCCC (30) + MORIA (36)**, then
-declined — each for a distinct, *measured* reason (writeups in `legacy_audit_work/findings/`):
+declined — each for a distinct, *measured* reason (writeups in `legacy_audit_work/findings/`,
+a local gitignored scratch area, not part of the repo):
 
 | item | verdict | why (measured) |
 |---|---|---|
