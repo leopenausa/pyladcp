@@ -8,9 +8,9 @@ you read here is exactly what the installed code accepts.
 ## `ladcp-qa`
 
 ```text
-usage: ladcp-qa [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
-                [-o OUTDIR] [--no-plots] [--drot DROT]
-                [--solver {shear,inverse}] [--botfac BOTFAC]
+usage: ladcp-qa [-h] [--config PATH] [--no-config] [--root ROOT]
+                [--cruise CRUISE] [--index INDEX] [-o OUTDIR] [--no-plots]
+                [--drot DROT] [--solver {shear,inverse}] [--botfac BOTFAC]
                 [--barofac BAROFAC] [--smoofac SMOOFAC] [--down-only]
                 [--nearfield-dn-bins LIST] [--edits PATH] [--no-soundcorr]
                 [--dzbelow METERS] [--zbottom METERS] [--guessbottom METERS]
@@ -31,6 +31,11 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  --config PATH         cruise.toml supplying defaults for the options below
+                        (default: auto-discovered in the current directory or
+                        its parents; typed flags always override the file)
+  --no-config           ignore any discovered cruise.toml (built-in defaults
+                        only)
   --root ROOT           base dir for file discovery (default: New_golden/Good)
   --cruise CRUISE       cruise preset for params + raw-archive manifest
                         (default: LADCP, the generic operator-community
