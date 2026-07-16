@@ -19,7 +19,14 @@ from ladcp.config import resolve_params
 from ladcp.io.ctd_cnv import read_ctd_cnv
 from ladcp.qa.ingest import apply_header_config, load_dualhead
 from ladcp.qa.inverse import compute_velocity_full
-from ladcp.session import EditConfig, SadcpConfig, SessionConfig, SolveConfig, StationSession
+from ladcp.session import (
+    EditConfig,
+    SadcpConfig,
+    SessionConfig,
+    SolveConfig,
+    StationSession,
+    edit_overrides,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"
 GOOD = ROOT / "New_golden" / "Good"
@@ -33,13 +40,7 @@ DROT = -9.878379
 
 def fresh_solve(cfg: SessionConfig):
     """The exact ladcp-qa recipe (_run_one + _velocity_outputs), no session involved."""
-    overrides = {}
-    if cfg.edit.nearfield_dn_bins is not None:
-        overrides["edit_nearfield_dn_bins"] = cfg.edit.nearfield_dn_bins
-    if cfg.edit.dzbelow is not None:
-        overrides["dzbelow"] = cfg.edit.dzbelow
-    if not cfg.edit.soundcorr:
-        overrides["soundcorr"] = False
+    overrides = edit_overrides(cfg.edit)
     params = resolve_params("MORIA", "MORIA-80", overrides=overrides or None)
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=params)
     apply_header_config(params, dh)
@@ -145,7 +146,7 @@ def test_sadcp_profile_cached_per_config(session, monkeypatch):
     r1 = session.solve(SessionConfig(sadcp=sa, solve=SolveConfig(drot=DROT)))
     r2 = session.solve(SessionConfig(sadcp=sa, solve=SolveConfig(drot=DROT, sadcpfac=6.0)))
     assert len(calls) == 1                        # same SadcpConfig -> one ingest
-    assert calls[0]["fac"] == 3.0                 # opts dict shape (fac rides along)
+    assert calls[0] == sa                         # the SadcpConfig itself is passed
     assert r1.sadcp is fake and r2.sadcp is fake
     session.solve(SessionConfig(sadcp=SadcpConfig(folder="other/sadcp"),
                                 solve=SolveConfig(drot=DROT)))

@@ -2,8 +2,8 @@
 
 The hard contract behind the Studio GUI: every configuration is expressible as a
 ``ladcp-qa`` command line, and parsing that command line back recovers the identical
-configuration. These tests also pin the ``inv_opts``/``sadcp_opts`` dicts to the exact
-shapes ``_run_one`` consumed before the config layer existed (no behavior change).
+configuration. These tests also pin ``edit_overrides`` — the single bridge that turns a
+configuration into ``CastParams`` overrides for every caller (CLI, session, tests).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from ladcp.session import (
     SadcpConfig,
     SessionConfig,
     SolveConfig,
+    edit_overrides,
     parse_nearfield,
     parse_timeoff,
 )
@@ -87,38 +88,33 @@ def test_roundtrip_with_context():
                      cruise="MORIA", index="i.json", outdir="out") == cfg
 
 
-# ---------------------------------------------------------------- opts-dict parity
-# Pinned to the exact dicts main() built inline before the config layer (cli.py history).
+# ---------------------------------------------------------------- config -> params bridge
+# edit_overrides is THE single path from a configuration to CastParams overrides
+# (qa.cli._run_one, StationSession.prepare and the parity tests all call it).
 
-def test_inv_opts_shape_default():
-    assert SessionConfig().inv_opts() == {
-        "botfac": 1.0, "barofac": 1.0, "smoofac": 0.0,
-        "down_only": False, "nearfield_dn_bins": None, "dzbelow": None,
-        "soundcorr": True, "zbottom": None, "guessbottom": None}
+def test_edit_overrides_default_is_empty():
+    assert edit_overrides(EditConfig()) == {}
 
 
-def test_inv_opts_from_args():
-    args = build_parser().parse_args(
-        ["80", "--botfac", "0.5", "--smoofac", "0.1", "--down-only",
-         "--nearfield-dn-bins", "3,4", "--dzbelow", "24"])
-    assert SessionConfig.from_args(args).inv_opts() == {
-        "botfac": 0.5, "barofac": 1.0, "smoofac": 0.1,
-        "down_only": True, "nearfield_dn_bins": (3, 4), "dzbelow": 24.0,
-        "soundcorr": True, "zbottom": None, "guessbottom": None}
+def test_edit_overrides_full():
+    edit = EditConfig(nearfield_dn_bins=(3, 4), dzbelow=24.0, soundcorr=False,
+                      zbottom=101.5, guessbottom=300.0,
+                      manual_flags=(("down", 1, 2, 3, 4),))
+    assert edit_overrides(edit) == {
+        "edit_nearfield_dn_bins": (3, 4), "dzbelow": 24.0, "soundcorr": False,
+        "zbottom": 101.5, "guessbottom": 300.0,
+        "edit_manual_flags": (("down", 1, 2, 3, 4),)}
 
 
-def test_sadcp_opts_none_without_sadcp():
-    assert SessionConfig().sadcp_opts() is None
+def test_edit_overrides_down_only_not_a_param():
+    # down_only drops the up-looker at ingest; it is not a CastParams override
+    assert edit_overrides(EditConfig(down_only=True)) == {}
 
 
-def test_sadcp_opts_from_args():
-    args = build_parser().parse_args(
-        ["80", "--sadcp", "sADCP", "--sadcp-source", "codas", "--sadcpfac", "4",
-         "--sadcp-filetype", "LTA", "--sadcp-xducer", "7", "--sadcp-reingest",
-         "--sadcp-timeoff", "12.5", "--sadcp-nav", "nav.csv"])
-    assert SessionConfig.from_args(args).sadcp_opts() == {
-        "folder": "sADCP", "source": "codas", "fac": 4.0, "file_type": "LTA",
-        "xducer": 7.0, "reingest": True, "timeoff": 12.5, "nav": "nav.csv"}
+def test_edit_overrides_journal_flags_take_precedence():
+    edit = EditConfig(manual_flags=(("down", 1, 2, 3, 4),))
+    ov = edit_overrides(edit, manual_flags=(("up", 5, 6, 7, 8),))
+    assert ov == {"edit_manual_flags": (("up", 5, 6, 7, 8),)}
 
 
 # ---------------------------------------------------------------- validation parity
