@@ -15,6 +15,8 @@ import pytest
 
 from ladcp.qa import cli
 
+pytestmark = pytest.mark.slow
+
 FIX = Path(__file__).resolve().parent / "fixtures" / "New_golden" / "Good"
 
 

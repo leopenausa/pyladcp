@@ -25,9 +25,9 @@ from ladcp.qa.cli import main as cli_main
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"
 GOOD = ROOT / "New_golden" / "Good"
 
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.slow, pytest.mark.skipif(
     not (GOOD / "CTD" / "moria-80_clean.cnv").exists(),
-    reason="MORIA New_golden not present")
+    reason="MORIA New_golden not present")]
 
 
 @pytest.fixture(scope="module")

@@ -33,7 +33,8 @@ DOWN = GOOD / "LADCP" / "MORIA-80-LADCP-M.000"
 UP = GOOD / "LADCP" / "MORIA-80-LADCP-S.000"
 CTD = GOOD / "CTD" / "moria-80_clean.cnv"
 
-pytestmark = pytest.mark.skipif(not DOWN.exists(), reason="MORIA New_golden not present")
+pytestmark = [pytest.mark.slow,
+              pytest.mark.skipif(not DOWN.exists(), reason="MORIA New_golden not present")]
 
 
 @pytest.fixture(scope="module")

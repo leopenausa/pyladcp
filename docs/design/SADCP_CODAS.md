@@ -1,5 +1,7 @@
 # SADCP processing with CODAS — one-page guide
 
+> **Historical design note** — archived to `docs/design/` 2026-07-16. This document guided the original build and is kept for context; where it disagrees with the code, the code wins. The current module map lives in `src/ladcp/README.md`.
+
 How to turn raw shipboard-ADCP (VmDAS) data into a calibrated, edited product with
 CODAS, and how that product plugs into pyladcp. CODAS (UH/SOEST) adds three things the
 raw `.STA`/`.LTA` averages lack: an **editing pass** (bad bins flagged), a **watertrack

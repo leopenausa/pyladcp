@@ -37,7 +37,7 @@ Two **optional** features need extra pieces — you can ignore both to start:
 | `--from-hex` (build cleaned CTD files from raw SeaBird `.hex`) | the companion [CTD_pipeline](https://github.com/leopenausa/CTD_pipeline) package, cloned next to pyladcp or pointed at with `LADCP_CTD_PROJECT` | only if you don't already have processed 1-s `.cnv` CTD files |
 
 The shipboard-ADCP **CODAS** route (`scripts/codas_*.sh`, see
-[`docs/SADCP_CODAS.md`](docs/SADCP_CODAS.md)) is a separate, optional toolchain that is
+[`docs/design/SADCP_CODAS.md`](docs/design/SADCP_CODAS.md)) is a separate, optional toolchain that is
 **Linux/macOS only** (bash + the UHDAS/CODAS suite). It is never required: pyladcp reads
 raw VmDAS STA/LTA ship-ADCP files directly on every platform.
 
@@ -121,7 +121,7 @@ Useful extras for step 3:
 **The full processing guide — every command, every report flag, every figure
 explained — lives at <https://leopenausa.github.io/pyladcp/>** (printable PDF attached
 to every [Guide CI run](https://github.com/leopenausa/pyladcp/actions/workflows/docs.yml)).
-The condensed recipe is [`docs/CRUISE_INGEST.md`](docs/CRUISE_INGEST.md), and there are
+The condensed recipe is [`docs/design/CRUISE_INGEST.md`](docs/design/CRUISE_INGEST.md), and there are
 two printable PDF quick-guides in [`guide/`](guide/):
 
 - [`guide/ladcp_cli_guide.pdf`](guide/ladcp_cli_guide.pdf) — the two-page CLI recipe +
@@ -198,8 +198,8 @@ The comparison machinery itself is part of the package (`ladcp-compare`), so you
 reproduce this check on your own cruises.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next,
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the data interfaces, and
-[`docs/SADCP_CODAS.md`](docs/SADCP_CODAS.md) for the CODAS shipboard-ADCP route.
+[`docs/design/ARCHITECTURE.md`](docs/design/ARCHITECTURE.md) for the data interfaces, and
+[`docs/design/SADCP_CODAS.md`](docs/design/SADCP_CODAS.md) for the CODAS shipboard-ADCP route.
 
 ## Troubleshooting
 

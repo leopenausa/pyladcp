@@ -65,6 +65,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: full-solve / golden-fixture tests (quick lane: pytest -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 99

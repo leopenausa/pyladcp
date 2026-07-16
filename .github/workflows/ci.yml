@@ -32,4 +32,5 @@ jobs:
       - name: Test
         env:
           MPLBACKEND: Agg
+          LADCP_REQUIRE_GOLDEN: "1"    # a missing golden fixture fails instead of skipping
         run: pytest -q
