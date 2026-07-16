@@ -27,11 +27,17 @@ from pathlib import Path
 
 import numpy as np
 
-from .sadcp_section import along_track_km
-from .section_grid import auto_oa_params, grid_linear, grid_oa
-
-_M_PER_DEG_LAT = 110_540.0
-_M_PER_DEG_LON = 111_320.0
+from .section_grid import (
+    M_PER_DEG_LAT,
+    M_PER_DEG_LON,
+    along_track_km,
+    auto_clim,
+    auto_oa_params,
+    grid_linear,
+    grid_oa,
+    station_ticks,
+    velocity_panel,
+)
 
 
 @dataclass
@@ -80,8 +86,8 @@ def _transect_order(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     positions is the section line); ties/curvature are handled gracefully.
     """
     latm = np.nanmedian(lat)
-    x = (lon - np.nanmean(lon)) * _M_PER_DEG_LON * np.cos(np.deg2rad(latm))
-    y = (lat - np.nanmean(lat)) * _M_PER_DEG_LAT
+    x = (lon - np.nanmean(lon)) * M_PER_DEG_LON * np.cos(np.deg2rad(latm))
+    y = (lat - np.nanmean(lat)) * M_PER_DEG_LAT
     pts = np.column_stack([x, y])
     good = np.isfinite(pts).all(axis=1)
     if good.sum() < 2:
@@ -201,30 +207,18 @@ def cruise_section_figure(sec: CruiseSection, *, component: str = "both",
     grids = [(_grid(c), n) for c, n in panels]
 
     if clim is None:
-        allv = np.abs(np.concatenate([g.ravel() for g, _ in grids]))
-        allv = allv[np.isfinite(allv)]
-        clim = max(round(float(np.percentile(allv, 98)), 2), 0.05) if allv.size else 0.5
+        clim = auto_clim([g for g, _ in grids])
 
     n = len(grids)
     if fig is None:
         fig = plt.figure(figsize=(11, 2.6 * n + 0.8), constrained_layout=True)
     axes = np.atleast_1d(fig.subplots(n, 1, sharex=True))
+    marks = list(zip(x_st, labels, strict=True))
     for ax, (g, name) in zip(axes, grids, strict=True):
-        pm = ax.pcolormesh(x_dense, z, g, cmap="RdBu_r", vmin=-clim, vmax=clim,
-                           shading="nearest")
+        velocity_panel(fig, ax, x_dense, z, g, clim=clim, title=name)
         ax.plot(x_dense, bathy_dense, color="0.2", lw=1.2)           # seabed line
         ax.fill_between(x_dense, bathy_dense, z.max(), color="0.75", zorder=0)
-        ax.invert_yaxis()
-        ax.set_ylabel("depth [m]")
-        ax.set_title(name, fontsize=9)
-        fig.colorbar(pm, ax=ax, label="m/s", pad=0.01)
-        for xm in x_st:
-            ax.axvline(xm, color="0.3", lw=0.4, ls=":", alpha=0.6)
-        if ax is axes[0]:
-            for xm, lab in zip(x_st, labels, strict=True):
-                ax.annotate(lab, (xm, 0), xytext=(0, 8), textcoords="offset points",
-                            ha="center", fontsize=6, rotation=90, color="0.3",
-                            annotation_clip=False)
+        station_ticks(ax, marks, annotate=(ax is axes[0]))
     axes[-1].set_xlabel("along-track distance [km]")
     axes[-1].annotate("single-occupation snapshot — depth-mean is tide-aliased; "
                       "contours objective-analysis gridded (blank where unsampled)",

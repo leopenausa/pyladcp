@@ -1,4 +1,10 @@
-"""Bathymetry-aware objective-analysis gridding for cruise sections.
+"""Shared section-plot machinery: OA gridding, distance axis, panels, colour range.
+
+Used by both section renderers (``cruise_section`` — LADCP profiles from the cruise
+NetCDF — and ``sadcp_section`` — ship-ADCP ensembles), so the along-track axis, the
+robust colour range, and the velocity-panel look cannot drift between them.
+
+The gridding half is bathymetry-aware objective analysis for cruise sections.
 
 A self-contained port of the anisotropic-Gaussian objective-analysis gridder used in the
 CTD pipeline's section plots (vendored here so pyladcp carries no cross-project dependency
@@ -17,7 +23,59 @@ field is smooth where the survey sampled and NaN where it did not.
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
+
+# coarse per-degree scales for plot axes and station ordering (NOT the velocity-critical
+# constant in io/sadcp_vmdas.py, which is golden-pinned)
+M_PER_DEG_LAT = 110_540.0
+M_PER_DEG_LON = 111_320.0
+
+
+def along_track_km(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Cumulative along-track distance [km] from per-ensemble nav (NaN-tolerant).
+
+    Equirectangular increments (exact enough at ship scales); NaN fixes contribute
+    zero step so the axis stays monotonic non-decreasing.
+    """
+    la = np.asarray(lat, float)
+    lo = np.asarray(lon, float)
+    latm = np.nanmedian(la)
+    dx = np.diff(lo) * M_PER_DEG_LON * np.cos(np.deg2rad(latm))
+    dy = np.diff(la) * M_PER_DEG_LAT
+    step = np.hypot(dx, dy)
+    step[~np.isfinite(step)] = 0.0
+    return np.concatenate([[0.0], np.cumsum(step)]) / 1000.0
+
+
+def auto_clim(values, fallback: float = 0.5) -> float:
+    """Robust symmetric colour range [m/s]: 98th percentile of |values|, floored at 0.05."""
+    a = np.abs(np.concatenate([np.ravel(v) for v in values]))
+    a = a[np.isfinite(a)]
+    return max(round(float(np.percentile(a, 98)), 2), 0.05) if a.size else fallback
+
+
+def velocity_panel(fig, ax, x, z, comp, *, clim: float, title: str):
+    """One RdBu velocity pcolormesh panel with the shared section look."""
+    pm = ax.pcolormesh(x, z, comp, cmap="RdBu_r", vmin=-clim, vmax=clim,
+                       shading="nearest")
+    ax.invert_yaxis()
+    ax.set_ylabel("depth [m]")
+    ax.set_title(title, fontsize=9)
+    fig.colorbar(pm, ax=ax, label="m/s", pad=0.01)
+    return pm
+
+
+def station_ticks(ax, marks, *, annotate: bool = False, color: str = "0.3",
+                  lw: float = 0.4, alpha: float = 0.6, dy: int = 8) -> None:
+    """Dotted station verticals from ``[(x, label), ...]``; labels above when ``annotate``."""
+    for xm, _label in marks:
+        ax.axvline(xm, color=color, lw=lw, ls=":", alpha=alpha)
+    if annotate:
+        for xm, label in marks:
+            if label is None:
+                continue
+            ax.annotate(label, (xm, 0), xytext=(0, dy), textcoords="offset points",
+                        ha="center", fontsize=6, rotation=90, color=color,
+                        annotation_clip=False)
 
 
 def auto_oa_params(x_st: np.ndarray, max_depth: float) -> tuple[float, float]:
@@ -113,13 +171,3 @@ def grid_linear(profiles: list[dict], x_grid: np.ndarray, z_grid: np.ndarray,
         z[z_grid[:, None] > bd[None, :]] = np.nan
         z[:, ~(bd > 0.0)] = np.nan
     return z
-
-
-def smooth_z(z: np.ndarray, sigma: float) -> np.ndarray:
-    """NaN-safe Gaussian smoothing (for contour overlays): fill, smooth, renormalise."""
-    mask = np.isfinite(z)
-    z_fill = np.where(mask, z, 0.0)
-    z_sm = gaussian_filter(z_fill, sigma=sigma)
-    w_sm = gaussian_filter(mask.astype(float), sigma=sigma)
-    with np.errstate(invalid="ignore"):
-        return np.where(w_sm > 0.01, z_sm / w_sm, np.nan)
