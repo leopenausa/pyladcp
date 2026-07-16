@@ -19,7 +19,8 @@ ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"  # tests/fixtures/
 LAD = ROOT / "New_golden" / "Good" / "LADCP"
 DOWN, UP = LAD / "MORIA-80-LADCP-M.000", LAD / "MORIA-80-LADCP-S.000"
 
-pytestmark = pytest.mark.skipif(not DOWN.exists(), reason="MORIA New_golden not present")
+pytestmark = [pytest.mark.slow,
+              pytest.mark.skipif(not DOWN.exists(), reason="MORIA New_golden not present")]
 
 
 @pytest.fixture(scope="module")

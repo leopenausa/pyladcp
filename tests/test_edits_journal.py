@@ -25,6 +25,8 @@ from ladcp.edits import (
 )
 from ladcp.session import EditConfig, SessionConfig
 
+pytestmark = pytest.mark.slow
+
 ROOT = pathlib.Path(__file__).resolve().parent / "fixtures"
 GOOD = ROOT / "New_golden" / "Good"
 DOWN = GOOD / "LADCP" / "MORIA-80-LADCP-M.000"

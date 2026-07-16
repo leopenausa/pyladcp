@@ -15,6 +15,8 @@ from ladcp import discovery as D
 from ladcp.io import ctd_raw
 from ladcp.io.ctd_cnv import read_ctd_cnv
 
+pytestmark = pytest.mark.slow
+
 
 def test_xmlcon_for_finds_sibling(tmp_path):
     hexp = tmp_path / "MORIA-01-CTD.hex"

@@ -1,5 +1,7 @@
 # Ingesting a new cruise (no code changes required)
 
+> **Historical design note** — archived to `docs/design/` 2026-07-16. This document guided the original build and is kept for context; where it disagrees with the code, the code wins. The current module map lives in `src/ladcp/README.md`.
+
 The pipeline is designed so a previously unseen cruise — different naming
 conventions, different instruments, desynced acquisition clocks — processes
 end-to-end with four commands. Validated on MORIA (N Atlantic, earth-coord

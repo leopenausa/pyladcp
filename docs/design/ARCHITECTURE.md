@@ -1,5 +1,7 @@
 # pyladcp — Architecture & Data Contract
 
+> **Historical design note** — archived to `docs/design/` 2026-07-16. This document guided the original build and is kept for context; where it disagrees with the code, the code wins. The current module map lives in `src/ladcp/README.md`.
+
 Status: **partly realized, partly forward-looking** — this is the original design contract,
 kept as a stage/interface reference. The authoritative interface is now the code under
 `src/ladcp/` (well-docstringed); where this document and the code disagree, the code wins.

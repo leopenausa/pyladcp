@@ -1,5 +1,7 @@
 # CTD ingest for LADCP — design + build result (#7)
 
+> **Historical design note** — archived to `docs/design/` 2026-07-16. This document guided the original build and is kept for context; where it disagrees with the code, the code wins. The current module map lives in `src/ladcp/README.md`.
+
 **Status:** BUILT + validated. 2026-06-07. Recipe locked + byte-verified.
 
 ## Build result (2026-06-07)

@@ -4,7 +4,7 @@ Status snapshot (2026-06): the acquisition-QA stage and a velocity solver
 (**shear method + reference**, LDEO_IX `ps.shear==1`) are complete and validated against
 the MORIA-80 golden (`u` corr 0.998; bottom-track `.bot` corr 0.991). The package is now
 `pyladcp` (MIT, CI). See [HISTORY.md](HISTORY.md) for how we got here and
-[ARCHITECTURE.md](ARCHITECTURE.md) for stages/interfaces.
+[ARCHITECTURE.md](design/ARCHITECTURE.md) for stages/interfaces.
 
 The work below is sequenced; each step gets its own detailed plan before execution.
 

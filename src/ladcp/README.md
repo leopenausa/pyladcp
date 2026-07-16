@@ -9,7 +9,7 @@ module is for*, and *which legacy step it corresponds to*.
 If a term here is unfamiliar (super-ensemble, baroclinic, bottom track, shear vs
 inverse, declination…), the **[guide glossary](../../docs/guide/appendix-e-glossary.md)**
 defines every one in a sentence. For the design contract (units, frames, data
-objects) see **[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)**; for the knob-
+objects) see **[docs/design/ARCHITECTURE.md](../../docs/design/ARCHITECTURE.md)**; for the knob-
 and-output mapping from the MATLAB toolbox see
 **[appendix B · LDEO_IX ↔ pyladcp](../../docs/guide/appendix-b-legacy-map.md)**.
 

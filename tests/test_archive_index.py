@@ -16,6 +16,8 @@ from ladcp import archive as A
 from ladcp import discovery as D
 from ladcp.io.ctd_hex import _dm_to_deg, _station_from_name, read_hex_header
 
+pytestmark = pytest.mark.slow
+
 _HEADER = (
     "* Sea-Bird SBE 9 Data File:\n"
     "* System UpLoad Time = Oct 03 2025 06:26:01\n"

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 REPO = Path(__file__).resolve().parents[1]
 GUIDE = REPO / "docs" / "guide"
 

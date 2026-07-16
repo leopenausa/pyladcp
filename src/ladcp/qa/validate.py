@@ -39,13 +39,20 @@ import numpy as np
 
 
 def _find_repo() -> Path:
-    """Repo root (.../LADCP_project), three parents up from src/ladcp/qa/.
+    """Root for the goldens/raw data: ``$LADCP_VALIDATE_ROOT`` when set, else the
+    repo checkout (three parents up from src/ladcp/qa/).
 
-    That only holds for a source checkout (editable install). Under a plain
-    ``pip install`` this file lives in site-packages, where no fixtures exist —
-    fall back to the working directory so ``pytest`` run from a checkout still
-    finds ``tests/fixtures/``.
+    The checkout heuristic only holds for a source checkout (editable install).
+    Under a plain ``pip install`` this file lives in site-packages, where no
+    fixtures exist — fall back to the working directory so ``pytest`` run from a
+    checkout still finds ``tests/fixtures/``. Point ``LADCP_VALIDATE_ROOT`` at a
+    directory with the same layout (``New_golden/``, ``raw_ladcp_test/``, …) to
+    validate against goldens kept elsewhere.
     """
+    import os
+    env = os.environ.get("LADCP_VALIDATE_ROOT")
+    if env:
+        return Path(env).expanduser()
     src = Path(__file__).resolve().parents[3]
     if (src / "tests" / "fixtures").is_dir():
         return src
