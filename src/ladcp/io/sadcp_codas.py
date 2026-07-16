@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .sadcp_vmdas import SadcpDataset
+from .sadcp_types import SadcpDataset
 
 
 def resolve_codas_nc(path: str | Path) -> Path:

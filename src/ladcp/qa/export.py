@@ -24,6 +24,23 @@ def _dm(value: float, pos: str, neg: str) -> str:
     return f"{deg:3d}°{hemi} {minutes:7.4f}'"
 
 
+def _ldeo_header(t: datetime, station: str, filename: str | None,
+                 lat: float, lon: float, drot: float, *, zbottom=None) -> list[str]:
+    """The shared ``.lad``/``.bot`` header block (golden ``MORIA-80`` byte layout)."""
+    lines = [
+        f"Filename    = {filename or station}",
+        f"Date        = {t.year:04d}/{t.month:2d}/{t.day:2d}",
+        f"Start_Time  = {t.hour:2d}:{t.minute:02d}:{t.second:02d}",
+        f"Start_Lat   = {_dm(lat, 'N', 'S')}" if np.isfinite(lat) else "Start_Lat   = ",
+        f"Start_Lon   = {_dm(lon, 'E', 'W')}" if np.isfinite(lon) else "Start_Lon   = ",
+        f"Deviation   = {drot:.6f}" if np.isfinite(drot) else "Deviation   = ",
+    ]
+    if zbottom is not None:
+        lines.append(f"Bottom depth= {int(zbottom)}" if np.isfinite(zbottom)
+                     else "Bottom depth= ")
+    return lines
+
+
 def write_lad(vp: VelocityProfile, path: str, *, station: str = "",
               lat: float = np.nan, lon: float = np.nan, drot: float = np.nan,
               time: datetime | None = None, filename: str | None = None) -> str:
@@ -32,15 +49,7 @@ def write_lad(vp: VelocityProfile, path: str, *, station: str = "",
     ``lat``/``lon`` are decimal degrees (N/E positive); ``drot`` the magnetic declination.
     """
     t = time or datetime.utcnow()
-    lines = [
-        f"Filename    = {filename or station}",
-        f"Date        = {t.year:04d}/{t.month:2d}/{t.day:2d}",
-        f"Start_Time  = {t.hour:2d}:{t.minute:02d}:{t.second:02d}",
-        f"Start_Lat   = {_dm(lat, 'N', 'S')}" if np.isfinite(lat) else "Start_Lat   = ",
-        f"Start_Lon   = {_dm(lon, 'E', 'W')}" if np.isfinite(lon) else "Start_Lon   = ",
-        f"Deviation   = {drot:.6f}" if np.isfinite(drot) else "Deviation   = ",
-        "Columns     = z:u:v:ev",
-    ]
+    lines = _ldeo_header(t, station, filename, lat, lon, drot) + ["Columns     = z:u:v:ev"]
     for z, u, v, ev in zip(vp.z, vp.u, vp.v, vp.uerr, strict=False):
         if not np.isfinite(u + v):
             continue
@@ -62,16 +71,8 @@ def write_bot(bp: BottomProfile, path: str, *, station: str = "",
     ``Bottom depth`` line and ``z:u:v:err`` columns.
     """
     t = time or datetime.utcnow()
-    lines = [
-        f"Filename    = {filename or station}",
-        f"Date        = {t.year:04d}/{t.month:2d}/{t.day:2d}",
-        f"Start_Time  = {t.hour:2d}:{t.minute:02d}:{t.second:02d}",
-        f"Start_Lat   = {_dm(lat, 'N', 'S')}" if np.isfinite(lat) else "Start_Lat   = ",
-        f"Start_Lon   = {_dm(lon, 'E', 'W')}" if np.isfinite(lon) else "Start_Lon   = ",
-        f"Deviation   = {drot:.6f}" if np.isfinite(drot) else "Deviation   = ",
-        f"Bottom depth= {int(zbottom)}" if np.isfinite(zbottom) else "Bottom depth= ",
-        "Columns     = z:u:v:err",
-    ]
+    lines = (_ldeo_header(t, station, filename, lat, lon, drot, zbottom=zbottom)
+             + ["Columns     = z:u:v:err"])
     for z, u, v, e in zip(bp.z, bp.u, bp.v, bp.uerr, strict=False):
         if not np.isfinite(u + v):
             continue

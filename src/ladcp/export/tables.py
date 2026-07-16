@@ -74,7 +74,7 @@ STANDARD_NAME = {
 }
 
 
-def _pyladcp_version() -> str:
+def pyladcp_version() -> str:
     from importlib.metadata import PackageNotFoundError, version
 
     try:
@@ -181,7 +181,7 @@ def metadata_dict(export: StationExport) -> dict:
         "solver": export.solver,
         "n_bins": int(np.isfinite(r.vp.u).sum()),
         "overall_status": export.qc.overall_status.value,
-        "pyladcp_version": _pyladcp_version(),
+        "pyladcp_version": pyladcp_version(),
     }
     if export.sadcp_source is not None:
         md["sadcp_source"] = export.sadcp_source

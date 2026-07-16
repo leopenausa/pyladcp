@@ -26,12 +26,12 @@ LDEO_IX ``loadsadcp.m`` / ``getinv.m`` ``lainsadcp``.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from .pd0 import _ensemble_offsets, _find_type, read_pd0
+from .sadcp_types import SadcpDataset  # noqa: F401  (re-export: the historical home)
 
 # VmDAS navigation data block (per-ensemble GPS fixes). Latitude/longitude are stored
 # as signed 32-bit "binary angle measure": degrees = raw * 180 / 2**31. Offsets are
@@ -47,32 +47,6 @@ _NAV_LAST_LON = 30
 _M_PER_DEG_LAT = 111_320.0   # feeds ship-velocity magnitude (velocity-critical, golden-pinned);
                              # io/nav.py + plots use 110_540 for coarse gating/axes only
 CACHE_NAME = "sadcp_cache.npz"
-
-
-@dataclass
-class SadcpDataset:
-    """Absolute ocean-velocity time series from one shipboard-ADCP instrument.
-
-    ``u``/``v`` are east/north ocean velocity in the **true** (geographic) frame, the
-    frame :func:`ladcp.qa.inverse.compute_velocity_full` expects for its ``sadcp=``
-    constraint. ``depth`` is positive-down below the sea surface.
-    """
-
-    time: np.ndarray            # [t] datetime64[ns] UTC (sorted)
-    lat: np.ndarray             # [t] deg N
-    lon: np.ndarray             # [t] deg E
-    depth: np.ndarray           # [z] m, positive down
-    u: np.ndarray               # [z, t] absolute ocean east, m/s
-    v: np.ndarray               # [z, t] absolute ocean north, m/s
-    freq_khz: int
-    transducer_depth: float
-    file_type: str              # "STA"/"LTA" (raw VmDAS) or "CODAS" (sadcp_codas)
-    source: str                 # ingested folder
-    n_files: int
-
-    @property
-    def n_ens(self) -> int:
-        return int(self.time.size)
 
 
 def _read_nav(buf: bytes, ensembles):

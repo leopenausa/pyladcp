@@ -400,6 +400,10 @@ class StationSession:
         self._declination: tuple[float, str] | None = None
 
     # -- warm tier -------------------------------------------------------------------
+    def is_prepared(self, edit: EditConfig | None = None) -> bool:
+        """Whether ``edit``'s expensive build is already cached (does no work)."""
+        return (edit if edit is not None else EditConfig()) in self._prepared
+
     def prepare(self, edit: EditConfig | None = None) -> _Prepared:
         """Ingest + build the solve context for ``edit`` (cached; ~1.5 s first time).
 

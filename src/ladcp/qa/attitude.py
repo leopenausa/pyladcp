@@ -25,6 +25,7 @@ from scipy.optimize import minimize
 from ..models import Metric, Status
 from .ingest import DualHead
 from .screen import tilt_series
+from .superens import _uvrot
 
 _BATTERY_FACTOR = 0.33          # legacy default guess (unknown CPU board)
 _BATTERY_LOW = 40.0
@@ -43,10 +44,6 @@ class AttitudeSummary:
     roll_offset_est: float | None
 
 
-def _uvrot(u, v, rot):
-    r = -np.radians(rot)
-    cr, sr = np.cos(r), np.sin(r)
-    return u * cr - v * sr, u * sr + v * cr
 
 
 def dual_head_offset(dh: DualHead) -> tuple[float, float, float]:

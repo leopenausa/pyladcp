@@ -21,27 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..io.sadcp_vmdas import SadcpDataset
-
-_M_PER_DEG_LAT = 110_540.0
-_M_PER_DEG_LON = 111_320.0
-
-
-def along_track_km(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
-    """Cumulative along-track distance [km] from per-ensemble nav (NaN-tolerant).
-
-    Equirectangular increments (exact enough at ship scales); NaN fixes contribute
-    zero step so the axis stays monotonic non-decreasing.
-    """
-    la = np.asarray(lat, float)
-    lo = np.asarray(lon, float)
-    latm = np.nanmedian(la)
-    dx = np.diff(lo) * _M_PER_DEG_LON * np.cos(np.deg2rad(latm))
-    dy = np.diff(la) * _M_PER_DEG_LAT
-    step = np.hypot(dx, dy)
-    step[~np.isfinite(step)] = 0.0
-    return np.concatenate([[0.0], np.cumsum(step)]) / 1000.0
-
+from ..io.sadcp_types import SadcpDataset
+from .section_grid import along_track_km, auto_clim, station_ticks, velocity_panel
 
 _ANOM_MIN_BINS = 5
 
@@ -164,10 +145,7 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
             sub.v = np.insert(sub.v, g + 1 + k, nan_col[:, 0], axis=1)
 
     if clim is None:
-        finite = np.abs(np.concatenate([sub.u[zmask].ravel(), sub.v[zmask].ravel()]))
-        finite = finite[np.isfinite(finite)]
-        clim = float(np.percentile(finite, 98)) if finite.size else 0.5
-        clim = max(round(clim, 2), 0.05)
+        clim = auto_clim([sub.u[zmask], sub.v[zmask]])
 
     if fig is None:
         fig = plt.figure(figsize=(11, 7), constrained_layout=True)
@@ -176,19 +154,10 @@ def sadcp_section_figure(ds: SadcpDataset, *, by: str = "time",
     names = (("u′ (east, minus depth mean)", "v′ (north, minus depth mean)")
              if anomaly else ("u (east)", "v (north)"))
     for ax, comp, name in ((axes[0], sub.u, names[0]), (axes[1], sub.v, names[1])):
-        pm = ax.pcolormesh(x, z, comp[zmask], cmap="RdBu_r", vmin=-clim, vmax=clim,
-                           shading="nearest")
-        ax.invert_yaxis()
-        ax.set_ylabel("depth [m]")
-        ax.set_title(f"{name}  [{sub.freq_khz} kHz {sub.file_type}]", fontsize=9)
-        fig.colorbar(pm, ax=ax, label="m/s", pad=0.01)
-        for xm, _label in marks:
-            ax.axvline(xm, color="0.25", lw=0.5, ls=":", alpha=0.7)
-        if marks and ax is axes[0]:
-            for xm, label in marks:
-                ax.annotate(label, (xm, 0), xytext=(0, 10), textcoords="offset points",
-                            ha="center", fontsize=6, rotation=90, color="0.25",
-                            annotation_clip=False)
+        velocity_panel(fig, ax, x, z, comp[zmask], clim=clim,
+                       title=f"{name}  [{sub.freq_khz} kHz {sub.file_type}]")
+        station_ticks(ax, marks, annotate=(ax is axes[0]),
+                      color="0.25", lw=0.5, alpha=0.7, dy=10)
     axes[1].set_xlabel(xlabel)
     if by == "time":
         axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
