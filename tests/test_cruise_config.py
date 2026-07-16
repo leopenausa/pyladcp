@@ -53,13 +53,14 @@ def _write(tmp_path: Path, text: str) -> Path:
 
 
 def test_load_projects_args_and_resolves_paths(tmp_path):
-    p = _write(tmp_path, """
+    abs_idx = str(tmp_path.parent / "idx.json")     # absolute on every platform
+    p = _write(tmp_path, f"""
 [cruise]
 name = "FDCCC"
 [data]
 root = "raw"
 out = "qa_out"
-index = "/abs/idx.json"
+index = '{abs_idx}'
 [ctd]
 from_hex = true
 [edit]
@@ -79,7 +80,7 @@ nav = "nav/track.csv"
     assert m["cruise"] == "FDCCC"
     assert m["root"] == str(tmp_path / "raw")                  # relative to the config dir
     assert m["outdir"] == str(tmp_path / "qa_out")
-    assert m["index"] == "/abs/idx.json"                       # absolute stays absolute
+    assert m["index"] == abs_idx                               # absolute stays absolute
     assert m["from_hex"] is True
     assert m["nearfield_dn_bins"] == "3,4"                     # TOML list -> CLI string
     assert m["no_soundcorr"] is True                           # soundcorr=false inverts
