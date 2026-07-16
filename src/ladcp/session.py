@@ -16,9 +16,10 @@ bit-identical to a fresh :func:`~ladcp.qa.inverse.compute_velocity_full` -- enfo
 by ``tests/test_session_solve.py`` -- so anything Studio produces, ``ladcp-qa``
 reproduces.
 
-``ladcp-qa`` builds its ``inv_opts``/``sadcp_opts`` dicts through this module
-(:meth:`SessionConfig.inv_opts` / :meth:`SessionConfig.sadcp_opts`), keeping a single
-source of truth for option names, defaults, and validation.
+``ladcp-qa`` threads the :class:`SessionConfig` itself through its pipeline, and every
+path that turns a configuration into resolved cast params goes through
+:func:`edit_overrides` -- one source of truth for option names, defaults, validation,
+and the config->params bridge.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ if TYPE_CHECKING:                                # heavy imports stay call-time
     from .qa.inverse import VelocityResult
 
 __all__ = ["EditConfig", "SadcpConfig", "SolveConfig", "SessionConfig", "StationSession",
-           "parse_nearfield", "parse_timeoff", "resolve_declination"]
+           "edit_overrides", "parse_nearfield", "parse_timeoff", "resolve_declination"]
 
 log = logging.getLogger("ladcp.session")
 
@@ -89,6 +90,31 @@ class EditConfig:
     # tuples, so a note edit in the journal never invalidates the prepare cache.
     # Reproducing this on the CLI needs the journal file: to_cli(edits=<path>).
     manual_flags: tuple[tuple[str, int, int, int, int], ...] = ()  # --edits
+
+
+def edit_overrides(edit: EditConfig, manual_flags=None) -> dict:
+    """:class:`~ladcp.config.CastParams` overrides for ``edit`` — THE config→params bridge.
+
+    Every path that turns a configuration into resolved cast params goes through here
+    (``ladcp-qa``'s ``_run_one``, :meth:`StationSession.prepare`, the parity tests), so
+    a new edit knob is wired once. ``manual_flags`` overrides ``edit.manual_flags``
+    when given (the CLI's per-station journal in ``--edits`` directory mode).
+    """
+    ov: dict = {}
+    if edit.nearfield_dn_bins is not None:
+        ov["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
+    if edit.dzbelow is not None:
+        ov["dzbelow"] = edit.dzbelow
+    if edit.zbottom is not None:
+        ov["zbottom"] = edit.zbottom
+    if edit.guessbottom is not None:
+        ov["guessbottom"] = edit.guessbottom
+    if not edit.soundcorr:
+        ov["soundcorr"] = False
+    flags = manual_flags if manual_flags is not None else edit.manual_flags
+    if flags:
+        ov["edit_manual_flags"] = flags
+    return ov
 
 
 @dataclass(frozen=True)
@@ -280,25 +306,6 @@ class SessionConfig:
                 parts.append("--sadcp-reingest")
         return " ".join(parts)
 
-    # -- option dicts consumed by the qa pipeline (single source of truth) -----------
-    def inv_opts(self) -> dict:
-        """The ``inv_opts`` dict ``ladcp-qa`` passes to ``_run_one``."""
-        return {"botfac": self.solve.botfac, "barofac": self.solve.barofac,
-                "smoofac": self.solve.smoofac, "down_only": self.edit.down_only,
-                "nearfield_dn_bins": self.edit.nearfield_dn_bins,
-                "dzbelow": self.edit.dzbelow, "soundcorr": self.edit.soundcorr,
-                "zbottom": self.edit.zbottom, "guessbottom": self.edit.guessbottom}
-
-    def sadcp_opts(self) -> dict | None:
-        """The ``sadcp_opts`` dict ``ladcp-qa`` passes to ``_run_one`` (``None`` = no SADCP)."""
-        if self.sadcp is None:
-            return None
-        return {"folder": self.sadcp.folder, "source": self.sadcp.source,
-                "fac": self.solve.sadcpfac, "file_type": self.sadcp.filetype,
-                "xducer": self.sadcp.xducer, "reingest": self.sadcp.reingest,
-                "timeoff": self.sadcp.timeoff, "nav": self.sadcp.nav}
-
-
 def _fmt(value) -> str:
     """Compact CLI rendering: floats lose a trailing ``.0`` (``2.0`` -> ``'2'``)."""
     if isinstance(value, float) and value == int(value):
@@ -420,19 +427,7 @@ class StationSession:
             timings[name] = round((_time.perf_counter() - t0) * 1000.0, 1)
             return out
 
-        overrides = {}
-        if edit.nearfield_dn_bins is not None:
-            overrides["edit_nearfield_dn_bins"] = edit.nearfield_dn_bins
-        if edit.dzbelow is not None:
-            overrides["dzbelow"] = edit.dzbelow
-        if edit.zbottom is not None:
-            overrides["zbottom"] = edit.zbottom
-        if edit.guessbottom is not None:
-            overrides["guessbottom"] = edit.guessbottom
-        if edit.manual_flags:
-            overrides["edit_manual_flags"] = edit.manual_flags
-        if not edit.soundcorr:                   # mirror qa.cli._run_one exactly
-            overrides["soundcorr"] = False
+        overrides = edit_overrides(edit)
         params = resolve_params(self.cruise, self.station, overrides=overrides or None)
         dh = tick("load_ms", load_dualhead, self.down, self.up,
                   station=self.station, params=params)
@@ -484,11 +479,11 @@ class StationSession:
         from .qa.cli import _sadcp_profile  # call-time: qa.cli imports this module
         t = prep.dh.down.time
         if cfg.solve.solver != "inverse":       # constraint ignored (with the CLI's notice)
-            return _sadcp_profile(cfg.sadcp_opts(), t.min(), t.max(),
+            return _sadcp_profile(cfg.sadcp, t.min(), t.max(),
                                   prep.lat, prep.lon, cfg.solve.solver)
         if cfg.sadcp not in self._sadcp_profiles:
             self._sadcp_profiles[cfg.sadcp] = _sadcp_profile(
-                cfg.sadcp_opts(), t.min(), t.max(), prep.lat, prep.lon, "inverse")
+                cfg.sadcp, t.min(), t.max(), prep.lat, prep.lon, "inverse")
         return self._sadcp_profiles[cfg.sadcp]
 
 

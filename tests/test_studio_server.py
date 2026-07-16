@@ -294,10 +294,10 @@ def test_sadcp_key_selects_the_source(tmp_path, monkeypatch):
     drot = {"solve": {"drot": -9.878379}}
     assert c.post("/api/station/MORIA-80/solve",
                   json=dict(drot, sadcp_key="os150nb_enr")).json()["sadcp_bins"] == 5
-    assert seen[-1]["source"] == "codas" and seen[-1]["folder"].endswith("os150nb_enr")
+    assert seen[-1].source == "codas" and seen[-1].folder.endswith("os150nb_enr")
     assert c.post("/api/station/MORIA-80/solve",
                   json=dict(drot, sadcp_key="raw")).json()["sadcp_bins"] == 5
-    assert seen[-1]["source"] == "vmdas" and seen[-1]["folder"] == "sADCP/DATA"
+    assert seen[-1].source == "vmdas" and seen[-1].folder == "sADCP/DATA"
     off = c.post("/api/station/MORIA-80/solve", json=dict(drot, sadcp_key="off")).json()
     assert off["sadcp_bins"] == 0
 
@@ -333,7 +333,7 @@ def test_legacy_use_sadcp_means_first_source(tmp_path, monkeypatch):
     c = TestClient(create_app(st))
     c.post("/api/station/MORIA-80/solve",
            json={"solve": {"drot": -9.878379}, "use_sadcp": True})
-    assert seen[-1]["source"] == "vmdas"
+    assert seen[-1].source == "vmdas"
 
 
 def test_codas_label_and_discovery(tmp_path):

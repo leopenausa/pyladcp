@@ -36,7 +36,7 @@ from pathlib import Path
 from ..config import DEFAULT_CRUISE, resolve_params
 from ..discovery import discover
 from ..io.ctd_cnv import read_ctd_cnv
-from ..session import SessionConfig, resolve_declination
+from ..session import SessionConfig, edit_overrides, resolve_declination
 from .ingest import apply_header_config, load_dualhead
 from .report import assess, text_report
 from .runlog import ProgressBar, setup_logging, teardown_logging
@@ -44,14 +44,17 @@ from .runlog import ProgressBar, setup_logging, teardown_logging
 log = logging.getLogger("ladcp.qa")
 
 
-def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
-             solver="inverse", sadcp_opts=None, cruise=DEFAULT_CRUISE, formats=None, ctd_utc=None,
-             inv_opts=None, edits=None, hint_root=None):
+def _run_one(down, up, ctd_path, station, outdir, make_plots, cfg: SessionConfig,
+             cruise=DEFAULT_CRUISE, formats=None, ctd_utc=None,
+             edits=None, hint_root=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
-    Returns ``(status, export)``: ``status`` is the QA verdict string (``"ok"``/``"warn"``/
-    ``"fail"``) and ``export`` is a :class:`~ladcp.export.StationExport` when a velocity
-    solution was produced (``None`` for acquisition-only stations).
+    ``cfg`` carries the full solve configuration (edit knobs, SADCP identity, solve
+    weights); by this point any ``timeoff='auto'`` has been resolved to seconds
+    (:func:`_warm_sadcp`). Returns ``(status, export)``: ``status`` is the QA verdict
+    string (``"ok"``/``"warn"``/``"fail"``) and ``export`` is a
+    :class:`~ladcp.export.StationExport` when a velocity solution was produced
+    (``None`` for acquisition-only stations).
 
     ``edits`` is the ``--edits`` value (journal file or ``.ladcp_edits`` dir) and is the
     single application point for manual edits -- resolved, staleness-verified and turned
@@ -69,19 +72,8 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
                                  f"{journal.station!r}, not {station!r}")
             verify_journal(journal, jpath, down, up)
 
-    overrides = {}
-    if inv_opts and inv_opts.get("nearfield_dn_bins") is not None:
-        overrides["edit_nearfield_dn_bins"] = inv_opts["nearfield_dn_bins"]
-    if inv_opts and inv_opts.get("dzbelow") is not None:
-        overrides["dzbelow"] = inv_opts["dzbelow"]
-    if inv_opts and inv_opts.get("zbottom") is not None:
-        overrides["zbottom"] = inv_opts["zbottom"]
-    if inv_opts and inv_opts.get("guessbottom") is not None:
-        overrides["guessbottom"] = inv_opts["guessbottom"]
-    if inv_opts and inv_opts.get("soundcorr") is False:
-        overrides["soundcorr"] = False
-    if journal is not None and journal.entries:
-        overrides["edit_manual_flags"] = manual_flags(journal)
+    jflags = manual_flags(journal) if journal is not None and journal.entries else None
+    overrides = edit_overrides(cfg.edit, manual_flags=jflags)
     params = resolve_params(cruise, station, overrides=overrides or None)
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers
@@ -132,7 +124,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     earth = all(h.coord_frame == CoordFrame.EARTH for h in (dh.down, dh.up) if h is not None)
     result = None
     export = None
-    down_only = bool(inv_opts and inv_opts.get("down_only"))
+    down_only = cfg.edit.down_only
     if ctd is not None and not earth:
         log.warning("        velocity skipped: %s-coordinate data is unsupported (beam frames are "
                     "auto-rotated to earth at ingest; only earth/beam are handled); QA metrics "
@@ -153,8 +145,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
                           source_stage="qa.cli",
                           note="velocity solved from the down-looker alone: reduced "
                                "near-surface coverage, reference layer from down bins only"))
-        result, meta = _velocity_outputs(dh_solve, ctd, station, st_dir, drot, solver,
-                                         sadcp_opts, inv_opts)
+        result, meta = _velocity_outputs(dh_solve, ctd, station, st_dir, cfg)
         from ..qa.checks import consistency_checks
         for m in consistency_checks(result):       # checkinv -> scorecard
             qc.add(m)
@@ -166,7 +157,7 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
         from ..export import StationExport
         export = StationExport(station=station, cruise=cruise, lat=meta["lat"],
                                lon=meta["lon"], time=meta["when"], drot=meta["drot"],
-                               solver=solver, result=result, qc=qc,
+                               solver=cfg.solve.solver, result=result, qc=qc,
                                sadcp_source=meta["sadcp_source"])
 
     if make_plots:
@@ -181,35 +172,35 @@ def _run_one(down, up, ctd_path, station, outdir, make_plots, drot=None,
     return qc.overall_status.value, export
 
 
-def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=None,
-                      inv_opts=None):
+def _velocity_outputs(dh, ctd, station, out, cfg: SessionConfig):
     import numpy as np
 
     from ..plots.sadcp_figure import sadcp_rms_discrepancy
     from ..qa.export import write_bot, write_lad
     from ..qa.inverse import build_solve_context, compute_velocity_full
 
+    solver = cfg.solve.solver
     lat = float(np.nanmedian(ctd.lat))
     lon = float(np.nanmedian(ctd.lon))
     when = dh.down.time[0].astype("datetime64[s]").item()
+    drot = cfg.solve.drot
     if drot is not None:
         drot_source = "explicit"                # user-supplied --drot
     else:                                       # IGRF-13 from cast position + date
         drot, drot_source = resolve_declination(lat, lon, when, logger=log)
 
     t_lad = dh.down.time
-    sadcp = (_sadcp_profile(sadcp_opts, t_lad.min(), t_lad.max(), lat, lon, solver)
-             if sadcp_opts else None)
-    io = inv_opts or {}
-    sadcpfac = (sadcp_opts or {}).get("fac", 3.0)
+    sadcp = (_sadcp_profile(cfg.sadcp, t_lad.min(), t_lad.max(), lat, lon, solver)
+             if cfg.sadcp is not None else None)
+    sadcpfac = cfg.solve.sadcpfac
     # Build the expensive front end once so the SADCP-withheld validation solve below reuses
     # it (~30 ms) instead of rebuilding (~1.2 s); the main solve stays bit-identical.
     context = build_solve_context(dh, ctd, dz=8.0, params=dh.params)
     result = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver,
                                    sadcp=sadcp, sadcpfac=sadcpfac,
-                                   botfac=io.get("botfac", 1.0),
-                                   barofac=io.get("barofac", 1.0),
-                                   smoofac=io.get("smoofac", 0.0),
+                                   botfac=cfg.solve.botfac,
+                                   barofac=cfg.solve.barofac,
+                                   smoofac=cfg.solve.smoofac,
                                    context=context)
     # Independent empirical uncertainty: re-solve with the ship-ADCP withheld (sadcpfac=0) so
     # the LADCP-vs-SADCP comparison is not circular, then RMS over the shared depth range. Only
@@ -217,9 +208,9 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
     if solver == "inverse" and sadcp is not None and sadcpfac > 0:
         withheld = compute_velocity_full(dh, ctd, drot=drot, params=dh.params, solver=solver,
                                          sadcp=sadcp, sadcpfac=0.0,
-                                         botfac=io.get("botfac", 1.0),
-                                         barofac=io.get("barofac", 1.0),
-                                         smoofac=io.get("smoofac", 0.0),
+                                         botfac=cfg.solve.botfac,
+                                         barofac=cfg.solve.barofac,
+                                         smoofac=cfg.solve.smoofac,
                                          context=context)
         result.sadcp_independent_rms = sadcp_rms_discrepancy(withheld)
     vp, bp = result.vp, result.bp
@@ -237,9 +228,9 @@ def _velocity_outputs(dh, ctd, station, out, drot, solver="inverse", sadcp_opts=
                   zbottom=result.zbottom, time=when)
         log.info("        bottom-track: %s  (%d bins)", bot, bp.n_bins)
 
-    if sadcp_opts and sadcp is not None:
-        sadcp_src = sadcp_opts["folder"]
-        if sadcp_opts.get("source") == "codas":
+    if cfg.sadcp is not None and sadcp is not None:
+        sadcp_src = cfg.sadcp.folder
+        if cfg.sadcp.source == "codas":
             sadcp_src = f"codas:{sadcp_src}"        # provenance: CODAS-calibrated product
     else:
         sadcp_src = None
@@ -313,46 +304,49 @@ def _write_cruise_exports(exports, outdir, cruise, formats) -> None:
             log.warning("  exports: cruise Excel skipped: %s", e)
 
 
-def _sadcp_profile(opts, time_start, time_end, lat, lon, solver):
-    """Build the cast's ship-ADCP constraint profile from a VmDAS folder or CODAS file.
+def _load_sadcp_dataset(sadcp):
+    """Load the ship-ADCP dataset for a :class:`~ladcp.session.SadcpConfig` (per source)."""
+    if sadcp.source == "codas":
+        from ..io.sadcp_codas import read_codas_nc
+        return read_codas_nc(sadcp.folder)
+    if sadcp.source == "ek80":
+        from ..io.sadcp_ek80 import read_ek80
+        return read_ek80(sadcp.folder, transducer_depth=sadcp.xducer)
+    from ..io.sadcp_vmdas import load_or_ingest
+    return load_or_ingest(sadcp.folder, force=sadcp.reingest,
+                          file_type=sadcp.filetype, transducer_depth=sadcp.xducer)
 
-    Loads the dataset once (raw VmDAS folder ingested+cached, or a CODAS-processed
-    NetCDF read directly per ``--sadcp-source``), then windows it to this cast's LADCP
-    time span and position. Only the ``inverse`` solver consumes the constraint; with
+
+def _sadcp_profile(sadcp, time_start, time_end, lat, lon, solver):
+    """Build the cast's ship-ADCP constraint profile for a :class:`SadcpConfig`.
+
+    Loads the dataset once (raw VmDAS folder ingested+cached, or a CODAS/EK80 NetCDF
+    read directly per ``--sadcp-source``), then windows it to this cast's LADCP time
+    span and position. Only the ``inverse`` solver consumes the constraint; with
     ``shear`` the folder is ignored with a notice. Returns the ``svel`` array or ``None``.
+
+    ``timeoff='auto'`` is resolved here when still present (library callers); the CLI
+    batch path resolves it once up front instead (:func:`_warm_sadcp`).
     """
     if solver != "inverse":
         log.info("        sadcp: ignored (constraint applies only to --solver inverse)")
         return None
     from ..io.sadcp_vmdas import extract_profile
 
-    if opts.get("source") == "codas":
-        from ..io.sadcp_codas import read_codas_nc
-        ds = read_codas_nc(opts["folder"])
-    elif opts.get("source") == "ek80":
-        from ..io.sadcp_ek80 import read_ek80
-        ds = read_ek80(opts["folder"], transducer_depth=opts.get("xducer", 5.0))
-    else:
-        from ..io.sadcp_vmdas import load_or_ingest
-        ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
-                            force=opts.get("reingest", False),
-                            file_type=opts.get("file_type", "STA"),
-                            transducer_depth=opts.get("xducer", 5.0))
-    toff = opts.get("timeoff")
+    ds = _load_sadcp_dataset(sadcp)
+    toff = sadcp.timeoff
     if toff == "auto":
         from ..io.nav import estimate_time_offset, read_nav
-        nav = read_nav(opts["nav"])
+        nav = read_nav(sadcp.nav)
         est = estimate_time_offset(ds.time, ds.lat, ds.lon, nav)
         toff = est["offset_s"]
-        opts["timeoff"] = toff          # estimate once, reuse for every station
         log.info("        sadcp: clock offset %+.2f s estimated from nav track "
                  "(track residual %.0f m median / %.0f m p90, overlap %.0f%%)",
                  toff, est["median_m"], est["p90_m"], 100 * est["overlap"])
     if toff:
         from ..io.nav import shift_time
         ds = shift_time(ds, float(toff))
-    sv = extract_profile(ds, time_start=time_start, time_end=time_end, lat=lat, lon=lon,
-                         dtok_min=opts.get("dtok_min", 0.0))
+    sv = extract_profile(ds, time_start=time_start, time_end=time_end, lat=lat, lon=lon)
     if sv is None:
         log.info("        sadcp: no usable %s kHz data at this station "
                  "(time/position window empty) -- constraint skipped", ds.freq_khz)
@@ -405,10 +399,9 @@ def _pool_task(task: dict) -> tuple[int, str, str, object, str]:
         label = sf.label
         status, export = _run_one(str(sf.down), str(sf.up) if sf.up else None,
                                   str(sf.ctd) if sf.ctd else None, label, task["outdir"],
-                                  task["make_plots"], drot=task["drot"],
-                                  solver=task["solver"], sadcp_opts=task["sadcp_opts"],
+                                  task["make_plots"], task["cfg"],
                                   cruise=task["cruise"], formats=task["formats"],
-                                  ctd_utc=sf.ctd_utc, inv_opts=task["inv_opts"],
+                                  ctd_utc=sf.ctd_utc,
                                   edits=task.get("edits"), hint_root=task["root"])
     except (Exception, SystemExit) as e:           # one bad cast must not abort the batch
         lg.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
@@ -426,31 +419,31 @@ def _append_worker_log(text: str) -> None:
             h.flush()
 
 
-def _warm_sadcp(opts: dict) -> None:
-    """Pre-fork SADCP setup: build the ingest cache and resolve ``timeoff='auto'`` once.
+def _warm_sadcp(cfg: SessionConfig) -> SessionConfig:
+    """One-time SADCP setup for a batch: build the ingest cache and resolve
+    ``timeoff='auto'`` to seconds, returning the updated (still frozen) config.
 
-    Without this every worker would race to parse the raw VmDAS tree and re-estimate
-    the clock offset against the nav track.
+    Without this every station (or worker process) would race to parse the raw VmDAS
+    tree and re-estimate the clock offset against the nav track. ``reingest`` is
+    cleared afterwards so the stations reuse the cache just built.
     """
-    if opts.get("source") in ("codas", "ek80"):
-        ds = None                                   # NetCDF read is cheap per worker
-    else:
-        from ..io.sadcp_vmdas import load_or_ingest
-        ds = load_or_ingest(opts["folder"], cache=opts.get("cache"),
-                            force=opts.get("reingest", False),
-                            file_type=opts.get("file_type", "STA"),
-                            transducer_depth=opts.get("xducer", 5.0))
-        opts["reingest"] = False                    # workers reuse the cache just built
-    if opts.get("timeoff") == "auto":
+    from dataclasses import replace
+
+    sadcp = cfg.sadcp
+    ds = None
+    if sadcp.source not in ("codas", "ek80"):       # NetCDF reads are cheap per station
+        ds = _load_sadcp_dataset(sadcp)
+        sadcp = replace(sadcp, reingest=False)
+    if sadcp.timeoff == "auto":
         if ds is None:
-            from ..io.sadcp_codas import read_codas_nc
-            ds = read_codas_nc(opts["folder"])
+            ds = _load_sadcp_dataset(sadcp)
         from ..io.nav import estimate_time_offset, read_nav
-        nav = read_nav(opts["nav"])
+        nav = read_nav(sadcp.nav)
         est = estimate_time_offset(ds.time, ds.lat, ds.lon, nav)
-        opts["timeoff"] = est["offset_s"]
-        log.info("sadcp: clock offset %+.2f s estimated from nav track (pre-fork; "
-                 "track residual %.0f m median)", est["offset_s"], est["median_m"])
+        sadcp = replace(sadcp, timeoff=est["offset_s"])
+        log.info("sadcp: clock offset %+.2f s estimated from nav track (once for the "
+                 "batch; track residual %.0f m median)", est["offset_s"], est["median_m"])
+    return replace(cfg, sadcp=sadcp)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -594,8 +587,6 @@ def main(argv: list[str] | None = None) -> int:
             cfg.sadcp.validate_folder()
     except ValueError as e:           # same messages the inline checks used to emit
         ap.error(str(e))
-    sadcp_opts = cfg.sadcp_opts()
-    inv_opts = cfg.inv_opts()
 
     # resolve the work list: explicit single file set, or a batch of station ids
     explicit = bool(args.down)
@@ -638,17 +629,16 @@ def main(argv: list[str] | None = None) -> int:
     results: list[tuple[str, str]] = []                # (label, status)
     exports = []
     try:
+        if cfg.sadcp is not None and cfg.solve.solver == "inverse":
+            cfg = _warm_sadcp(cfg)         # build the cache / resolve 'auto' ONCE per batch
         if jobs > 1 and not explicit:
             # one station per worker process: stations are fully independent, and the
             # bulk of a station's wall time is matplotlib rendering (CPU-bound)
-            if sadcp_opts:
-                _warm_sadcp(sadcp_opts)            # build the cache / resolve 'auto' ONCE
             log.info("parallel: %d worker processes", jobs)
             base = dict(root=str(root), cruise=args.cruise, index=args.index,
                         from_hex=args.from_hex, ctd_cache=args.ctd_cache,
-                        outdir=args.outdir, make_plots=not args.no_plots, drot=args.drot,
-                        solver=args.solver, sadcp_opts=sadcp_opts, formats=formats,
-                        inv_opts=inv_opts, edits=args.edits)
+                        outdir=args.outdir, make_plots=not args.no_plots,
+                        cfg=cfg, formats=formats, edits=args.edits)
             # each worker must NOT spin up a full BLAS thread pool: 6 workers x 16
             # OpenBLAS threads thrash the cores (measured 3x slower on the 40-cast
             # MORIA soak: 465s vs 148s). The pool itself is the parallelism, so
@@ -700,11 +690,9 @@ def main(argv: list[str] | None = None) -> int:
                         ctd_utc = sf.ctd_utc
                     bar.start(label)
                     status, export = _run_one(down, up, ctd_path, label, args.outdir,
-                                              not args.no_plots, drot=args.drot,
-                                              solver=args.solver, sadcp_opts=sadcp_opts,
+                                              not args.no_plots, cfg,
                                               cruise=args.cruise, formats=formats,
-                                              ctd_utc=ctd_utc, inv_opts=inv_opts,
-                                              edits=args.edits,
+                                              ctd_utc=ctd_utc, edits=args.edits,
                                               hint_root=None if explicit else str(root))
                     if export is not None:
                         exports.append(export)
