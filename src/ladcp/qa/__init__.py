@@ -1,8 +1,11 @@
-"""Acquisition quality-assessment layer (QA-first rebuild).
+"""The processing package: acquisition QA *and* the velocity solve.
 
-This subtree is intentionally independent of the velocity inverse. Each module computes
-diagnostics from raw instrument fields (echo amplitude, correlation, attitude,
-percent-good) and reports numbers validated against the MORIA-80 golden ``p``-struct.
+Historically this subtree held only the quality-assessment layer; it has since grown
+the full pipeline — ingest, screening/editing, CTD sync, seabed detection,
+super-ensembles, and both velocity solvers (``inverse``/``inverse_full`` and the
+shear method) — orchestrated by :mod:`.pipeline` and driven by the ``ladcp-qa``
+command (:mod:`.cli`). The package name is kept for stability (imports, the
+``ladcp-qa`` entry point, and ``source_stage`` tags in QA output all build on it).
 
-See ``docs/PLAN_QA_REBUILD.md``.
+Reading order and a module-by-module map: ``src/ladcp/README.md``.
 """

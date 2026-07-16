@@ -86,7 +86,7 @@ def read_vmdas_file(path: str, *, transducer_depth: float = 5.0,
     ensembles = list(_ensemble_offsets(buf))
     if not ensembles:
         raise ValueError(f"no valid VmDAS ensembles in {path}")
-    raw = read_pd0(path)
+    raw = read_pd0(path, buf=buf)               # reuse the bytes: no second disk read
     time = np.asarray(raw.time)
     # read_pd0 stores earth velocity as the 4 "beam" slots: 0=east, 1=north, 2=up, 3=err
     u_water = raw.vel[0].copy()
