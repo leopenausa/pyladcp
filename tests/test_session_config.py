@@ -90,7 +90,7 @@ def test_roundtrip_with_context():
 
 # ---------------------------------------------------------------- config -> params bridge
 # edit_overrides is THE single path from a configuration to CastParams overrides
-# (qa.cli._run_one, StationSession.prepare and the parity tests all call it).
+# (qa.pipeline.process_station, StationSession.prepare and the parity tests all call it).
 
 def test_edit_overrides_default_is_empty():
     assert edit_overrides(EditConfig()) == {}

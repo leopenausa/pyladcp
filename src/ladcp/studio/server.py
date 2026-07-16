@@ -805,8 +805,8 @@ def main(argv: list[str] | None = None) -> int:
 
     labels = list(args.stations)
     if not labels and args.index:
-        from ..qa.cli import _all_station_labels
-        labels = _all_station_labels(args.index, Path(args.root), args.cruise)
+        from ..discovery import all_station_labels
+        labels = all_station_labels(args.index, Path(args.root))
     if not labels:
         ap.error("give one or more station ids, or --index to serve the whole archive")
 

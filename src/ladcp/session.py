@@ -96,7 +96,8 @@ def edit_overrides(edit: EditConfig, manual_flags=None) -> dict:
     """:class:`~ladcp.config.CastParams` overrides for ``edit`` — THE config→params bridge.
 
     Every path that turns a configuration into resolved cast params goes through here
-    (``ladcp-qa``'s ``_run_one``, :meth:`StationSession.prepare`, the parity tests), so
+    (:func:`ladcp.qa.pipeline.process_station`, :meth:`StationSession.prepare`, the
+    parity tests), so
     a new edit knob is wired once. ``manual_flags`` overrides ``edit.manual_flags``
     when given (the CLI's per-station journal in ``--edits`` directory mode).
     """
@@ -200,7 +201,7 @@ class SessionConfig:
         nearfield = (None if args.nearfield_dn_bins is None
                      else parse_nearfield(args.nearfield_dn_bins))
         # --edits FILE attaches the journal's geometry here (launch-time validation);
-        # a DIRECTORY is resolved per station later (qa.cli._run_one), so it cannot
+        # a DIRECTORY is resolved per station later (qa.pipeline.process_station), so it cannot
         # be represented in a single SessionConfig and stays empty here.
         manual: tuple = ()
         edits_arg = getattr(args, "edits", None)
@@ -476,13 +477,13 @@ class StationSession:
         """The cast-windowed ship-ADCP constraint profile, cached per :class:`SadcpConfig`."""
         if cfg.sadcp is None:
             return None
-        from .qa.cli import _sadcp_profile  # call-time: qa.cli imports this module
+        from .qa.pipeline import sadcp_profile  # call-time: qa.pipeline imports this module
         t = prep.dh.down.time
         if cfg.solve.solver != "inverse":       # constraint ignored (with the CLI's notice)
-            return _sadcp_profile(cfg.sadcp, t.min(), t.max(),
-                                  prep.lat, prep.lon, cfg.solve.solver)
+            return sadcp_profile(cfg.sadcp, t.min(), t.max(),
+                                 prep.lat, prep.lon, cfg.solve.solver)
         if cfg.sadcp not in self._sadcp_profiles:
-            self._sadcp_profiles[cfg.sadcp] = _sadcp_profile(
+            self._sadcp_profiles[cfg.sadcp] = sadcp_profile(
                 cfg.sadcp, t.min(), t.max(), prep.lat, prep.lon, "inverse")
         return self._sadcp_profiles[cfg.sadcp]
 
