@@ -49,6 +49,7 @@ Repository = "https://github.com/leopenausa/pyladcp"
 Issues = "https://github.com/leopenausa/pyladcp/issues"
 
 [project.scripts]
+ladcp = "ladcp.hub.cli:main"
 ladcp-qa = "ladcp.qa.cli:main"
 ladcp-index = "ladcp.archive_cli:main"
 ladcp-sadcp-section = "ladcp.plots.sadcp_section:main"

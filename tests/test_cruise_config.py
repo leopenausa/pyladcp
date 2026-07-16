@@ -217,8 +217,9 @@ def captured(monkeypatch):
                               param_overrides=param_overrides)
         return "ok", None
 
-    monkeypatch.setattr(cli, "discover", fake_discover)
-    monkeypatch.setattr(cli, "process_station", fake_process)
+    from ladcp.qa import batch
+    monkeypatch.setattr(batch, "discover", fake_discover)
+    monkeypatch.setattr(batch, "process_station", fake_process)
     return calls
 
 

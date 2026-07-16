@@ -5,6 +5,66 @@ This appendix is **generated from the live `--help` output** of each pyladcp com
 you read here is exactly what the installed code accepts.
 
 
+## `ladcp`
+
+```text
+usage: ladcp [-h] {config,process} ...
+
+The LADCP cruise hub: drives the ladcp-* commands from one cruise.toml (run
+inside a cruise directory).
+
+positional arguments:
+  {config,process}
+    config          show / validate / edit the cruise.toml
+    process         process stations per the cruise.toml
+
+options:
+  -h, --help        show this help message and exit
+```
+
+## `ladcp process`
+
+```text
+usage: ladcp process [-h] [--new] [--all] [--force] [--config PATH] [-j N]
+                     [--no-plots] [-v] [--no-progress] [--no-log]
+                     [stations ...]
+
+positional arguments:
+  stations        station label(s) to (re)process unconditionally; default:
+                  every indexed station that is missing or stale (the
+                  freshness rule)
+
+options:
+  -h, --help      show this help message and exit
+  --new           process missing/stale stations only (the default when no
+                  stations are named; spelled out for scripts)
+  --all           process every indexed station and rebuild the cruise exports
+  --force         ignore freshness: reprocess everything (same as --all)
+  --config PATH   cruise.toml to use (default: auto-discovered upward from
+                  cwd)
+  -j N, --jobs N  process N stations in parallel (default: 1; 0 = one per CPU)
+  --no-plots      skip figures/PDF
+  -v, --verbose   stream per-station detail instead of the progress bar
+  --no-progress   disable the progress bar
+  --no-log        do not write a run-log file
+```
+
+## `ladcp config`
+
+```text
+usage: ladcp config [-h] [--config PATH] {show,validate,edit}
+
+positional arguments:
+  {show,validate,edit}  show: resolved options with provenance; validate:
+                        schema + referenced paths; edit: $EDITOR on a copy,
+                        saved only if valid
+
+options:
+  -h, --help            show this help message and exit
+  --config PATH         cruise.toml to use (default: auto-discovered upward
+                        from cwd)
+```
+
 ## `ladcp-qa`
 
 ```text

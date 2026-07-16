@@ -1,9 +1,9 @@
-"""``ladcp-qa`` — argument parsing, work-list resolution, logging and the worker pool.
+"""``ladcp-qa`` — argument parsing, work-list resolution and run logging.
 
 The science lives in :mod:`ladcp.qa.pipeline` (its ``process_station`` is the
 pipeline's table of contents; start reading there). This module only turns a command
-line into ``process_station`` calls: serially, or one worker process per station
-(``--jobs``).
+line into a :func:`ladcp.qa.batch.run_batch` call — the shared batch loop (serial,
+or one worker process per station with ``--jobs``) that the ``ladcp`` hub drives too.
 
 Compact form — give one or more station ids and let it find the files under a root
 directory (expects ``<root>/LADCP`` and ``<root>/CTD`` with the usual MORIA names)::
@@ -33,91 +33,23 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
 from ..config import DEFAULT_CRUISE
-from ..discovery import all_station_labels, discover
+from ..discovery import all_station_labels
 from ..hub.cruise_config import (
     ConfigError,
     apply_to_args,
     explicit_dests,
     find_config,
     load_config,
-    merge_params,
-    station_params,
 )
 from ..session import SessionConfig
-from .pipeline import process_station, warm_sadcp, write_cruise_exports
-from .runlog import ProgressBar, setup_logging, teardown_logging
+from .batch import log_summary, run_batch
+from .runlog import setup_logging, teardown_logging
 
 log = logging.getLogger("ladcp.qa")
-
-
-# ---------------------------------------------------------------------------
-# --jobs N: parallel batch over stations (one worker process per station).
-# Stations are fully independent; ~80% of a station's wall time is figure
-# rendering, so process-level parallelism scales near-linearly. The worker
-# functions are top-level so they pickle under the spawn start method
-# (Windows/macOS).
-
-def _pool_init() -> None:
-    """Worker initializer: force the headless matplotlib backend."""
-    os.environ["MPLBACKEND"] = "Agg"
-    import matplotlib
-    matplotlib.use("Agg", force=True)
-
-
-def _pool_task(task: dict) -> tuple[int, str, str, object, str]:
-    """Process one station in a worker: returns (index, label, status, export, log_text).
-
-    Per-station log records are captured into a buffer (file-log format) and written
-    sequentially by the parent, so ``ladcp-qa.log`` never interleaves stations.
-    """
-    import io as _io
-
-    buf = _io.StringIO()
-    lg = logging.getLogger("ladcp.qa")
-    lg.setLevel(logging.DEBUG)
-    lg.propagate = False
-    for h in list(lg.handlers):
-        lg.removeHandler(h)
-        h.close()
-    bh = logging.StreamHandler(buf)
-    bh.setLevel(logging.DEBUG)
-    bh.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s",
-                                      "%Y-%m-%d %H:%M:%S"))
-    lg.addHandler(bh)
-
-    label, status, export = task["item"], "error", None
-    try:
-        sf = discover(task["item"], root=Path(task["root"]), cruise=task["cruise"],
-                      index=task["index"], from_hex=task["from_hex"],
-                      ctd_cache=task["ctd_cache"])
-        label = sf.label
-        pov = merge_params(task["params_global"], task["params_station"], label)
-        status, export = process_station(str(sf.down), str(sf.up) if sf.up else None,
-                                         str(sf.ctd) if sf.ctd else None, label,
-                                         task["outdir"], task["make_plots"], task["cfg"],
-                                         cruise=task["cruise"], formats=task["formats"],
-                                         ctd_utc=sf.ctd_utc, edits=task.get("edits"),
-                                         hint_root=task["root"],
-                                         param_overrides=pov or None)
-    except (Exception, SystemExit) as e:           # one bad cast must not abort the batch
-        lg.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
-    bh.flush()
-    return task["_i"], label, status, export, buf.getvalue()
-
-
-def _append_worker_log(text: str) -> None:
-    """Write a worker's captured log block into the parent's run-log file verbatim."""
-    if not text:
-        return
-    for h in logging.getLogger("ladcp.qa").handlers:
-        if isinstance(h, logging.FileHandler):
-            h.stream.write(text)
-            h.flush()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -321,124 +253,24 @@ def main(argv: list[str] | None = None) -> int:
     if ccfg is not None:
         log.info("config: %s", ccfg.path)
     log.info("ladcp-qa: %d station(s), solver=%s, out=%s", n, args.solver, args.outdir)
-    bar = ProgressBar(n, enabled=(not explicit and n > 1 and not console_detail
-                                  and not args.no_progress))
 
-    root = Path(args.root)
-    jobs = args.jobs if args.jobs > 0 else (os.cpu_count() or 1)
-    jobs = max(1, min(jobs, n))
-    results: list[tuple[str, str]] = []                # (label, status)
-    exports = []
     try:
-        if cfg.sadcp is not None and cfg.solve.solver == "inverse":
-            cfg = warm_sadcp(cfg)          # build the cache / resolve 'auto' ONCE per batch
-        if jobs > 1 and not explicit:
-            # one station per worker process: stations are fully independent, and the
-            # bulk of a station's wall time is matplotlib rendering (CPU-bound)
-            log.info("parallel: %d worker processes", jobs)
-            base = dict(root=str(root), cruise=args.cruise, index=args.index,
-                        from_hex=args.from_hex, ctd_cache=args.ctd_cache,
-                        outdir=args.outdir, make_plots=not args.no_plots,
-                        cfg=cfg, formats=formats, edits=args.edits,
-                        params_global=ccfg.params_global if ccfg else {},
-                        params_station=ccfg.params_station if ccfg else {})
-            # each worker must NOT spin up a full BLAS thread pool: 6 workers x 16
-            # OpenBLAS threads thrash the cores (measured 3x slower on the 40-cast
-            # MORIA soak: 465s vs 148s). The pool itself is the parallelism, so
-            # workers run single-threaded BLAS; an explicit user env setting wins.
-            # The spawn context (all platforms) makes the limit apply at numpy load.
-            for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-                        "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
-                os.environ.setdefault(var, "1")
-            import multiprocessing
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            ctx = multiprocessing.get_context("spawn")
-            slots: list[tuple[str, str, object] | None] = [None] * n
-            with ProcessPoolExecutor(max_workers=jobs, initializer=_pool_init,
-                                     mp_context=ctx) as ex:
-                futs = {ex.submit(_pool_task, dict(base, item=item, _i=i)): i
-                        for i, item in enumerate(plan)}
-                for fut in as_completed(futs):
-                    try:
-                        i, label, status, export, text = fut.result()
-                    except Exception as e:         # un-picklable result / dead worker
-                        i = futs[fut]
-                        label, status, export = plan[i], "error", None
-                        text = f"[ERROR] {label}: {type(e).__name__}: {e}\n"
-                    slots[i] = (label, status, export)
-                    _append_worker_log(text)
-                    bar.advance(f"{label} [{status}]")
-            for slot in slots:                     # plan order: deterministic summary/exports
-                if slot is None:
-                    continue
-                label, status, export = slot
-                results.append((label, status))
-                if export is not None:
-                    exports.append(export)
-        else:
-            for item in plan:
-                label = item
-                bar.start(label)
-                ctd_utc = None
-                try:
-                    if explicit:
-                        down, up, ctd_path = args.down, args.up, args.ctd
-                    else:
-                        sf = discover(item, root=root, cruise=args.cruise, index=args.index,
-                                      from_hex=args.from_hex, ctd_cache=args.ctd_cache)
-                        label = sf.label
-                        down = str(sf.down)
-                        up = str(sf.up) if sf.up else None
-                        ctd_path = str(sf.ctd) if sf.ctd else None
-                        ctd_utc = sf.ctd_utc
-                    bar.start(label)
-                    pov = station_params(ccfg, label) if ccfg else None
-                    status, export = process_station(down, up, ctd_path, label, args.outdir,
-                                                     not args.no_plots, cfg,
-                                                     cruise=args.cruise, formats=formats,
-                                                     ctd_utc=ctd_utc, edits=args.edits,
-                                                     hint_root=None if explicit else str(root),
-                                                     param_overrides=pov or None)
-                    if export is not None:
-                        exports.append(export)
-                except (Exception, SystemExit) as e:   # one bad cast must not abort the batch
-                    status = "error"
-                    bar.clear()
-                    log.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
-                results.append((label, status))
-                bar.advance(f"{label} [{status}]")
-        bar.close()
-
-        # cruise-level aggregate only when explicitly requested (batch / whole index)
-        if formats and exports and (args.all_stations or args.cruise_export):
-            write_cruise_exports(exports, args.outdir, args.cruise, formats)
-
-        _log_summary(results, logfile, console_detail)
+        results = run_batch(
+            plan, cfg, root=args.root, cruise=args.cruise, index=args.index,
+            from_hex=args.from_hex, ctd_cache=args.ctd_cache, outdir=args.outdir,
+            make_plots=not args.no_plots, formats=formats, edits=args.edits,
+            jobs=args.jobs,
+            explicit_files=(args.down, args.up, args.ctd) if explicit else None,
+            params_global=ccfg.params_global if ccfg else None,
+            params_station=ccfg.params_station if ccfg else None,
+            cruise_export=bool(args.all_stations or args.cruise_export),
+            progress_enabled=(not explicit and n > 1 and not console_detail
+                              and not args.no_progress))
+        log_summary(results, logfile, console_detail)
     finally:
         teardown_logging()
 
     return 1 if any(s in ("fail", "error") for _, s in results) else 0
-
-
-def _log_summary(results: list[tuple[str, str]], logfile, console_detail: bool) -> None:
-    """Log a one-line tally plus any problem stations; echo to console when it's quiet."""
-    from collections import Counter
-
-    counts = Counter(status for _, status in results)
-    tally = ", ".join(f"{counts[k]} {k}" for k in ("ok", "warn", "fail", "error") if counts[k])
-    summary = f"done: {len(results)} station(s) — {tally}"
-    problems = [(label, status) for label, status in results if status in ("fail", "error")]
-    log.info(summary)
-    for label, status in problems:
-        log.info("  %-14s %s", label, status)
-    if logfile:
-        log.info("run log: %s", logfile)
-    if not console_detail:                             # console handler is quiet -> echo it
-        print(summary)
-        for label, status in problems:
-            print(f"  {label}: {status}")
-        if logfile:
-            print(f"run log: {logfile}")
 
 
 if __name__ == "__main__":
