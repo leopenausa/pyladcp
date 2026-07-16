@@ -53,10 +53,16 @@ def _ensemble_offsets(buf: bytes):
             pos += 1
 
 
-def read_pd0(path: str, head: str = "", facing_hint: str | None = None) -> RawADCP:
-    """Read a single-head PD0 file into a :class:`RawADCP`."""
-    with open(path, "rb") as fh:
-        buf = fh.read()
+def read_pd0(path: str, head: str = "", facing_hint: str | None = None, *,
+             buf: bytes | None = None) -> RawADCP:
+    """Read a single-head PD0 file into a :class:`RawADCP`.
+
+    ``buf`` lets a caller that already holds the file's bytes (e.g. the VmDAS reader,
+    which also scans the 0x2000 nav blocks) skip the second disk read.
+    """
+    if buf is None:
+        with open(path, "rb") as fh:
+            buf = fh.read()
 
     ensembles = list(_ensemble_offsets(buf))
     if not ensembles:
