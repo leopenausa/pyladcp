@@ -29,7 +29,7 @@ log = logging.getLogger("ladcp.qa")
 
 def process_station(down, up, ctd_path, station, outdir, make_plots, cfg: SessionConfig,
                     cruise=DEFAULT_CRUISE, formats=None, ctd_utc=None,
-                    edits=None, hint_root=None):
+                    edits=None, hint_root=None, param_overrides=None):
     """Process one station into ``<outdir>/stations/<station>/``.
 
     ``cfg`` carries the full solve configuration (edit knobs, SADCP identity, solve
@@ -43,6 +43,11 @@ def process_station(down, up, ctd_path, station, outdir, make_plots, cfg: Sessio
     single application point for manual edits -- resolved, staleness-verified and turned
     into params here. ``hint_root`` (discovery mode only) lets the no-``--edits`` path
     WARN about an existing unapplied journal.
+
+    ``param_overrides`` is the station's merged ``cruise.toml`` ``[params]`` layer
+    (:func:`ladcp.hub.cruise_config.station_params`): applied to the resolved
+    :class:`~ladcp.config.CastParams` *under* the edit knobs, so explicit flags and
+    journals keep winning over the config file.
     """
     from ..edits import journal_path, load_journal, manual_flags, resolve_edits_arg, verify_journal
     journal = jpath = None
@@ -56,7 +61,8 @@ def process_station(down, up, ctd_path, station, outdir, make_plots, cfg: Sessio
             verify_journal(journal, jpath, down, up)
 
     jflags = manual_flags(journal) if journal is not None and journal.entries else None
-    overrides = edit_overrides(cfg.edit, manual_flags=jflags)
+    overrides = dict(param_overrides or {})
+    overrides.update(edit_overrides(cfg.edit, manual_flags=jflags))
     params = resolve_params(cruise, station, overrides=overrides or None)
     dh = load_dualhead(down, up, station=station, params=params)
     apply_header_config(params, dh)             # geometry/head-count from the PD0 headers

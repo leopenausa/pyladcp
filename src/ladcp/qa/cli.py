@@ -16,6 +16,11 @@ Explicit form — name the files directly (for non-standard layouts)::
 
     ladcp-qa --down …-M.000 --up …-S.000 --ctd …_clean.cnv --station MORIA-80
 
+A ``cruise.toml`` in the working directory (or a parent, or ``--config``) supplies
+per-cruise defaults for all of these options — root, index, SADCP source, solver
+knobs, and per-station ``[params]`` overrides (:mod:`ladcp.hub.cruise_config`).
+Typed flags always win over the file.
+
 Each station yields ``<station>_qa.txt`` + ``_qa.json`` (report), the QA PNGs, and a
 combined ``<station>_report.pdf`` (scorecard + figures). ``--no-plots`` skips the figures.
 
@@ -29,10 +34,20 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
 
 from ..config import DEFAULT_CRUISE
 from ..discovery import all_station_labels, discover
+from ..hub.cruise_config import (
+    ConfigError,
+    apply_to_args,
+    explicit_dests,
+    find_config,
+    load_config,
+    merge_params,
+    station_params,
+)
 from ..session import SessionConfig
 from .pipeline import process_station, warm_sadcp, write_cruise_exports
 from .runlog import ProgressBar, setup_logging, teardown_logging
@@ -81,12 +96,14 @@ def _pool_task(task: dict) -> tuple[int, str, str, object, str]:
                       index=task["index"], from_hex=task["from_hex"],
                       ctd_cache=task["ctd_cache"])
         label = sf.label
+        pov = merge_params(task["params_global"], task["params_station"], label)
         status, export = process_station(str(sf.down), str(sf.up) if sf.up else None,
                                          str(sf.ctd) if sf.ctd else None, label,
                                          task["outdir"], task["make_plots"], task["cfg"],
                                          cruise=task["cruise"], formats=task["formats"],
-                                         ctd_utc=sf.ctd_utc,
-                                         edits=task.get("edits"), hint_root=task["root"])
+                                         ctd_utc=sf.ctd_utc, edits=task.get("edits"),
+                                         hint_root=task["root"],
+                                         param_overrides=pov or None)
     except (Exception, SystemExit) as e:           # one bad cast must not abort the batch
         lg.error("[ERROR] %s: %s: %s", label, type(e).__name__, e, exc_info=True)
     bh.flush()
@@ -108,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ladcp-qa",
                                  description="LADCP acquisition quality assessment")
     ap.add_argument("stations", nargs="*", help="station id(s), e.g. 80 or 79 80 82")
+    ap.add_argument("--config", metavar="PATH", default=None,
+                    help="cruise.toml supplying defaults for the options below (default: "
+                         "auto-discovered in the current directory or its parents; typed "
+                         "flags always override the file)")
+    ap.add_argument("--no-config", action="store_true",
+                    help="ignore any discovered cruise.toml (built-in defaults only)")
     ap.add_argument("--root", default="New_golden/Good",
                     help="base dir for file discovery (default: New_golden/Good)")
     ap.add_argument("--cruise", default=DEFAULT_CRUISE,
@@ -228,6 +251,25 @@ def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     args = ap.parse_args(argv)
 
+    # cruise.toml layer: merged into the namespace BEFORE any option is consumed, so
+    # the file flows through the exact validation the flags it stands in for would.
+    # Precedence per knob: explicit flags > cruise.toml > preset > generic defaults.
+    ccfg = None
+    if args.config and args.no_config:
+        ap.error("--config and --no-config are mutually exclusive")
+    if not args.no_config:
+        cfg_path = Path(args.config) if args.config else find_config()
+        if args.config and not cfg_path.is_file():
+            ap.error(f"--config: {cfg_path} does not exist")
+        if cfg_path is not None:
+            try:
+                ccfg = load_config(cfg_path)
+                apply_to_args(ccfg, args,
+                              explicit_dests(build_parser,
+                                             sys.argv[1:] if argv is None else argv))
+            except ConfigError as e:
+                ap.error(str(e))
+
     valid_fmts = {"xlsx", "odv", "nc", "csv"}
     if args.no_export:
         formats: set[str] = set()
@@ -276,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     console_detail = args.verbose or n <= 1            # stream detail for -v or a single cast
     logfile = None if args.no_log else (args.log or str(Path(args.outdir) / "ladcp-qa.log"))
     setup_logging(logfile, console_level=logging.INFO if console_detail else logging.WARNING)
+    if ccfg is not None:
+        log.info("config: %s", ccfg.path)
     log.info("ladcp-qa: %d station(s), solver=%s, out=%s", n, args.solver, args.outdir)
     bar = ProgressBar(n, enabled=(not explicit and n > 1 and not console_detail
                                   and not args.no_progress))
@@ -295,7 +339,9 @@ def main(argv: list[str] | None = None) -> int:
             base = dict(root=str(root), cruise=args.cruise, index=args.index,
                         from_hex=args.from_hex, ctd_cache=args.ctd_cache,
                         outdir=args.outdir, make_plots=not args.no_plots,
-                        cfg=cfg, formats=formats, edits=args.edits)
+                        cfg=cfg, formats=formats, edits=args.edits,
+                        params_global=ccfg.params_global if ccfg else {},
+                        params_station=ccfg.params_station if ccfg else {})
             # each worker must NOT spin up a full BLAS thread pool: 6 workers x 16
             # OpenBLAS threads thrash the cores (measured 3x slower on the 40-cast
             # MORIA soak: 465s vs 148s). The pool itself is the parallelism, so
@@ -346,11 +392,13 @@ def main(argv: list[str] | None = None) -> int:
                         ctd_path = str(sf.ctd) if sf.ctd else None
                         ctd_utc = sf.ctd_utc
                     bar.start(label)
+                    pov = station_params(ccfg, label) if ccfg else None
                     status, export = process_station(down, up, ctd_path, label, args.outdir,
                                                      not args.no_plots, cfg,
                                                      cruise=args.cruise, formats=formats,
                                                      ctd_utc=ctd_utc, edits=args.edits,
-                                                     hint_root=None if explicit else str(root))
+                                                     hint_root=None if explicit else str(root),
+                                                     param_overrides=pov or None)
                     if export is not None:
                         exports.append(export)
                 except (Exception, SystemExit) as e:   # one bad cast must not abort the batch

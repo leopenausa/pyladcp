@@ -33,6 +33,8 @@ dependencies = [
     "matplotlib",
     "gsw",
     "ppigrf",
+    "tomli >= 1.1.0 ; python_version < '3.11'",   # cruise.toml reading (stdlib tomllib on 3.11+)
+    "tomli-w",                                     # cruise.toml writing (stdlib has no emitter)
 ]
 
 [project.optional-dependencies]
