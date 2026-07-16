@@ -18,16 +18,14 @@ The ``ladcp-ek80`` command (:mod:`ladcp.ek80_cli`) wraps both.
 from __future__ import annotations
 
 import bisect
-import glob
 import os
 import re
 import struct
 from datetime import datetime, timedelta, timezone
 
+from .ek80_common import collect_files, filetime_to_dt, find_adcp_path, ns1601_to_dt
+
 FNAME_RE = re.compile(r"-D(\d{8})-T(\d{6})")
-EPOCH_1601 = datetime(1601, 1, 1, tzinfo=timezone.utc)   # SONAR-netCDF4 / FILETIME epoch
-_S_1601_TO_1970 = 11644473600
-_ADCP_CANDIDATES = [f"/Sonar/Beam_group{g}/ADCP" for g in range(1, 8)]
 
 # variables kept by the slim extract (everything sadcp_ek80.read_ek80 needs)
 _KEEP_MEANCURRENT = ["mean_time", "current_velocity_geographical_east",
@@ -45,23 +43,6 @@ def start_from_name(path: str):
     if not m:
         return None
     return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-
-
-def _ns1601_to_dt(v):
-    return EPOCH_1601 + timedelta(microseconds=int(v) / 1000.0)
-
-
-def _filetime_to_dt(low, high):
-    ticks = (high << 32) | (low & 0xFFFFFFFF)
-    return EPOCH_1601 + timedelta(microseconds=ticks / 10.0)
-
-
-def _has_path(ds, path: str) -> bool:
-    try:
-        ds[path]
-        return True
-    except (IndexError, KeyError):
-        return False
 
 
 def peek_nc_time(path: str):
@@ -98,7 +79,7 @@ def peek_nc_time(path: str):
         tvar = hits["mean"] or hits["ping"] or hits["any"]
         if tvar is None:
             return None
-        t0, t1 = _ns1601_to_dt(tvar[0]), _ns1601_to_dt(tvar[-1])
+        t0, t1 = ns1601_to_dt(tvar[0]), ns1601_to_dt(tvar[-1])
         la = float(lat[0]) if lat is not None and len(lat) else None
         lo = float(lon[0]) if lon is not None and len(lon) else None
         return t0, t1, len(tvar), la, lo
@@ -121,7 +102,7 @@ def peek_raw_time(path: str):
                 if len(hdr) < 12:
                     return None
                 low, high = struct.unpack_from("<ii", hdr, 4)
-                return _filetime_to_dt(low, high)
+                return filetime_to_dt(low, high)
 
             t0 = dt_at(4)                          # payload after the leading length
             fh.seek(size - 4)
@@ -138,14 +119,7 @@ def peek_raw_time(path: str):
 
 def collect(paths) -> list[str]:
     """Expand dirs (recursive ``*.nc``/``*.raw``) and globs to a sorted file list."""
-    files: list[str] = []
-    for p in (paths if isinstance(paths, (list, tuple)) else [paths]):
-        if os.path.isdir(p):
-            files += glob.glob(os.path.join(p, "**", "*.nc"), recursive=True)
-            files += glob.glob(os.path.join(p, "**", "*.raw"), recursive=True)
-        else:
-            files += glob.glob(p, recursive=True)
-    return sorted(set(files))
+    return collect_files(paths, exts=("nc", "raw"))
 
 
 def scan(paths, *, peek: bool = True) -> list[dict]:
@@ -255,8 +229,7 @@ def slim_extract(src_path: str, dst_path: str) -> int:
     """Copy only the ADCP current group of ``src_path`` to ``dst_path``; return bytes written."""
     import netCDF4 as nc
     with nc.Dataset(src_path, "r") as src:
-        adcp_path = next((p for p in _ADCP_CANDIDATES if _has_path(src, p + "/Mean_current")),
-                         None)
+        adcp_path = find_adcp_path(src)
         if adcp_path is None:
             raise KeyError(f"no /Sonar/Beam_group*/ADCP/Mean_current in {src_path}")
         s_adcp = src[adcp_path]

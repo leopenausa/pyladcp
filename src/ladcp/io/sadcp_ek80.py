@@ -19,34 +19,17 @@ Works on both the full 541 MB originals and the slim ADCP-only extracts
 """
 from __future__ import annotations
 
-import glob
-import os
-
 import numpy as np
 
-from .sadcp_vmdas import SadcpDataset
-
-# SONAR-netCDF4 time epoch is 1601-01-01 (ns); seconds from there to the unix epoch.
-_S_1601_TO_1970 = 11644473600
-_ADCP_GROUP_CANDIDATES = [f"/Sonar/Beam_group{g}/ADCP" for g in range(1, 8)]
-
-
-def _ek80_time_to_dt64(ns_since_1601) -> np.ndarray:
-    """uint64 ns-since-1601 -> datetime64[ns] UTC (1601 is out of ns range, so offset)."""
-    v = np.asarray(ns_since_1601).astype("uint64")
-    ns70 = (v - np.uint64(_S_1601_TO_1970 * 1_000_000_000)).astype("int64")
-    return np.datetime64("1970-01-01T00:00:00", "ns") + ns70.astype("timedelta64[ns]")
+from .ek80_common import collect_files, ek80_time_to_dt64, find_adcp_path
+from .sadcp_types import SadcpDataset
 
 
 def _find_adcp(ds):
-    for p in _ADCP_GROUP_CANDIDATES:
-        try:
-            g = ds[p]
-            if "Mean_current" in g.groups:
-                return g, ds[p + "/Mean_current"]
-        except (IndexError, KeyError):
-            continue
-    raise KeyError("no /Sonar/Beam_group*/ADCP/Mean_current group found")
+    p = find_adcp_path(ds)
+    if p is None:
+        raise KeyError("no /Sonar/Beam_group*/ADCP/Mean_current group found")
+    return ds[p], ds[p + "/Mean_current"]
 
 
 def _vlen_to_2d(var, n_mean: int, fill=np.nan) -> np.ndarray:
@@ -72,7 +55,7 @@ def read_ek80_file(path, *, bin_m: float = 8.0, z_max: float = 250.0,
 
     with nc.Dataset(path, "r") as ds:
         g, mc = _find_adcp(ds)
-        t = _ek80_time_to_dt64(mc["mean_time"][:])
+        t = ek80_time_to_dt64(mc["mean_time"][:])
         nt = t.size
         east = _vlen_to_2d(mc["current_velocity_geographical_east"], nt)
         north = _vlen_to_2d(mc["current_velocity_geographical_north"], nt)
@@ -117,7 +100,7 @@ def read_ek80(source, *, bin_m: float = 8.0, z_max: float = 250.0,
               quality_min: float = 0.0, min_samples: int = 5,
               transducer_depth: float = 5.0) -> SadcpDataset:
     """Read EK80 ADCP currents (a file, dir, or glob) into a SadcpDataset (time-sorted)."""
-    files = _collect(source)
+    files = collect_files(source, exts=("nc",))
     if not files:
         raise FileNotFoundError(f"no EK80 .nc found under {source!r}")
 
@@ -146,20 +129,6 @@ def read_ek80(source, *, bin_m: float = 8.0, z_max: float = 250.0,
         u=u[:, order], v=v[:, order],
         freq_khz=150, transducer_depth=float(transducer_depth),
         file_type="EK80", source=str(source), n_files=len(files))
-
-
-def _collect(source) -> list[str]:
-    if isinstance(source, (list, tuple)):
-        out = []
-        for s in source:
-            out += _collect(s)
-        return sorted(set(out))
-    p = str(source)
-    if os.path.isdir(p):
-        return sorted(glob.glob(os.path.join(p, "**", "*.nc"), recursive=True))
-    if any(ch in p for ch in "*?["):
-        return sorted(glob.glob(p, recursive=True))
-    return [p] if os.path.exists(p) else []
 
 
 if __name__ == "__main__":          # quick manual check

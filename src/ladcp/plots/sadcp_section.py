@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..io.sadcp_vmdas import SadcpDataset
+from ..io.sadcp_types import SadcpDataset
 
 _M_PER_DEG_LAT = 110_540.0
 _M_PER_DEG_LON = 111_320.0
