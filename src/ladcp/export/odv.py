@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .tables import StationExport, _pyladcp_version, metadata_dict, profile_frame
+from .tables import StationExport, metadata_dict, profile_frame, pyladcp_version
 
 # metadata columns (per cast) then data columns (per sample)
 _META_COLS = [
@@ -34,7 +34,7 @@ def write_odv(exports: list[StationExport], path: str, *, cruise: str = "") -> s
     """Write the stations in ``exports`` as one ODV Generic Spreadsheet. Returns ``path``."""
     lines = [
         "//<Encoding>UTF-8</Encoding>",
-        f"//<Creator>pyladcp {_pyladcp_version()}</Creator>",
+        f"//<Creator>pyladcp {pyladcp_version()}</Creator>",
         f"//<Cruise>{cruise}</Cruise>",
         "//LADCP absolute ocean velocity profiles (eastward/northward, m/s).",
         "\t".join(_META_COLS + _DATA_COLS),
