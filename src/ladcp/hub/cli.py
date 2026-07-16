@@ -1,10 +1,11 @@
 """``ladcp`` — the cruise hub (docs/WIZARD_SPEC.md): one command per cruise directory.
 
-Phase B surface (docs/WIZARD_PLAN.md): ``ladcp config`` (show / validate / edit the
+Current surface (docs/WIZARD_PLAN.md phases B+C): ``ladcp init`` (the setup wizard,
+:mod:`~ladcp.hub.init_flow`), ``ladcp config`` (show / validate / edit the
 ``cruise.toml``) and ``ladcp process`` (run stations through the shared
 :func:`~ladcp.qa.batch.run_batch` loop, selecting work by the freshness rule).
-``init`` (the setup wizard), ``status`` (the dashboard) and ``studio`` arrive in
-later phases; until then a bare ``ladcp`` prints where things stand and what to run.
+``status`` (the dashboard) and ``studio`` arrive in later phases; until then a bare
+``ladcp`` prints where things stand and what to run.
 
 The hub never grows a second orchestration or configuration path: it fills the same
 ``ladcp-qa`` argparse namespace from ``cruise.toml``
@@ -45,8 +46,8 @@ def _resolve_config(config_arg: str | None) -> Path:
     p = cc.find_config()
     if p is None:
         raise SystemExit("ladcp: no cruise.toml found in this directory or its parents; "
-                         "run from the cruise directory, pass --config, or create one "
-                         "(`ladcp init` arrives in a later phase — see docs/WIZARD_SPEC.md)")
+                         "run from the cruise directory, pass --config, or set one up "
+                         "with `ladcp init`")
     return p
 
 
@@ -195,14 +196,17 @@ def _cmd_process(ns) -> int:
         return 1
 
     universe = all_station_labels(args.index, Path(args.root))
+    if not universe:                  # .cnv-only cruises index 0 casts (.hex anchors);
+        from .detect import curated_station_labels  # fall back to name enumeration
+        universe = curated_station_labels(args.root)
     if ns.stations:                                   # named stations: unconditional
         plan = list(ns.stations)
         selection = f"{len(plan)} named station(s)"
     else:
         if not universe:
             print(f"ladcp process: no casts in the archive index under {args.root} "
-                  "(build one with ladcp-index; `ladcp init` automates this in a "
-                  "later phase)", file=sys.stderr)
+                  "and none enumerable by filename (run `ladcp init`, or build an "
+                  "index with ladcp-index)", file=sys.stderr)
             return 1
         if ns.all or ns.force:                        # everything, freshness ignored
             plan = universe
@@ -258,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "cruise.toml (run inside a cruise directory).")
     sub = ap.add_subparsers(dest="cmd")
 
+    from .init_flow import add_init_parser
+    add_init_parser(sub)
+
     p = sub.add_parser("config", help="show / validate / edit the cruise.toml")
     p.add_argument("action", choices=("show", "validate", "edit"),
                    help="show: resolved options with provenance; validate: schema + "
@@ -292,6 +299,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     ns = ap.parse_args(argv)
+    if ns.cmd == "init":
+        from .init_flow import run_init
+        try:
+            return run_init(ns)
+        except (KeyboardInterrupt, EOFError):     # Ctrl-C / Ctrl-D: leave nothing half-done
+            print("\nladcp init: aborted")        # (every write is atomic + post-confirm)
+            return 130
     if ns.cmd == "config":
         return _cmd_config(ns)
     if ns.cmd == "process":
@@ -301,10 +315,8 @@ def main(argv: list[str] | None = None) -> int:
     # bare `ladcp`: point at the config and the available actions (status = phase D)
     path = cc.find_config()
     if path is None:
-        print("no cruise.toml found in this directory or its parents.\n"
-              "  - run `ladcp` from the cruise directory, or\n"
-              "  - create a cruise.toml by hand (see docs/WIZARD_SPEC.md §5; "
-              "`ladcp init` automates this in a later phase)\n")
+        print("no cruise.toml found in this directory or its parents — run "
+              "`ladcp init` from the cruise directory to set one up.\n")
     else:
         print(f"cruise.toml: {path}\n")
     ap.print_help()
