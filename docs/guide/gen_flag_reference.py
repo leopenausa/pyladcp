@@ -17,6 +17,9 @@ from pathlib import Path
 OUT = Path(__file__).parent / "appendix-a-flags.md"
 
 COMMANDS: list[tuple[str, list[str]]] = [
+    ("ladcp", ["ladcp", "--help"]),
+    ("ladcp process", ["ladcp", "process", "--help"]),
+    ("ladcp config", ["ladcp", "config", "--help"]),
     ("ladcp-qa", ["ladcp-qa", "--help"]),
     ("ladcp-index", ["ladcp-index", "--help"]),
     ("ladcp-index build", ["ladcp-index", "build", "--help"]),
