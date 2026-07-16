@@ -39,7 +39,7 @@ DROT = -9.878379
 
 
 def fresh_solve(cfg: SessionConfig):
-    """The exact ladcp-qa recipe (_run_one + _velocity_outputs), no session involved."""
+    """The exact ladcp-qa recipe (qa.pipeline.process_station), no session involved."""
     overrides = edit_overrides(cfg.edit)
     params = resolve_params("MORIA", "MORIA-80", overrides=overrides or None)
     dh = load_dualhead(str(DOWN), str(UP), station="MORIA-80", params=params)
@@ -136,11 +136,11 @@ def test_weight_and_solver_changes_never_rebuild(monkeypatch):
 
 
 def test_sadcp_profile_cached_per_config(session, monkeypatch):
-    import ladcp.qa.cli as qacli
+    import ladcp.qa.pipeline as qapipe
     fake = np.column_stack([np.arange(10.0, 60.0, 10.0), np.full(5, 0.1),
                             np.full(5, -0.1), np.full(5, 0.02)])
     calls = []
-    monkeypatch.setattr(qacli, "_sadcp_profile",
+    monkeypatch.setattr(qapipe, "sadcp_profile",
                         lambda *a, **k: calls.append(a[0]) or fake)
     sa = SadcpConfig(folder="some/sadcp")
     r1 = session.solve(SessionConfig(sadcp=sa, solve=SolveConfig(drot=DROT)))

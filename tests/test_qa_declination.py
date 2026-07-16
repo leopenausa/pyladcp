@@ -9,7 +9,7 @@ import numpy as np
 
 from ladcp.models import Status
 from ladcp.proc.magdec import magnetic_declination
-from ladcp.qa.cli import _declination_metric
+from ladcp.qa.pipeline import _declination_metric
 
 
 def test_declination_metric_status_by_source():

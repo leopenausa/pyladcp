@@ -52,8 +52,9 @@ a velocity solve → outputs. Read in this order to follow one cast end to end:
 9. **`qa/report.py`** → **`qa/export.py`** / `export/` — score the cast (the QA
    traffic-light report) and write the products (`.lad`/`.bot`, NetCDF, figures).
 
-`qa/cli.py` is the driver that wires all of the above together for the
-`ladcp-qa` command — read it last, as the table of contents.
+`qa/pipeline.py` wires all of the above together (`process_station` runs the stages
+in order) — read it last, as the table of contents. `qa/cli.py` is only the
+`ladcp-qa` front end: argument parsing, work-list resolution, and the worker pool.
 
 ## Module map by role
 
@@ -105,7 +106,8 @@ legacy LDEO_IX 18-step order (see ARCHITECTURE.md §1).
 | `edits.py` | record/replay manual brush edits as a per-station journal |
 | `archive.py` · `archive_cli.py` | the station↔raw-file index (`ladcp-index`) |
 | `proc/magdec.py` | magnetic declination from the IGRF model (replaces `magdev.m`) |
-| `qa/cli.py` · `qa/runlog.py` | the `ladcp-qa` command-line driver + its logging |
+| `qa/pipeline.py` | the per-station pipeline (`process_station`: ingest → … → export) |
+| `qa/cli.py` · `qa/runlog.py` | the `ladcp-qa` front end (args, batch, pool) + its logging |
 | `studio/` | the optional interactive editing GUI (`ladcp-studio`) |
 
 ## Command-line entry points

@@ -135,6 +135,12 @@ def _load_index(path: Path) -> dict:
         return {}
 
 
+def all_station_labels(index, root: Path) -> list[str]:
+    """Every cast label in the archive index (``--all-stations``, Studio's station list)."""
+    idx_path = Path(index) if index else root / ".ladcp_archive.json"
+    return sorted((_load_index(idx_path).get("casts") or {}).keys())
+
+
 def _find_clean_ctd(ctd_dir: Path, station: str) -> Path | None:
     """Glob a cleaned ``.cnv`` for ``station`` under ``ctd_dir`` (prefer a *clean* name)."""
     num = station.split("-")[-1].split("_")[-1]
