@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: v0.15.21    # keep in lockstep with the ruff pin in pyproject [dev]
     hooks:
       - id: ruff           # lint only; ruff-format deferred to release hardening (#7)
         args: [--fix]
