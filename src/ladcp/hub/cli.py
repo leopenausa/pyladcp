@@ -221,8 +221,8 @@ def _cmd_studio(ns) -> int:
             if args.sadcp_source == "codas":
                 argv += ["--sadcp-codas", str(args.sadcp)]
             elif args.sadcp_source == "ek80":
-                print("ladcp studio: the ek80 [sadcp] source has no Studio dropdown "
-                      "yet — opening without the constraint", file=sys.stderr)
+                argv += ["--sadcp", str(args.sadcp), "--sadcp-source", "ek80",
+                         "--sadcp-xducer", str(args.sadcp_xducer)]
             else:
                 argv += ["--sadcp", str(args.sadcp),
                          "--sadcp-filetype", args.sadcp_filetype,

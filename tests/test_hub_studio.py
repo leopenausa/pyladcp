@@ -131,6 +131,44 @@ def test_ladcp_studio_translates_config(tmp_path, monkeypatch):
     assert "--start-page" not in argv                         # editor landing
 
 
+def test_ladcp_studio_translates_ek80(tmp_path, monkeypatch):
+    """EK-A: an ek80 [sadcp] source reaches Studio's dropdown instead of being skipped."""
+    root = _tree(tmp_path)
+    (root / "ek80").mkdir()
+    (root / "cruise.toml").write_text(
+        '[cruise]\nname = "B"\n[data]\nroot = "."\n'
+        '[sadcp]\nfolder = "ek80"\nsource = "ek80"\nxducer = 7.0\n', encoding="utf-8")
+    monkeypatch.chdir(root)
+    captured: list[list[str]] = []
+    from ladcp.studio import cli as studio_cli
+    monkeypatch.setattr(studio_cli, "main", lambda argv: captured.append(argv) or 0)
+    assert hub.main(["studio", "--no-browser"]) == 0
+    argv = captured[0]
+    i = argv.index("--sadcp")
+    assert argv[i + 1] == str(root / "ek80")
+    assert argv[argv.index("--sadcp-source") + 1] == "ek80"
+    assert argv[argv.index("--sadcp-xducer") + 1] == "7.0"
+
+
+def test_studio_dropdown_lists_and_picks_ek80(tmp_path):
+    """The server offers an ek80 source and config_from_body resolves it by key."""
+    from ladcp.session import SadcpConfig
+    from ladcp.studio.payloads import config_from_body
+    src = tmp_path / "ek80_slim"
+    src.mkdir()
+    state = StudioState([], root=str(tmp_path),
+                        sadcp=SadcpConfig(folder=str(src), source="ek80", xducer=7.0))
+    app = create_app(state, hub_dir=tmp_path)
+    c = TestClient(app)
+    listed = c.get("/api/stations").json()["sadcp_sources"]
+    assert [s["source"] for s in listed] == ["ek80"]
+    key = listed[0]["key"]
+    assert key == "ek80_slim"                    # labeled by product dir name
+    cfg = config_from_body({"sadcp_key": key}, state)
+    assert cfg.sadcp is not None and cfg.sadcp.source == "ek80"
+    assert cfg.sadcp.xducer == 7.0
+
+
 def test_ladcp_studio_without_config_opens_setup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     captured: list[list[str]] = []

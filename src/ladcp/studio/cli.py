@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="CODAS-processed product (contour NetCDF or its processing "
                          "dir) offered in the GUI's SADCP source dropdown alongside "
                          "the raw --sadcp; repeatable, one entry per product")
-    ap.add_argument("--sadcp-source", choices=("vmdas", "codas"), default="vmdas")
+    ap.add_argument("--sadcp-source", choices=("vmdas", "codas", "ek80"), default="vmdas")
     ap.add_argument("--sadcp-filetype", choices=("STA", "LTA"), default="STA")
     ap.add_argument("--sadcp-xducer", type=float, default=5.0)
     ap.add_argument("--sadcp-timeoff", default=None, metavar="SECONDS|auto")
