@@ -500,7 +500,7 @@ options:
 ```text
 usage: ladcp-studio [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                     [--from-hex] [--ctd-cache CTD_CACHE] [--sadcp PATH]
-                    [--sadcp-codas PATH] [--sadcp-source {vmdas,codas}]
+                    [--sadcp-codas PATH] [--sadcp-source {vmdas,codas,ek80}]
                     [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
                     [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
                     [--sadcp-reingest] [--host HOST] [--port PORT]
@@ -531,7 +531,7 @@ options:
                         processing dir) offered in the GUI's SADCP source
                         dropdown alongside the raw --sadcp; repeatable, one
                         entry per product
-  --sadcp-source {vmdas,codas}
+  --sadcp-source {vmdas,codas,ek80}
   --sadcp-filetype {STA,LTA}
   --sadcp-xducer SADCP_XDUCER
   --sadcp-timeoff SECONDS|auto

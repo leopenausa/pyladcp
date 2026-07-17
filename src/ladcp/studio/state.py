@@ -117,7 +117,7 @@ class StudioState:
             self.sadcp_origin[key] = origin
 
         for cfg in raws:
-            if cfg.source != "vmdas":
+            if cfg.source != "vmdas":            # codas/ek80: label by product dir name
                 add(codas_label(cfg.folder), cfg)
             else:
                 add("raw" if len(raws) == 1 else raw_label(cfg.folder), cfg)
