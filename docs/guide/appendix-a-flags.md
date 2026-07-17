@@ -8,18 +8,56 @@ you read here is exactly what the installed code accepts.
 ## `ladcp`
 
 ```text
-usage: ladcp [-h] {config,process} ...
+usage: ladcp [-h] {init,config,process} ...
 
 The LADCP cruise hub: drives the ladcp-* commands from one cruise.toml (run
 inside a cruise directory).
 
 positional arguments:
-  {config,process}
-    config          show / validate / edit the cruise.toml
-    process         process stations per the cruise.toml
+  {init,config,process}
+    init                first-run setup: discover data, confirm, write
+                        cruise.toml, optional trial station
+    config              show / validate / edit the cruise.toml
+    process             process stations per the cruise.toml
 
 options:
-  -h, --help        show this help message and exit
+  -h, --help            show this help message and exit
+```
+
+## `ladcp init`
+
+```text
+usage: ladcp init [-h] [--root ROOT] [-y] [--name NAME] [--ladcp DIR]
+                  [--ctd DIR] [--from-hex] [--no-from-hex] [--sadcp PATH]
+                  [--sadcp-source {vmdas,codas,ek80}] [--no-sadcp]
+                  [--nav PATH] [--out OUT] [--trial [STATION]] [--no-trial]
+                  [--force]
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           cruise directory to scan (default: .)
+  -y, --yes             accept every proposal; never prompts (a ship-ADCP
+                        source is still only chosen via --sadcp)
+  --name NAME           cruise name (default: the directory's)
+  --ladcp DIR           LADCP PD0 directory, relative to --root (default:
+                        detected)
+  --ctd DIR             CTD directory, relative to --root (default: detected)
+  --from-hex            convert raw .hex CTD casts on the fly (needs
+                        CTD_project)
+  --no-from-hex         never convert .hex, even when .cnv coverage is
+                        incomplete
+  --sadcp PATH          ship-ADCP source to constrain with (skips the choice
+                        step)
+  --sadcp-source {vmdas,codas,ek80}
+                        what --sadcp points at (default: vmdas)
+  --no-sadcp            no ship-ADCP constraint
+  --nav PATH            independent nav track: enables --sadcp-timeoff auto
+                        (vmdas)
+  --out OUT             output directory (default: qa_out)
+  --trial [STATION]     process a trial station after setup (default pick:
+                        mid-cruise)
+  --no-trial            skip the trial-station offer
+  --force               overwrite an existing cruise.toml
 ```
 
 ## `ladcp process`
