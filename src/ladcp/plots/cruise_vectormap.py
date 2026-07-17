@@ -76,9 +76,20 @@ def _layer_label(z0: float, z1: float) -> str:
     return f"{z0:g}–{hi} m"
 
 
+def _fmt_time(t) -> str:
+    """``datetime64`` → ``YYYY-MM-DD HH:MM`` UTC, or ``""`` for NaT/missing."""
+    if t is None:
+        return ""
+    t = np.datetime64(t)
+    if np.isnat(t):
+        return ""
+    return np.datetime_as_string(t, unit="m").replace("T", " ")
+
+
 def cruise_vectormap_figure(sec: CruiseSection, layers: list[tuple[float, float]], *,
                             reduce: str = "mean", stations: list[str] | None = None,
                             scale: float | None = None, coastline: bool = False,
+                            show_times: bool = False,
                             title: str = "", fig=None, savepath: str | None = None):
     """Plan-view quiver of depth-range-integrated vectors, one colour per layer."""
     import matplotlib.pyplot as plt
@@ -118,10 +129,19 @@ def cruise_vectormap_figure(sec: CruiseSection, layers: list[tuple[float, float]
         ax.quiverkey(q, 0.06, 0.97 - 0.045 * k, ref,
                      f"{_layer_label(z0, z1)}: {ref:g} {units}", labelpos="E",
                      fontproperties={"size": 8}, coordinates="axes")
+    times = sec.time[sel] if (show_times and sec.time is not None) else [None] * lon.size
     if not tk:                                       # data-coord labels (non-cartopy path)
-        for s, x, y in zip(sec.stations[sel], lon, lat, strict=True):
-            ax.annotate(s, (x, y), fontsize=5, color="0.45", xytext=(2, 2),
+        for s, x, y, t in zip(sec.stations[sel], lon, lat, times, strict=True):
+            ts = _fmt_time(t)
+            lbl = f"{s}\n{ts} UTC" if ts else s
+            ax.annotate(lbl, (x, y), fontsize=5, color="0.45", xytext=(2, 2),
                         textcoords="offset points")
+    if not tk and np.isfinite(lon).any():            # tight auto-extent (non-cartopy path)
+        # centre on the stations; a minimum half-window keeps single-station maps from
+        # auto-expanding to a near-empty continental frame, and leaves room for arrows.
+        mx, my = 0.5 * (np.nanmin(lon) + np.nanmax(lon)), 0.5 * (np.nanmin(lat) + np.nanmax(lat))
+        r = max(np.nanmax(lon) - np.nanmin(lon), np.nanmax(lat) - np.nanmin(lat), 0.12) * 0.65
+        ax.set_xlim(mx - r, mx + r); ax.set_ylim(my - r, my + r)
     ax.set_xlabel("longitude [°E]"); ax.set_ylabel("latitude [°N]")
     ax.grid(alpha=0.3)
     ax.set_title(title or "cruise depth-integrated velocity vectors", fontsize=12)
@@ -166,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="quiver scale (larger = shorter arrows; default: robust auto)")
     ap.add_argument("--coastline", action="store_true",
                     help="draw a coastline (needs cartopy; ignored if unavailable)")
+    ap.add_argument("--show-times", action="store_true",
+                    help="annotate each station with its cast start time (UTC) from the NetCDF")
     ap.add_argument("--title", default="", help="figure title")
     ap.add_argument("-o", "--out", default="cruise_vectormap.png", help="output figure path")
     args = ap.parse_args(argv)
@@ -175,7 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     subset = [s.strip() for s in args.stations.split(",")] if args.stations else None
     title = args.title or f"{Path(args.cruise).resolve().stem} velocity vectors"
     cruise_vectormap_figure(sec, layers, reduce=args.reduce, stations=subset,
-                            scale=args.scale, coastline=args.coastline, title=title,
+                            scale=args.scale, coastline=args.coastline,
+                            show_times=args.show_times, title=title,
                             savepath=args.out)
     print(f"wrote {args.out}")
     return 0

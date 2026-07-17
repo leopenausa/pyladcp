@@ -52,6 +52,7 @@ class CruiseSection:
     lat: np.ndarray             # [ns]
     lon: np.ndarray             # [ns]
     bottom_depth: np.ndarray    # [ns] seabed depth [m]
+    time: np.ndarray = None     # [ns] cast start time [datetime64[ns]]; None/NaT if absent
 
 
 def load_cruise_section(path: str) -> CruiseSection:
@@ -76,6 +77,8 @@ def load_cruise_section(path: str) -> CruiseSection:
             lon=np.asarray(ds["longitude"].values, float),
             bottom_depth=np.asarray(ds["bottom_depth"].values, float) if "bottom_depth" in ds
             else np.full(ds.sizes["station"], np.nan),
+            time=np.asarray(ds["time"].values, "datetime64[ns]") if "time" in ds
+            else np.full(ds.sizes["station"], np.datetime64("NaT")),
         )
 
 
