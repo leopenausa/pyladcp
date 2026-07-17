@@ -214,5 +214,68 @@ dashboard in <2 s without touching raw PD0 payloads.
 
 ## Deferred to v2 (per spec §8)
 
-Studio setup page on the shared step engine; QA-diagnosis suggestions after
-runs; outputs-freshness in status; `ladcp studio` deep integration.
+QA-diagnosis suggestions after runs; outputs-freshness in status; live log
+streaming in the hub window. (The Studio setup page shipped in v1 — phase E as
+revised.)
+
+---
+
+# EK80 integration into the wizard (phases EK-A..C, planned 2026-07-17)
+
+The processing engine already speaks EK80 end-to-end (`--sadcp-source ek80`,
+`io/sadcp_ek80.read_ek80`, `ladcp-ek80 timetable`/`extract` for remote shares);
+what's missing is the wizard/Studio layer. Decisions (user, 2026-07-17): the
+timetable + slim-extract flow runs **in the GUI as a job with the equivalent
+`ladcp-ek80` commands always shown**; extractions land in
+**`<cruise-root>/ek80/<station>/`** by default; Studio's source dropdown gains
+ek80 **first**.
+
+## Phase EK-A — Studio solves with EK80 (S)
+
+1. `studio/cli.py`: `--sadcp-source` gains `ek80`; launch validation via the
+   existing `SadcpConfig.validate_folder` (already ek80-aware). Dropdown labeling
+   in `studio/state.py` (an `ek80_label` alongside `raw_label`/`codas_label`).
+2. `hub/cli._cmd_studio`: translate `[sadcp] source="ek80"` into
+   `--sadcp … --sadcp-source ek80` — delete the warn-and-skip.
+3. Tests: launch validation, argv translation (replaces the skip test), and a
+   Studio solve against a monkeypatched `read_ek80` dataset for the dropdown path.
+
+**Exit:** a cruise.toml with an ek80 source opens in Studio with the constraint
+live in the dropdown; `ladcp studio` prints no warning.
+
+## Phase EK-B — the guided share→extract flow (M)
+
+1. **Backend** (`studio/hub_api.py`):
+   - `POST /api/hub/ek80/timetable {paths, pre, post}` → `ek80_files.scan` (header
+     peek) + `read_casts(index)` + `correlate` → the station↔file table with
+     coverage, JSON. Requires the archive index → the panel lives *after* the
+     save/index step.
+   - `POST /api/hub/ek80/extract {paths, stations?, pre, post}` → background job
+     (the `_Job` pattern) running `slim_extract` per file into
+     `<cruise-root>/ek80/<station>/`; per-file progress + bytes written; runs only
+     on an explicit click (spec §3.4: never copy without asking); 409 while busy.
+2. **Wizard panel** (`hub.js`): choosing an ek80 candidate (or typing a path —
+   SMB mounts live outside the cruise tree) opens the EK80 panel:
+   [compute timetable] → table → [extract slim copies] → progress → on success
+   `[sadcp]` is pointed at the extracted directory automatically. The equivalent
+   `ladcp-ek80` commands are displayed at each step.
+3. **Terminal parity** (`init_flow.py`): the same offer as prompts after the
+   index step; `--yes` flags (`--ek80-extract`, `--ek80-pre/post`).
+4. Tests: endpoint contract with monkeypatched scan/correlate/slim_extract;
+   extraction lands per-station; refuses without index.
+
+**Exit:** a cruise whose EK80 lives on a share reaches "constraint configured on
+a local slim copy" without leaving the window, and nothing was copied without an
+explicit confirmation.
+
+## Phase EK-C — guidance + docs (S)
+
+1. Wizard hint where ek80 is chosen: shallow constraint (~15–140 m), most
+   valuable for single-head casts / upper-ocean referencing.
+2. `detect.py`: flag `.nc`-rich directories as "possible EK80 (verify)" beyond
+   the name match; still filename-only.
+3. Guide: chapter 8 (ship-ADCP) gains the wizard flow; chapter 11 cross-links;
+   appendix regen.
+
+**Exit:** a first-contact user can answer "should I use EK80 here?" from what
+the wizard itself tells them.
