@@ -85,6 +85,23 @@ def test_detect_master_slave_layout(tmp_path):
     assert det.ladcp.stations == ()                      # needs the index (time pairing)
 
 
+def test_detect_flags_nc_rich_dir_as_possible_ek80(tmp_path):
+    """EK-C: .nc-rich dirs are offered as *possible* EK80; codas dirs are not."""
+    _tree(tmp_path)                                      # incl. codas/os150_enr/contour
+    d = tmp_path / "Datos_procesados"
+    d.mkdir()
+    for i in range(3):
+        (d / f"run{i}.nc").write_bytes(b"")
+    (tmp_path / "lonely").mkdir()                        # a single stray .nc: too weak
+    (tmp_path / "lonely" / "x.nc").write_bytes(b"")
+    det = detect.detect(tmp_path)
+    ek = {c.path: c.evidence for c in det.sadcp if c.source == "ek80"}
+    assert "Datos_procesados" in ek and "possibly EK80" in ek["Datos_procesados"]
+    assert "EK80_run" in ek                              # name match keeps its wording
+    assert not any("lonely" in p for p in ek)
+    assert not any("codas" in p for p in ek)             # the codas convention is codas
+
+
 def test_curated_labels_only_from_standard_dir(tmp_path):
     _tree(tmp_path)
     assert detect.curated_station_labels(tmp_path) == ["A-01", "A-02"]

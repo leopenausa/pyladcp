@@ -213,12 +213,18 @@ def _detect_sadcp(root: Path) -> tuple[SadcpCandidate, ...]:
             if n:
                 out.append(SadcpCandidate("vmdas", _rel(d, root),
                                           f"{n} VmDAS .{ft} file(s)"))
+        n_nc = len(list(d.glob("*.nc")))
         if "ek80" in d.name.lower():
-            n = len(list(d.glob("*.nc")))
-            if n:
+            if n_nc:
                 out.append(SadcpCandidate("ek80", _rel(d, root),
-                                          f"{n} .nc file(s) (verify with "
+                                          f"{n_nc} .nc file(s) (verify with "
                                           "ladcp-ek80 timetable)"))
+        elif n_nc >= 2 and "codas" not in Path(_rel(d, root)).parts:
+            # a .nc-rich dir that is neither the codas convention nor ek80-named:
+            # offer it as a *possible* EK80 run — choosing it is still the user's call
+            out.append(SadcpCandidate("ek80", _rel(d, root),
+                                      f"{n_nc} .nc file(s) — possibly EK80 "
+                                      "(verify with ladcp-ek80 timetable)"))
     from ..studio.state import codas_label, discover_codas_products
     for nc in discover_codas_products(root):
         folder = nc.parent.parent if nc.parent.name == "contour" else nc

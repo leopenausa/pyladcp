@@ -220,7 +220,7 @@ revised.)
 
 ---
 
-# EK80 integration into the wizard (phases EK-A..C, planned 2026-07-17)
+# EK80 integration into the wizard (phases EK-A..C, planned & shipped 2026-07-17)
 
 The processing engine already speaks EK80 end-to-end (`--sadcp-source ek80`,
 `io/sadcp_ek80.read_ek80`, `ladcp-ek80 timetable`/`extract` for remote shares);
