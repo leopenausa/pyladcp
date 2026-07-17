@@ -34,8 +34,9 @@ options:
 usage: ladcp init [-h] [--root ROOT] [-y] [--name NAME] [--ladcp DIR]
                   [--ctd DIR] [--from-hex] [--no-from-hex] [--sadcp PATH]
                   [--sadcp-source {vmdas,codas,ek80}] [--no-sadcp]
-                  [--nav PATH] [--out OUT] [--trial [STATION]] [--no-trial]
-                  [--force]
+                  [--nav PATH] [--ek80-extract] [--ek80-pre MIN]
+                  [--ek80-post MIN] [--out OUT] [--trial [STATION]]
+                  [--no-trial] [--force]
 
 options:
   -h, --help            show this help message and exit
@@ -57,6 +58,14 @@ options:
   --no-sadcp            no ship-ADCP constraint
   --nav PATH            independent nav track: enables --sadcp-timeoff auto
                         (vmdas)
+  --ek80-extract        with an ek80 --sadcp source: slim-extract the on-
+                        station files into <root>/ek80/<station>/ after the
+                        index build (the explicit consent to copy; interactive
+                        runs ask instead)
+  --ek80-pre MIN        EK80 cast-window start, minutes before cast UTC
+                        (default 20)
+  --ek80-post MIN       EK80 cast-window end, minutes after cast UTC (default
+                        170)
   --out OUT             output directory (default: qa_out)
   --trial [STATION]     process a trial station after setup (default pick:
                         mid-cruise)

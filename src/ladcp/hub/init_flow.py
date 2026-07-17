@@ -225,6 +225,10 @@ def run_init(ns, *, ask=input, say=print) -> int:
         say("index skipped (no .hex anchors) and no name-pairable casts — "
             "process stations explicitly: ladcp process <station>")
 
+    # -- step 6b: EK80 share -> slim local copy (needs the index for cast windows) -----
+    if sadcp is not None and sadcp.source == "ek80":
+        _ek80_offer(ns, root, cfg_path, raw, sadcp.path, ask, say)
+
     # -- step 7: trial station (suggested, skippable) ----------------------------------
     if labels and not ns.no_trial:
         trial = ns.trial if ns.trial not in (None, "auto") else labels[len(labels) // 2]
@@ -241,6 +245,58 @@ def run_init(ns, *, ask=input, say=print) -> int:
     say("\ndone. next steps: `ladcp process` (new/stale casts), `ladcp config show`"
         + (", `ladcp process --all` for everything" if labels else ""))
     return 0
+
+
+def _ek80_offer(ns, root: Path, cfg_path: Path, raw: dict, src: str, ask, say) -> None:
+    """Timetable + slim extraction for an ek80 source (spec §3.4: copy only on consent).
+
+    ``--yes`` runs it only with ``--ek80-extract`` (the explicit consent flag);
+    interactively the timetable is shown first and the copy confirmed after.
+    On success ``cruise.toml`` is re-pointed at the local slim copy (``ek80/``).
+    """
+    idx = root / ".ladcp_archive.json"
+    if not idx.is_file():
+        say("EK80 extraction skipped: it needs the archive index for the cast "
+            "windows (build it, then use ladcp-ek80 or the Studio hub)")
+        return
+    if ns.yes and not ns.ek80_extract:
+        say("EK80 extraction skipped (--yes never copies without --ek80-extract)")
+        return
+    if not ns.yes and not _confirm(ask, say, "\ncompute the EK80 timetable now "
+                                             "(header peeks only, nothing copied)?"):
+        return
+    from . import ek80_ops
+    src_abs = str(root / src)                    # absolute paths pass through the join
+    try:
+        table = ek80_ops.timetable([src_abs], idx, pre=ns.ek80_pre, post=ns.ek80_post)
+        say(f"  {table['n_files']} EK80 file(s); {table['covered']}/"
+            f"{len(table['stations'])} cast(s) covered")
+        for row in table["stations"][:12]:
+            say(f"    {row['station']:<14} {row['n']} file(s)")
+        cmds = ek80_ops.commands([src_abs], idx, root / ek80_ops.DEFAULT_OUT,
+                                 pre=ns.ek80_pre, post=ns.ek80_post)
+        say(f"  terminal equivalent: {cmds['extract']}")
+        if not table["covered"]:
+            say("  nothing to extract (logging gap over every cast window)")
+            return
+        if not ns.yes and not _confirm(ask, say,
+                                       f"extract slim copies into {root / 'ek80'}/"
+                                       "<station>/ now?"):
+            return
+        jobs = ek80_ops.build_jobs([src_abs], idx, pre=ns.ek80_pre, post=ns.ek80_post)
+        ok, nbytes, errors = ek80_ops.extract_jobs(
+            jobs, root / ek80_ops.DEFAULT_OUT,
+            progress=lambda i, n, st, f: say(f"  [{i}/{n}] {st:<14} {f}"))
+        say(f"  extracted {ok}/{len(jobs)} file(s), {nbytes / 1e6:.0f} MB -> ek80/")
+        for e in errors[:5]:
+            say(f"  {e}")
+        if ok:
+            raw["sadcp"] = {**raw.get("sadcp", {}), "folder": ek80_ops.DEFAULT_OUT,
+                            "source": "ek80"}
+            cc.save_config(raw, cfg_path)
+            say('  cruise.toml re-pointed: [sadcp] folder = "ek80"')
+    except Exception as e:                       # a share hiccup must not sink init
+        say(f"  EK80 flow failed ({type(e).__name__}: {e}) — finish with ladcp-ek80")
 
 
 def _process(cfg_path: Path, stations: list[str], say) -> int:
@@ -301,6 +357,14 @@ def add_init_parser(sub) -> None:
     p.add_argument("--no-sadcp", action="store_true", help="no ship-ADCP constraint")
     p.add_argument("--nav", metavar="PATH", default=None,
                    help="independent nav track: enables --sadcp-timeoff auto (vmdas)")
+    p.add_argument("--ek80-extract", action="store_true",
+                   help="with an ek80 --sadcp source: slim-extract the on-station "
+                        "files into <root>/ek80/<station>/ after the index build "
+                        "(the explicit consent to copy; interactive runs ask instead)")
+    p.add_argument("--ek80-pre", type=float, default=20.0, metavar="MIN",
+                   help="EK80 cast-window start, minutes before cast UTC (default 20)")
+    p.add_argument("--ek80-post", type=float, default=170.0, metavar="MIN",
+                   help="EK80 cast-window end, minutes after cast UTC (default 170)")
     p.add_argument("--out", default=None, help="output directory (default: qa_out)")
     p.add_argument("--trial", nargs="?", const="auto", default=None, metavar="STATION",
                    help="process a trial station after setup (default pick: mid-cruise)")

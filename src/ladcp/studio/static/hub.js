@@ -161,22 +161,26 @@ function confirmStep(det, prev) {
                      fromHex: !!(fromHex && fromHex.checked),
                      sadcpIdx: pick ? Number(pick.value) : null,
                      nav: !!(navSel && navSel.checked)};
-    const raw = {cruise: {name: nextAns.name},
-                 data: {root: ".", out: nextAns.out}};
-    if (nextAns.fromHex) raw.ctd = {from_hex: true};
-    if (pick) {
-      const c = det.sadcp[nextAns.sadcpIdx];
-      raw.sadcp = {folder: c.path, source: c.source};
-      if (nextAns.nav && c.source === "vmdas") {
-        raw.sadcp.nav = det.nav[0].path;
-        raw.sadcp.timeoff = "auto";
-      }
-    }
     try {
+      const raw = buildRaw(det, nextAns);
       const prev = await api("/api/hub/preview", raw);
       saveStep(det, raw, prev.toml, nextAns);
     } catch (e) { errBox.textContent = String(e); }
   };
+}
+
+function buildRaw(det, a) {
+  const raw = {cruise: {name: a.name}, data: {root: ".", out: a.out}};
+  if (a.fromHex) raw.ctd = {from_hex: true};
+  if (a.sadcpIdx !== null && a.sadcpIdx !== undefined) {
+    const c = det.sadcp[a.sadcpIdx];
+    raw.sadcp = {folder: c.path, source: c.source};
+    if (a.nav && c.source === "vmdas") {
+      raw.sadcp.nav = det.nav[0].path;
+      raw.sadcp.timeoff = "auto";
+    }
+  }
+  return raw;
 }
 
 function saveStep(det, raw, toml, ans) {
@@ -213,6 +217,13 @@ function saveStep(det, raw, toml, ans) {
 function trialStep(det, saved, ans) {
   const main = $("#main");
   main.replaceChildren(steps(3));
+  const chosen = ans && ans.sadcpIdx !== null && ans.sadcpIdx !== undefined
+    ? det.sadcp[ans.sadcpIdx] : null;
+  if (chosen && chosen.source === "ek80") {      // the share->slim-copy offer (EK-B)
+    const ek = el("div", "card");
+    ek80Panel(ek, chosen.path, repointConfigToExtract);
+    main.appendChild(ek);
+  }
   const card = el("div", "card");
   card.appendChild(el("h2", "", "trial station (suggested, skippable)"));
   let note = `wrote ${saved.written}`;
@@ -264,6 +275,97 @@ async function showScorecard(label, out, card) {
   go.onclick = dashboard;
   act.appendChild(go);
   card.appendChild(act);
+}
+
+// ---------------------------------------------------------------------------
+// EK80: timetable -> confirm -> slim extraction into <cruise-root>/ek80/<station>/
+// (never copies without the explicit click; the equivalent ladcp-ek80 commands
+// are shown next to each action)
+
+function ek80Panel(host, srcPath, onRepointed) {
+  host.replaceChildren();
+  host.appendChild(el("h2", "", "EK80 slim extraction"));
+  host.appendChild(el("div", "ev",
+    "the EK80 source can live on a remote share — the timetable only peeks at "
+    + "headers; extraction copies just the ADCP current groups, per station"));
+  const pathIn = el("input"); pathIn.type = "text"; pathIn.value = srcPath || "";
+  const preIn = el("input"); preIn.type = "text"; preIn.value = "20"; preIn.size = 4;
+  const postIn = el("input"); postIn.type = "text"; postIn.value = "170"; postIn.size = 4;
+  const l1 = el("label"); l1.appendChild(el("span", "", "source path")); l1.appendChild(pathIn);
+  const l2 = el("label"); l2.appendChild(el("span", "", "window −min / +min"));
+  l2.appendChild(preIn); l2.appendChild(postIn);
+  host.appendChild(l1); host.appendChild(l2);
+  const act = el("div", "actions");
+  const tbtn = el("button", "btn", "compute timetable");
+  const xbtn = el("button", "btn", "extract → ek80/");
+  xbtn.style.display = "none";
+  act.appendChild(tbtn); act.appendChild(xbtn);
+  const out = el("div");
+  const cmdNote = el("div", "note");
+  const errBox = el("div", "err");
+  host.appendChild(act); host.appendChild(out);
+  host.appendChild(cmdNote); host.appendChild(errBox);
+  const body = () => ({paths: [pathIn.value.trim()],
+                       pre: Number(preIn.value) || 20, post: Number(postIn.value) || 170});
+
+  tbtn.onclick = async () => {
+    errBox.textContent = ""; out.replaceChildren(el("p", "note", "peeking at headers…"));
+    try {
+      const t = await api("/api/hub/ek80/timetable", body());
+      const tab = el("table", "st");
+      tab.innerHTML = "<tr><th>station</th><th>files in window</th></tr>";
+      t.stations.forEach((s) => {
+        const tr = el("tr");
+        tr.appendChild(el("td", "", s.station));
+        tr.appendChild(el("td", "", s.n ? `${s.n} — ${s.files.slice(0, 3).join(", ")}`
+                                          + (s.n > 3 ? ", …" : "") : "— (logging gap)"));
+        tab.appendChild(tr);
+      });
+      out.replaceChildren(
+        el("div", "ev", `${t.n_files} EK80 file(s) scanned; `
+                        + `${t.covered}/${t.stations.length} cast(s) covered`), tab);
+      cmdNote.textContent = `terminal equivalent: ${t.cmd}`;
+      xbtn.style.display = t.covered ? "" : "none";
+    } catch (e) { out.replaceChildren(); errBox.textContent = String(e); }
+  };
+
+  xbtn.onclick = async () => {
+    errBox.textContent = ""; xbtn.disabled = true;
+    try {
+      const r = await api("/api/hub/ek80/extract", body());
+      if (!r.started) { errBox.textContent = r.reason; xbtn.disabled = false; return; }
+      cmdNote.textContent = `terminal equivalent: ${r.cmd}`;
+      for (;;) {
+        const j = await api("/api/hub/ek80/job");
+        out.replaceChildren(el("div", "ev",
+          `extracting ${j.done}/${j.total}` + (j.current ? ` · ${j.current}` : "")
+          + ` · ${(j.bytes / 1e6).toFixed(0)} MB`));
+        if (!j.running) {
+          const done = el("div", "ev",
+            `done: ${j.ok}/${j.total} file(s), ${(j.bytes / 1e6).toFixed(0)} MB -> ${j.out}`);
+          out.replaceChildren(done);
+          j.errors.slice(0, 5).forEach((e2) => out.appendChild(el("div", "err", e2)));
+          if (j.ok && onRepointed) await onRepointed(out);
+          break;
+        }
+        await new Promise((res) => setTimeout(res, 800));
+      }
+    } catch (e) { errBox.textContent = String(e); }
+    xbtn.disabled = false;
+  };
+}
+
+async function repointConfigToExtract(out) {
+  // the whole point of extracting: the constraint now reads the local slim copy
+  try {
+    const cur = await api("/api/hub/config");
+    const raw = cur.raw;
+    raw.sadcp = {...(Array.isArray(raw.sadcp) ? raw.sadcp[0] : raw.sadcp || {}),
+                 folder: "ek80", source: "ek80"};
+    delete raw.sadcp.nav; delete raw.sadcp.timeoff;   // vmdas-only knobs
+    await api("/api/hub/config", {config: raw});
+    out.appendChild(el("div", "ev", 'cruise.toml re-pointed: [sadcp] folder = "ek80"'));
+  } catch (e) { out.appendChild(el("div", "err", `re-point failed: ${e}`)); }
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +435,24 @@ async function dashboard() {
       p2.appendChild(r);
     });
     main.appendChild(p2);
+  }
+
+  // EK80 tools (configured constraint is ek80: offer/redo the slim extraction)
+  if (d.sadcp_source === "ek80") {
+    const ek = el("div", "card");
+    const head = el("div", "actions");
+    const toggle = el("button", "btn", "EK80 extraction tools…");
+    head.appendChild(toggle);
+    const bodyDiv = el("div");
+    ek.appendChild(head); ek.appendChild(bodyDiv);
+    toggle.onclick = () => {
+      if (bodyDiv.childElementCount) { bodyDiv.replaceChildren(); return; }
+      ek80Panel(bodyDiv, d.sadcp_folder || "", async (out) => {
+        await repointConfigToExtract(out);
+        dashboard();
+      });
+    };
+    main.appendChild(ek);
   }
 
   // loose ends

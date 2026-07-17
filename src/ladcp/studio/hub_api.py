@@ -74,6 +74,42 @@ def _run_job(job: _Job, ccfg: cc.CruiseConfig) -> None:
     job.current = None
 
 
+class _Ek80Job:
+    """One EK80 slim-extraction run: (station, src) plan, per-file progress."""
+
+    def __init__(self, plan: list[tuple[str, str]], out_root: Path):
+        self.plan = plan
+        self.out_root = out_root
+        self.done = 0
+        self.ok = 0
+        self.bytes = 0
+        self.current: str | None = None
+        self.errors: list[str] = []
+        self.thread: threading.Thread | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def payload(self) -> dict:
+        return {"running": self.running, "total": len(self.plan), "done": self.done,
+                "ok": self.ok, "bytes": self.bytes, "current": self.current,
+                "errors": self.errors, "out": str(self.out_root)}
+
+
+def _run_ek80_job(job: _Ek80Job) -> None:
+    from ..hub import ek80_ops
+
+    def progress(i, n, station, name):
+        job.done = i - 1
+        job.current = f"{station}/{name}"
+
+    job.ok, job.bytes, job.errors = ek80_ops.extract_jobs(job.plan, job.out_root,
+                                                          progress=progress)
+    job.done = len(job.plan)
+    job.current = None
+
+
 def add_hub_routes(app, hub_dir: Path) -> None:
     """Mount the ``/api/hub/*`` surface for the cruise directory ``hub_dir``."""
     hub_dir = Path(hub_dir).resolve()
@@ -166,6 +202,70 @@ def add_hub_routes(app, hub_dir: Path) -> None:
         job = jobs.get("current")
         return job.payload() if job else {"running": False, "total": 0,
                                           "done": [], "current": None, "error": None}
+
+    # -- EK80 share -> slim local copy (EK-B) --------------------------------------
+    def _index_path() -> Path:
+        args = cc.merged_qa_args(_load())
+        return Path(args.index) if args.index else Path(args.root) / ".ladcp_archive.json"
+
+    def _ek80_window(body) -> tuple[list[str], Path, float, float]:
+        paths = body.get("paths") or []
+        if not paths:
+            raise HTTPException(400, "give at least one EK80 path (dir, glob or mount)")
+        idx = _index_path()
+        if not idx.is_file():
+            raise HTTPException(409, "no archive index yet — EK80 windows need the "
+                                     "cast times (finish setup / build the index first)")
+        return paths, idx, float(body.get("pre", 20.0)), float(body.get("post", 170.0))
+
+    @app.post("/api/hub/ek80/timetable")
+    async def ek80_timetable(request: Request) -> dict:
+        from ..hub import ek80_ops
+        paths, idx, pre, post = _ek80_window(await request.json())
+        try:
+            table = ek80_ops.timetable(paths, idx, pre=pre, post=post)
+        except Exception as e:
+            raise HTTPException(400, f"{type(e).__name__}: {e}") from None
+        table["cmd"] = ek80_ops.commands(paths, idx, hub_dir / ek80_ops.DEFAULT_OUT,
+                                         pre=pre, post=post)["timetable"]
+        return table
+
+    @app.post("/api/hub/ek80/extract")
+    async def ek80_extract(request: Request) -> dict:
+        from ..hub import ek80_ops
+        body = await request.json()
+        ej = jobs.get("ek80")
+        if ej is not None and ej.running:
+            raise HTTPException(409, "an EK80 extraction is already running")
+        paths, idx, pre, post = _ek80_window(body)
+        try:
+            plan = ek80_ops.build_jobs(paths, idx, pre=pre, post=post,
+                                       stations=body.get("stations"))
+        except Exception as e:
+            raise HTTPException(400, f"{type(e).__name__}: {e}") from None
+        if not plan:
+            return {"started": False,
+                    "reason": "no EK80 files fall in any cast window (logging gap?)"}
+        out_root = hub_dir / ek80_ops.DEFAULT_OUT
+        ej = _Ek80Job(plan, out_root)
+        ej.thread = threading.Thread(target=_run_ek80_job, args=(ej,), daemon=True)
+        jobs["ek80"] = ej
+        ej.thread.start()
+        return {"started": True, "total": len(plan), "out": str(out_root),
+                "cmd": ek80_ops.commands(paths, idx, out_root,
+                                         pre=pre, post=post)["extract"]}
+
+    @app.get("/api/hub/ek80/job")
+    def ek80_job() -> dict:
+        ej = jobs.get("ek80")
+        return ej.payload() if ej else {"running": False, "total": 0, "done": 0,
+                                        "ok": 0, "bytes": 0, "current": None,
+                                        "errors": []}
+
+    @app.get("/api/hub/config")
+    def hub_config_get() -> dict:
+        ccfg = _load()
+        return {"path": str(ccfg.path), "raw": ccfg.raw}
 
     def _station_dir(label: str) -> Path:
         args = cc.merged_qa_args(_load())

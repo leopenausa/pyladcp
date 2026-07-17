@@ -169,6 +169,66 @@ def test_studio_dropdown_lists_and_picks_ek80(tmp_path):
     assert cfg.sadcp.xducer == 7.0
 
 
+def _fake_ek(monkeypatch, share_file="/share/a.nc"):
+    """Monkeypatch the ek80_files seam: one file covering B-01, none for B-02."""
+    from datetime import datetime, timezone
+
+    from ladcp.io import ek80_files as ek
+    t0 = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(ek, "scan",
+                        lambda paths, peek=True: [{"file": share_file, "start": t0,
+                                                   "end": None, "n": 1, "lat": None,
+                                                   "lon": None, "time_source": "nc"}])
+    monkeypatch.setattr(ek, "read_casts", lambda p: [("B-01", t0, None, None)])
+    monkeypatch.setattr(ek, "correlate",
+                        lambda rows, casts, **kw: {"B-01": [share_file], "B-02": []})
+
+    def fake_slim(src, dst):
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_bytes(b"slim")
+        return 1000
+
+    monkeypatch.setattr(ek, "slim_extract", fake_slim)
+
+
+def test_ek80_timetable_needs_index(client):
+    c, root = client
+    raw = {"cruise": {"name": "B"}, "data": {"root": ".", "out": "qa_out"}}
+    assert c.post("/api/hub/config", json={"config": raw}).status_code == 200
+    r = c.post("/api/hub/ek80/timetable", json={"paths": ["/share"]})
+    assert r.status_code == 409 and "index" in r.json()["detail"]
+    assert c.post("/api/hub/ek80/timetable", json={"paths": []}).status_code == 400
+
+
+def test_ek80_flow_over_http(client, monkeypatch):
+    c, root = client
+    raw = {"cruise": {"name": "B"}, "data": {"root": ".", "out": "qa_out"},
+           "sadcp": {"folder": "share", "source": "ek80"}}
+    (root / "share").mkdir()
+    assert c.post("/api/hub/config", json={"config": raw}).status_code == 200
+    (root / ".ladcp_archive.json").write_text('{"casts": {}}', encoding="utf-8")
+    _fake_ek(monkeypatch)
+
+    t = c.post("/api/hub/ek80/timetable", json={"paths": ["/share"]}).json()
+    assert t["n_files"] == 1 and t["covered"] == 1
+    assert {"station": "B-01", "n": 1, "files": ["a.nc"]} in t["stations"]
+    assert t["cmd"].startswith("ladcp-ek80 timetable")
+
+    r = c.post("/api/hub/ek80/extract", json={"paths": ["/share"]}).json()
+    assert r["started"] is True and r["total"] == 1
+    assert r["cmd"].startswith("ladcp-ek80 extract")
+    for _ in range(100):
+        j = c.get("/api/hub/ek80/job").json()
+        if not j["running"]:
+            break
+        time.sleep(0.05)
+    assert j["ok"] == 1 and j["bytes"] == 1000 and j["errors"] == []
+    assert (root / "ek80" / "B-01" / "a.nc").is_file()
+
+    cur = c.get("/api/hub/config").json()        # what the GUI re-points afterwards
+    assert cur["raw"]["sadcp"]["folder"] == "share"
+
+
 def test_ladcp_studio_without_config_opens_setup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     captured: list[list[str]] = []
