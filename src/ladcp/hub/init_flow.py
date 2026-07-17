@@ -115,7 +115,9 @@ def run_init(ns, *, ask=input, say=print) -> int:
         say(f"\nCTD: {ctd_dir or '.'}/ — {det.ctd.evidence}")
         if not ns.yes and not _confirm(ask, say, "use this directory?"):
             ctd_dir = _text(ask, "CTD directory (relative to the cruise root)", ctd_dir)
-        need_hex = bool(det.ctd.missing_cnv) and det.ctd.n_hex > 0
+        # any cast without a cleaned .cnv — incl. MASTER/SLAVE archives, where no
+        # name-paired stations exist (missing_cnv empty) but n_cnv tells the story
+        need_hex = det.ctd.n_hex > 0 and (bool(det.ctd.missing_cnv) or det.ctd.n_cnv == 0)
         if ns.from_hex is not None:
             from_hex = ns.from_hex
         elif need_hex and det.ctd.converter:

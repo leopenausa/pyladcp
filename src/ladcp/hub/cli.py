@@ -187,6 +187,70 @@ def _cmd_config(ns) -> int:
 
 
 # ---------------------------------------------------------------------------
+# ladcp studio
+
+def _cmd_studio(ns) -> int:
+    """Open the Studio window: setup wizard, cruise dashboard, or station editor.
+
+    A translation layer only — cruise.toml becomes a ``ladcp-studio`` argv, so the
+    window always runs the exact same server the expert command launches. Without a
+    cruise.toml the window opens on the setup wizard for the current directory.
+    """
+    path = Path(ns.config) if ns.config else cc.find_config()
+    if ns.config and not Path(ns.config).is_file():
+        print(f"ladcp studio: --config: {ns.config} does not exist", file=sys.stderr)
+        return 1
+    argv: list[str] = list(ns.stations)
+    hub_root = Path.cwd()
+    if path is not None:
+        try:
+            ccfg = cc.load_config(path)
+        except cc.ConfigError as e:
+            print(f"ladcp studio: {e}", file=sys.stderr)
+            return 1
+        args = cc.merged_qa_args(ccfg)
+        hub_root = path.parent
+        argv += ["--root", str(args.root), "--cruise", args.cruise]
+        if args.index:
+            argv += ["--index", str(args.index)]
+        if args.from_hex:
+            argv += ["--from-hex"]
+        if args.ctd_cache:
+            argv += ["--ctd-cache", str(args.ctd_cache)]
+        if args.sadcp:
+            if args.sadcp_source == "codas":
+                argv += ["--sadcp-codas", str(args.sadcp)]
+            elif args.sadcp_source == "ek80":
+                print("ladcp studio: the ek80 [sadcp] source has no Studio dropdown "
+                      "yet — opening without the constraint", file=sys.stderr)
+            else:
+                argv += ["--sadcp", str(args.sadcp),
+                         "--sadcp-filetype", args.sadcp_filetype,
+                         "--sadcp-xducer", str(args.sadcp_xducer)]
+                if args.sadcp_timeoff is not None:
+                    argv += ["--sadcp-timeoff", str(args.sadcp_timeoff)]
+                if args.sadcp_nav:
+                    argv += ["--sadcp-nav", str(args.sadcp_nav)]
+                if args.sadcp_reingest:
+                    argv += ["--sadcp-reingest"]
+        if not ns.stations:                    # serve the whole cruise for the dashboard
+            universe = all_station_labels(args.index, Path(args.root))
+            if not universe:
+                from .detect import curated_station_labels
+                universe = curated_station_labels(args.root)
+            argv += universe
+    argv += ["--hub-dir", str(hub_root)]
+    if not ns.stations:
+        argv += ["--start-page", "hub"]        # wizard (no config) or dashboard
+    if ns.port is not None:
+        argv += ["--port", str(ns.port)]
+    if ns.no_browser:
+        argv += ["--no-browser"]
+    from ..studio.cli import main as studio_main
+    return studio_main(argv)
+
+
+# ---------------------------------------------------------------------------
 # ladcp process
 
 def _cmd_process(ns) -> int:
@@ -288,6 +352,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", metavar="PATH", default=None,
                    help="cruise.toml to use (default: auto-discovered upward from cwd)")
 
+    p = sub.add_parser("studio", help="open the Studio window: setup wizard (no "
+                                      "cruise.toml yet), cruise dashboard, or the "
+                                      "station editor")
+    p.add_argument("stations", nargs="*",
+                   help="station(s) to open directly in the editor (default: the "
+                        "whole cruise, landing on the dashboard/wizard)")
+    p.add_argument("--config", metavar="PATH", default=None,
+                   help="cruise.toml to use (default: auto-discovered upward from cwd)")
+    p.add_argument("--port", type=int, default=None, help="port (default: 8642)")
+    p.add_argument("--no-browser", action="store_true", help="do not open the browser")
+
     p = sub.add_parser("process", help="process stations per the cruise.toml")
     p.add_argument("stations", nargs="*",
                    help="station label(s) to (re)process unconditionally; default: "
@@ -324,6 +399,8 @@ def main(argv: list[str] | None = None) -> int:
             return 130
     if ns.cmd == "status":
         return _cmd_status(ns)
+    if ns.cmd == "studio":
+        return _cmd_studio(ns)
     if ns.cmd == "config":
         return _cmd_config(ns)
     if ns.cmd == "process":

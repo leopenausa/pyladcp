@@ -50,6 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default: localhost)")
     ap.add_argument("--port", type=int, default=8642, help="port (default: 8642)")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
+    ap.add_argument("--hub-dir", metavar="DIR", default=None,
+                    help="serve the cruise-hub pages (/hub.html: setup wizard + "
+                         "dashboard) for this cruise directory; zero stations is then "
+                         "fine (first-run setup). `ladcp studio` passes this for you")
+    ap.add_argument("--start-page", choices=("editor", "hub"), default=None,
+                    help="which page the browser opens (default: hub when --hub-dir "
+                         "is given and no station was named, else the editor)")
     args = ap.parse_args(argv)
     os.environ.setdefault("MPLBACKEND", "Agg")   # QA panels render headless
 
@@ -57,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     if not labels and args.index:
         from ..discovery import all_station_labels
         labels = all_station_labels(args.index, Path(args.root))
-    if not labels:
+    if not labels and not args.hub_dir:
         ap.error("give one or more station ids, or --index to serve the whole archive")
 
     raw_cfgs = []
@@ -107,10 +114,13 @@ def main(argv: list[str] | None = None) -> int:
     state = StudioState(labels, root=args.root, cruise=args.cruise, index=args.index,
                         from_hex=args.from_hex, ctd_cache=args.ctd_cache, sadcp=raw_cfgs,
                         sadcp_codas=codas_cfgs, sadcp_found=found_cfgs)
-    app = create_app(state)
+    app = create_app(state, hub_dir=args.hub_dir)
 
     import uvicorn
     url = f"http://{args.host}:{args.port}"
+    start = args.start_page or ("hub" if args.hub_dir and not args.stations else "editor")
+    if start == "hub" and args.hub_dir:          # hub landing: wizard or dashboard
+        url += "/hub.html"
     print(f"pyladcp studio: {len(labels)} station(s) at {url}  (Ctrl-C to stop)")
     if not args.no_browser:
         import webbrowser

@@ -62,6 +62,20 @@ pytest -q          # expect ~320 passed, ~22 skipped (skips = local-only cruise 
 If you prefer conda, `conda env create -f environment.yml` builds a ready `pyladcp` env
 with everything in it.
 
+## Quickstart — the guided way
+
+From your cruise directory (the folder holding the LADCP and CTD data):
+
+```bash
+ladcp studio        # a window opens: setup wizard -> trial station -> dashboard
+```
+
+The hub finds your casts, walks you through the cruise setup step by step, writes
+everything to a reviewable `cruise.toml`, and processes stations with one click —
+new users get guided, experienced users get speed. The same hub works entirely in
+the terminal (`ladcp init`, `ladcp status`, `ladcp process`) for SSH sessions and
+scripts. See the [cruise hub chapter](docs/guide/11-cruise-hub.md).
+
 ## Quickstart — one station
 
 ```bash

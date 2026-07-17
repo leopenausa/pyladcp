@@ -95,7 +95,8 @@ def test_gather_index_staleness(cruise):
             "slave": str(cruise / "LADCP" / "A-01-LADCP-S.000"),
             "ctd_hex": None, "utc": None, "lat": None, "lon": None,
             "depth": None, "provenance": "test"}}}), encoding="utf-8")
-    data = status.gather(cc.load_config(cruise / "cruise.toml"))
+    _age(cruise / ".ladcp_archive.json", 30)             # older than the new arrival,
+    data = status.gather(cc.load_config(cruise / "cruise.toml"))     # newer than the rest
     assert data["n_stations"] == 1                       # index wins over name pairing
     assert data["index_stale"] is False
     new = cruise / "LADCP" / "A-09-LADCP-M.000"          # a cast arrives on watch

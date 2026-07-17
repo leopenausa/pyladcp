@@ -159,20 +159,30 @@ file reads during discovery.
 **Exit criteria:** on the MORIA2 working directory, `ladcp` prints an accurate
 dashboard in <2 s without touching raw PD0 payloads.
 
-## Phase E — `ladcp studio` thin launcher + docs (S)
+## Phase E — the Studio hub GUI + docs (M/L; revised 2026-07-17)
 
-1. **`ladcp studio [station]`**: translate `CruiseConfig` → the existing
-   `studio/cli.py` arg surface (root, cruise, index, from-hex, sadcp sources) and
-   call its `main` with the assembled argv — thin by construction, no new studio
-   code paths (spec §9.4).
-2. **Docs**: new guide chapter "The cruise hub" (init walkthrough, cruise.toml
-   reference table with provenance rules, status glossary); README quickstart
-   switches to `ladcp init`; `docs/WIZARD_SPEC.md` marked implemented.
-3. **Tests**: argv translation unit test; `test_guide_commands.py` extended so
-   documented hub commands stay real.
+> Revised per the user's course correction: the goal is a *guided window*, not just
+> a launcher. Studio grows the hub pages; `ladcp studio` is the one command that
+> pops it up (spec v0.3).
 
-**Exit criteria:** guide + README describe the hub; a colleague's first-contact
-path is `pip install`, `ladcp init`, done.
+1. **`studio/hub_api.py`**: `/api/hub/*` — state, detect, preview/save config,
+   status, process (background job, per-station progress), scorecard, report PDF.
+   Every endpoint is a JSON shim over the phase A–D engine.
+2. **`static/hub.html` + `hub.js`**: the wizard (scan cards → choices → toml
+   preview → save+index → trial with inline scorecard) and the dashboard (pending /
+   QA / loose ends with process buttons and a progress bar).
+3. **`ladcp studio [station]`**: translates `cruise.toml` → the `studio/cli.py`
+   argv (vmdas→`--sadcp`, codas→`--sadcp-codas`; ek80 warned + skipped) and lands
+   on the wizard (no config), the dashboard (config, no station), or the editor
+   (station named). `--hub-dir`/`--start-page` on `ladcp-studio` carry the mode.
+4. **Docs**: guide chapter 11 "The cruise hub" (both front ends), README "guided
+   way" quickstart, spec v0.3.
+5. **Tests**: TestClient wizard flow + job endpoint (monkeypatched at the
+   `run_batch` seam); `ladcp studio` argv-translation tests.
+
+**Exit criteria:** a colleague's first-contact path is `pip install`,
+`ladcp studio`, follow the window; the terminal parity path stays
+`ladcp init --yes …`.
 
 ---
 

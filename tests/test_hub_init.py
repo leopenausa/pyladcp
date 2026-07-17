@@ -129,6 +129,26 @@ def test_init_yes_from_hex_flags_are_tristate(tmp_path, monkeypatch):
     assert cc.load_config(tmp_path / "cruise.toml").args_map["from_hex"] is True
 
 
+def test_init_offers_from_hex_on_master_slave_hex_only_cruise(tmp_path, monkeypatch):
+    """The MORIA_2 shape: MASTER/SLAVE archive + raw .hex only (no .cnv anywhere).
+
+    No name-paired stations exist, so missing_cnv is empty — the from-hex offer
+    must key off n_cnv == 0 instead (regression: the offer never appeared).
+    """
+    for sub in ("MASTER", "SLAVE"):
+        d = tmp_path / "LADCP" / sub
+        d.mkdir(parents=True)
+        (d / "m0001.000").write_bytes(b"")
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "cast01.hex").write_text("", encoding="utf-8")
+    from ladcp.io import ctd_raw
+    monkeypatch.setattr(ctd_raw, "_find_ctd_project", lambda: tmp_path / "CTD_project")
+    monkeypatch.chdir(tmp_path)
+    # --yes auto-enables from-hex when it is needed and the converter is available
+    assert hub.main(["init", "--yes", "--no-trial"]) == 0
+    assert cc.load_config(tmp_path / "cruise.toml").args_map["from_hex"] is True
+
+
 def test_init_refuses_existing_config_without_force(tmp_path, monkeypatch, capsys):
     _tree(tmp_path)
     (tmp_path / "cruise.toml").write_text("", encoding="utf-8")
