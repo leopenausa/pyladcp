@@ -54,6 +54,7 @@ nav:
   - "8 · Ship-ADCP integration": 08-ship-adcp.md
   - "9 · Troubleshooting": 09-troubleshooting.md
   - "10 · Interactive Studio": 10-studio.md
+  - "11 · The cruise hub (ladcp)": 11-cruise-hub.md
   - Appendices:
       - "A · CLI flag reference": appendix-a-flags.md
       - "B · LDEO_IX ↔ pyladcp mapping": appendix-b-legacy-map.md

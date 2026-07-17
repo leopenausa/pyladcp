@@ -17,13 +17,20 @@ from .render import render_heatmap, render_panel
 from .state import StudioState
 
 
-def create_app(state: StudioState):
-    """Build the FastAPI app over ``state`` (missing extra -> install hint)."""
+def create_app(state: StudioState, hub_dir=None):
+    """Build the FastAPI app over ``state`` (missing extra -> install hint).
+
+    ``hub_dir`` (a cruise directory) additionally mounts the ``/api/hub/*`` surface
+    — the setup wizard + cruise dashboard served at ``/hub`` (wizard phase E).
+    """
     if FastAPI is None:                          # pragma: no cover - exercised manually
         raise SystemExit("ladcp-studio needs the GUI extra: "
                          "pip install 'pyladcp[gui]'")
 
     app = FastAPI(title="pyladcp studio", docs_url=None, redoc_url=None)
+    if hub_dir is not None:
+        from .hub_api import add_hub_routes
+        add_hub_routes(app, hub_dir)
 
     def _check(label: str) -> None:
         if not state.has_station(label):

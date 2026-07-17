@@ -1,7 +1,16 @@
-# `ladcp` — the cruise hub (spec v0.2, 2026-07-16)
+# `ladcp` — the cruise hub (spec v0.3, 2026-07-17)
 
-> Status: **approved** — distilled from the design interview of 2026-07-16;
-> §9 open questions settled 2026-07-16. Implementation plan: `docs/WIZARD_PLAN.md`.
+> Status: **approved & implemented** — distilled from the design interview of
+> 2026-07-16; §9 open questions settled 2026-07-16. Implementation plan:
+> `docs/WIZARD_PLAN.md`.
+>
+> **v0.3 revision (2026-07-17, user decision):** the primary front end is a *GUI*
+> — `ladcp studio` opens a browser window (the existing Studio server) that guides
+> new and experienced users step by step: setup wizard when no `cruise.toml`
+> exists, cruise dashboard (process + QA + loose ends) when one does, station
+> editor when a station is named. The "Studio setup page" originally deferred to
+> v2 (§2, §9.4) was pulled into v1; the terminal subcommands remain the SSH/script
+> layer. Both front ends share one engine, as designed.
 
 ## 1. Purpose
 

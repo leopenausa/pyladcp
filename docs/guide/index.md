@@ -23,6 +23,10 @@ it to make a processing decision.
 - **Tuning a single station?** [Chapter 10](10-studio.md) is the interactive GUI
   (`ladcp-studio`): move the weights and watch the profile respond live, then copy the
   `ladcp-qa` command that reproduces what you found.
+- **New to pyladcp, or starting a cruise?** [Chapter 11](11-cruise-hub.md) is the
+  cruise hub: `ladcp studio` opens a window that finds your data, sets the cruise up
+  step by step, and processes it — `ladcp init/status/process` are the same hub in
+  the terminal.
 
 Every command shown in this guide is executed by pyladcp's continuous-integration tests
 against the repository's built-in test station — if the guide and the code ever

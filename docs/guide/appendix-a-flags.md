@@ -8,18 +8,20 @@ you read here is exactly what the installed code accepts.
 ## `ladcp`
 
 ```text
-usage: ladcp [-h] {init,status,config,process} ...
+usage: ladcp [-h] {init,status,config,studio,process} ...
 
 The LADCP cruise hub: drives the ladcp-* commands from one cruise.toml (run
 inside a cruise directory).
 
 positional arguments:
-  {init,status,config,process}
+  {init,status,config,studio,process}
     init                first-run setup: discover data, confirm, write
                         cruise.toml, optional trial station
     status              the mid-cruise dashboard: pending casts, QA rollup,
                         loose ends (default when run bare)
     config              show / validate / edit the cruise.toml
+    studio              open the Studio window: setup wizard (no cruise.toml
+                        yet), cruise dashboard, or the station editor
     process             process stations per the cruise.toml
 
 options:
@@ -71,6 +73,23 @@ options:
   -h, --help     show this help message and exit
   --config PATH  cruise.toml to use (default: auto-discovered upward from cwd)
   --json         emit the dashboard as JSON (for scripts)
+```
+
+## `ladcp studio`
+
+```text
+usage: ladcp studio [-h] [--config PATH] [--port PORT] [--no-browser]
+                    [stations ...]
+
+positional arguments:
+  stations       station(s) to open directly in the editor (default: the whole
+                 cruise, landing on the dashboard/wizard)
+
+options:
+  -h, --help     show this help message and exit
+  --config PATH  cruise.toml to use (default: auto-discovered upward from cwd)
+  --port PORT    port (default: 8642)
+  --no-browser   do not open the browser
 ```
 
 ## `ladcp process`
@@ -485,7 +504,7 @@ usage: ladcp-studio [-h] [--root ROOT] [--cruise CRUISE] [--index INDEX]
                     [--sadcp-filetype {STA,LTA}] [--sadcp-xducer SADCP_XDUCER]
                     [--sadcp-timeoff SECONDS|auto] [--sadcp-nav PATH]
                     [--sadcp-reingest] [--host HOST] [--port PORT]
-                    [--no-browser]
+                    [--no-browser] [--hub-dir DIR] [--start-page {editor,hub}]
                     [stations ...]
 
 pyladcp Studio: interactive single-station LADCP processing in the browser
@@ -521,6 +540,14 @@ options:
   --host HOST           bind address (default: localhost)
   --port PORT           port (default: 8642)
   --no-browser          do not open the browser
+  --hub-dir DIR         serve the cruise-hub pages (/hub.html: setup wizard +
+                        dashboard) for this cruise directory; zero stations is
+                        then fine (first-run setup). `ladcp studio` passes
+                        this for you
+  --start-page {editor,hub}
+                        which page the browser opens (default: hub when --hub-
+                        dir is given and no station was named, else the
+                        editor)
 ```
 
 ## `ladcp-ek80`
