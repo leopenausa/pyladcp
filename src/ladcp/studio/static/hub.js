@@ -49,7 +49,10 @@ async function wizard() {
   confirmStep(det);
 }
 
-function confirmStep(det) {
+function confirmStep(det, prev) {
+  // `prev` carries the user's answers when navigating backwards — a wrong choice
+  // is fixed in place, everything else stays as they set it
+  const ans = prev || {};
   const main = $("#main");
   main.replaceChildren(steps(1));
 
@@ -87,7 +90,7 @@ function confirmStep(det) {
     fromHex = el("input");
     fromHex.type = "checkbox";
     fromHex.disabled = !det.ctd.converter;
-    fromHex.checked = !!det.ctd.converter;
+    fromHex.checked = ans.fromHex !== undefined ? ans.fromHex : !!det.ctd.converter;
     l.appendChild(fromHex);
     l.appendChild(el("span", "", det.ctd.converter
       ? `convert raw .hex on the fly (CTD_project found at ${det.ctd.converter})`
@@ -113,11 +116,14 @@ function confirmStep(det) {
   };
   mk("", "no ship-ADCP constraint").checked = true;
   det.sadcp.forEach((c, i) => mk(String(i), `${c.path}  (${c.source}: ${c.evidence})`));
+  if (ans.sadcpIdx !== undefined && ans.sadcpIdx !== null && radios[ans.sadcpIdx + 1])
+    radios[ans.sadcpIdx + 1].checked = true;
   let navSel = null;                 // clock check only makes sense with a raw source
   if (det.nav.length && det.sadcp.some((c) => c.source === "vmdas")) {
     const l = el("label");
     navSel = el("input");
     navSel.type = "checkbox";
+    navSel.checked = !!ans.nav;
     l.appendChild(navSel);
     l.appendChild(el("span", "",
       `clock check against ${det.nav[0].path} (--sadcp-timeoff auto; raw VmDAS only)`));
@@ -128,8 +134,8 @@ function confirmStep(det) {
   // cruise identity card
   const cru = el("div", "card");
   cru.appendChild(el("h2", "", "cruise"));
-  const nameIn = el("input"); nameIn.type = "text"; nameIn.value = det.name;
-  const outIn = el("input"); outIn.type = "text"; outIn.value = "qa_out";
+  const nameIn = el("input"); nameIn.type = "text"; nameIn.value = ans.name || det.name;
+  const outIn = el("input"); outIn.type = "text"; outIn.value = ans.out || "qa_out";
   const row1 = el("label"); row1.appendChild(el("span", "", "name")); row1.appendChild(nameIn);
   const row2 = el("label"); row2.appendChild(el("span", "", "output dir")); row2.appendChild(outIn);
   cru.appendChild(row1); cru.appendChild(row2);
@@ -140,33 +146,40 @@ function confirmStep(det) {
   main.appendChild(cru);
 
   const act = el("div", "actions");
+  const rescan = el("button", "btn", "↻ rescan directory");
   const btn = el("button", "btn", "preview cruise.toml →");
   const errBox = el("div", "err");
-  act.appendChild(btn);
+  act.appendChild(rescan); act.appendChild(btn);
   main.appendChild(act);
   main.appendChild(errBox);
+  rescan.onclick = wizard;           // fixed something on disk? look again
 
   btn.onclick = async () => {
-    const raw = {cruise: {name: nameIn.value.trim() || det.name},
-                 data: {root: ".", out: outIn.value.trim() || "qa_out"}};
-    if (fromHex && fromHex.checked) raw.ctd = {from_hex: true};
     const pick = radios.find((r) => r.checked && r.value !== "");
+    const nextAns = {name: nameIn.value.trim() || det.name,
+                     out: outIn.value.trim() || "qa_out",
+                     fromHex: !!(fromHex && fromHex.checked),
+                     sadcpIdx: pick ? Number(pick.value) : null,
+                     nav: !!(navSel && navSel.checked)};
+    const raw = {cruise: {name: nextAns.name},
+                 data: {root: ".", out: nextAns.out}};
+    if (nextAns.fromHex) raw.ctd = {from_hex: true};
     if (pick) {
-      const c = det.sadcp[Number(pick.value)];
+      const c = det.sadcp[nextAns.sadcpIdx];
       raw.sadcp = {folder: c.path, source: c.source};
-      if (navSel && navSel.checked && c.source === "vmdas") {
+      if (nextAns.nav && c.source === "vmdas") {
         raw.sadcp.nav = det.nav[0].path;
         raw.sadcp.timeoff = "auto";
       }
     }
     try {
       const prev = await api("/api/hub/preview", raw);
-      saveStep(det, raw, prev.toml);
+      saveStep(det, raw, prev.toml, nextAns);
     } catch (e) { errBox.textContent = String(e); }
   };
 }
 
-function saveStep(det, raw, toml) {
+function saveStep(det, raw, toml, ans) {
   const main = $("#main");
   main.replaceChildren(steps(2));
   const card = el("div", "card");
@@ -184,20 +197,20 @@ function saveStep(det, raw, toml) {
   act.appendChild(back); act.appendChild(save);
   card.appendChild(act); card.appendChild(errBox);
   main.appendChild(card);
-  back.onclick = () => confirmStep(det);
+  back.onclick = () => confirmStep(det, ans);
   save.onclick = async () => {
     save.disabled = true; save.textContent = "writing…";
     try {
       const res = await api("/api/hub/config",
         {config: raw, build_index: buildIdx,
          ladcp_dir: det.ladcp.dir || ".", ctd_dir: det.ctd.dir || "."});
-      trialStep(det, res);
+      trialStep(det, res, ans);
     } catch (e) { errBox.textContent = String(e); save.disabled = false;
                   save.textContent = "save & continue →"; }
   };
 }
 
-function trialStep(det, saved) {
+function trialStep(det, saved, ans) {
   const main = $("#main");
   main.replaceChildren(steps(3));
   const card = el("div", "card");
@@ -215,13 +228,17 @@ function trialStep(det, saved) {
   labels.forEach((l) => { const o = el("option", "", l); o.value = l; sel.appendChild(o); });
   if (labels.length) sel.value = labels[Math.floor(labels.length / 2)];
   const act = el("div", "actions");
+  const back = el("button", "btn", "← change setup");
   const run = el("button", "btn", "process trial station");
   const skip = el("button", "btn", "skip → dashboard");
+  act.appendChild(back);
   if (labels.length) { act.appendChild(sel); act.appendChild(run); }
   act.appendChild(skip);
   const out = el("div");
   card.appendChild(act); card.appendChild(out);
   main.appendChild(card);
+  // cruise.toml is already written; going back re-saves it over the current one
+  back.onclick = () => confirmStep(det, ans);
   skip.onclick = dashboard;
   run.onclick = async () => {
     run.disabled = true;
@@ -280,8 +297,11 @@ async function dashboard() {
   const bNew = el("button", "btn", pend.length ? `process ${pend.length} pending` : "nothing pending");
   bNew.disabled = !pend.length;
   const bAll = el("button", "btn", "process all");
+  const bSetup = el("button", "btn", "↺ re-run setup");
+  bSetup.title = "walk the setup wizard again (saving overwrites cruise.toml)";
   const errBox = el("div", "err");
-  act.appendChild(bNew); act.appendChild(bAll);
+  act.appendChild(bNew); act.appendChild(bAll); act.appendChild(bSetup);
+  bSetup.onclick = wizard;
   p1.appendChild(act); p1.appendChild(errBox);
   main.appendChild(p1);
   const kick = (body) => async () => {
