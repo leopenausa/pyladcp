@@ -229,7 +229,11 @@ def run_init(ns, *, ask=input, say=print) -> int:
 
     # -- step 6b: EK80 share -> slim local copy (needs the index for cast windows) -----
     if sadcp is not None and sadcp.source == "ek80":
-        _ek80_offer(ns, root, cfg_path, raw, sadcp.path, ask, say)
+        if getattr(sadcp, "extracted", False):
+            say(f"EK80: {sadcp.path} is already a per-station extract tree — "
+                "nothing to copy; each cast picks its files by time window")
+        else:
+            _ek80_offer(ns, root, cfg_path, raw, sadcp.path, ask, say)
 
     # -- step 7: trial station (suggested, skippable) ----------------------------------
     if labels and not ns.no_trial:

@@ -224,7 +224,8 @@ function trialStep(det, saved, ans) {
   main.replaceChildren(steps(3));
   const chosen = ans && ans.sadcpIdx !== null && ans.sadcpIdx !== undefined
     ? det.sadcp[ans.sadcpIdx] : null;
-  if (chosen && chosen.source === "ek80") {      // the share->slim-copy offer (EK-B)
+  // the share->slim-copy offer (EK-B) — pointless for an already-extracted tree
+  if (chosen && chosen.source === "ek80" && !chosen.extracted) {
     const ek = el("div", "card");
     ek80Panel(ek, chosen.path, repointConfigToExtract);
     main.appendChild(ek);

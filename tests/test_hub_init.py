@@ -102,6 +102,28 @@ def test_detect_flags_nc_rich_dir_as_possible_ek80(tmp_path):
     assert not any("codas" in p for p in ek)             # the codas convention is codas
 
 
+def test_detect_groups_per_station_ek80_extracts(tmp_path):
+    """The MORIA_2 shape: EK80/adcp_local/<station>/*.nc must be ONE candidate.
+
+    Regression: every station subfolder was flagged separately — 20+ radio
+    buttons, each covering a single cast. The parent is the right [sadcp]
+    folder (each cast picks its files by time window, guide ch. 8).
+    """
+    _tree(tmp_path, sadcp=False)
+    base = tmp_path / "EK80" / "adcp_local"
+    for st in ("M_02", "M_03", "M_05"):
+        d = base / st
+        d.mkdir(parents=True)
+        for i in range(3):
+            (d / f"r{i}.nc").write_bytes(b"")
+    det = detect.detect(tmp_path)
+    ek = [c for c in det.sadcp if c.source == "ek80"]
+    assert len(ek) == 1
+    assert ek[0].path == str(Path("EK80") / "adcp_local")
+    assert ek[0].extracted is True
+    assert "3 station folder(s), 9 .nc file(s)" in ek[0].evidence
+
+
 def test_curated_labels_only_from_standard_dir(tmp_path):
     _tree(tmp_path)
     assert detect.curated_station_labels(tmp_path) == ["A-01", "A-02"]
