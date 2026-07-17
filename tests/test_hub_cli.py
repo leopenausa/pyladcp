@@ -264,10 +264,10 @@ def test_config_edit_refuses_invalid_and_keeps_edits(cruise, monkeypatch, tmp_pa
 # ---------------------------------------------------------------------------
 # bare ladcp
 
-def test_bare_ladcp_points_at_config(cruise, capsys):
+def test_bare_ladcp_shows_the_dashboard(cruise, capsys):
     assert hub.main([]) == 0
     out = capsys.readouterr().out
-    assert "cruise.toml:" in out and "process" in out
+    assert "cruise MORIA —" in out and "casts:" in out   # status, not the help screen
 
 
 def test_bare_ladcp_without_config_hints_init(tmp_path, monkeypatch, capsys):

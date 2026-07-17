@@ -346,6 +346,19 @@ def apply_to_args(cfg: CruiseConfig, args: argparse.Namespace,
     return applied
 
 
+def merged_qa_args(cfg: CruiseConfig):
+    """A ``ladcp-qa`` namespace holding this config over the built-in defaults.
+
+    Nothing is marked explicit, so the config wins over every parser default — the
+    same merge ``ladcp-qa --config`` performs, minus any typed flags. This is how
+    the hub's subcommands resolve root/outdir/cruise/… without a second config path.
+    """
+    from ..qa.cli import build_parser  # call-time: qa.cli imports this module
+    args = build_parser().parse_args([])
+    apply_to_args(cfg, args, explicit=set())
+    return args
+
+
 def merge_params(params_global: dict, params_station: dict[str, dict],
                  label: str) -> dict[str, object]:
     """The ``[params]`` + ``[params.<label>]`` overrides for one station (station wins)."""

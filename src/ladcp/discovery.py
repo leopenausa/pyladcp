@@ -122,6 +122,10 @@ def _discover_curated(root: Path, st: str) -> StationFiles:
         raise FileNotFoundError(f"no down-looker found for station {st!r} under {root}/LADCP")
     up = pick(f"LADCP/*{st}*-S.000", f"LADCP/*{st}*S*.000")
     ctd = pick(f"CTD/*{st}*.cnv")
+    if ctd is None and (root / "CTD").is_dir():
+        # cnv names often lowercase the label (moria-80_clean.cnv vs MORIA-80): fall
+        # back to the numeric-id resolver the archive-index path already uses
+        ctd = _find_clean_ctd(root / "CTD", st)
     label = down.name.split("-LADCP")[0] if "-LADCP" in down.name else st
     return StationFiles(down=down, up=up, ctd=ctd, label=label)
 

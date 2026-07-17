@@ -1,11 +1,11 @@
 """``ladcp`` — the cruise hub (docs/WIZARD_SPEC.md): one command per cruise directory.
 
-Current surface (docs/WIZARD_PLAN.md phases B+C): ``ladcp init`` (the setup wizard,
-:mod:`~ladcp.hub.init_flow`), ``ladcp config`` (show / validate / edit the
-``cruise.toml``) and ``ladcp process`` (run stations through the shared
-:func:`~ladcp.qa.batch.run_batch` loop, selecting work by the freshness rule).
-``status`` (the dashboard) and ``studio`` arrive in later phases; until then a bare
-``ladcp`` prints where things stand and what to run.
+Current surface (docs/WIZARD_PLAN.md phases B–D): ``ladcp init`` (the setup wizard,
+:mod:`~ladcp.hub.init_flow`), ``ladcp status`` (the mid-cruise dashboard,
+:mod:`~ladcp.hub.status` — also what a bare ``ladcp`` shows in a cruise directory),
+``ladcp config`` (show / validate / edit the ``cruise.toml``) and ``ladcp process``
+(run stations through the shared :func:`~ladcp.qa.batch.run_batch` loop, selecting
+work by the freshness rule). ``studio`` arrives in phase E.
 
 The hub never grows a second orchestration or configuration path: it fills the same
 ``ladcp-qa`` argparse namespace from ``cruise.toml``
@@ -51,16 +51,25 @@ def _resolve_config(config_arg: str | None) -> Path:
     return p
 
 
-def _merged_qa_args(ccfg: cc.CruiseConfig):
-    """A ``ladcp-qa`` namespace holding cruise.toml over the built-in defaults.
+# ---------------------------------------------------------------------------
+# ladcp status
 
-    Nothing is marked explicit, so the config wins over every parser default — the
-    same merge ``ladcp-qa --config`` performs, minus any typed flags.
-    """
-    from ..qa.cli import build_parser
-    args = build_parser().parse_args([])
-    cc.apply_to_args(ccfg, args, explicit=set())
-    return args
+def _cmd_status(ns) -> int:
+    path = _resolve_config(ns.config)
+    try:
+        ccfg = cc.load_config(path)
+    except cc.ConfigError as e:
+        print(f"ladcp status: {e}", file=sys.stderr)
+        return 1
+    from .status import gather, render
+    data = gather(ccfg)
+    if ns.json:
+        import json
+        print(json.dumps(data, indent=2))
+    else:
+        for line in render(data):
+            print(line)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +132,7 @@ def _cmd_config_validate(ccfg: cc.CruiseConfig) -> int:
         if not ok:
             problems.append(f"{name}: {p} does not exist")
     try:                # cross-field validation (e.g. timeoff='auto' needs nav)
-        cfg = SessionConfig.from_args(_merged_qa_args(ccfg))
+        cfg = SessionConfig.from_args(cc.merged_qa_args(ccfg))
         if cfg.sadcp is not None:
             cfg.sadcp.validate_folder()
     except ValueError as e:
@@ -187,7 +196,7 @@ def _cmd_process(ns) -> int:
     path = _resolve_config(ns.config)
     try:
         ccfg = cc.load_config(path)
-        args = _merged_qa_args(ccfg)
+        args = cc.merged_qa_args(ccfg)
         cfg = SessionConfig.from_args(args)
         if cfg.sadcp is not None:         # fail at launch, not minutes in at a solve
             cfg.sadcp.validate_folder()
@@ -265,6 +274,13 @@ def build_parser() -> argparse.ArgumentParser:
     from .init_flow import add_init_parser
     add_init_parser(sub)
 
+    p = sub.add_parser("status", help="the mid-cruise dashboard: pending casts, "
+                                      "QA rollup, loose ends (default when run bare)")
+    p.add_argument("--config", metavar="PATH", default=None,
+                   help="cruise.toml to use (default: auto-discovered upward from cwd)")
+    p.add_argument("--json", action="store_true",
+                   help="emit the dashboard as JSON (for scripts)")
+
     p = sub.add_parser("config", help="show / validate / edit the cruise.toml")
     p.add_argument("action", choices=("show", "validate", "edit"),
                    help="show: resolved options with provenance; validate: schema + "
@@ -306,19 +322,19 @@ def main(argv: list[str] | None = None) -> int:
         except (KeyboardInterrupt, EOFError):     # Ctrl-C / Ctrl-D: leave nothing half-done
             print("\nladcp init: aborted")        # (every write is atomic + post-confirm)
             return 130
+    if ns.cmd == "status":
+        return _cmd_status(ns)
     if ns.cmd == "config":
         return _cmd_config(ns)
     if ns.cmd == "process":
         if ns.stations and (ns.all or ns.force):
             ap.error("give station labels OR --all/--force, not both")
         return _cmd_process(ns)
-    # bare `ladcp`: point at the config and the available actions (status = phase D)
-    path = cc.find_config()
-    if path is None:
-        print("no cruise.toml found in this directory or its parents — run "
-              "`ladcp init` from the cruise directory to set one up.\n")
-    else:
-        print(f"cruise.toml: {path}\n")
+    # bare `ladcp`: the dashboard when a cruise.toml is found, the init hint otherwise
+    if cc.find_config() is not None:
+        return _cmd_status(argparse.Namespace(config=None, json=False))
+    print("no cruise.toml found in this directory or its parents — run "
+          "`ladcp init` from the cruise directory to set one up.\n")
     ap.print_help()
     return 0
 

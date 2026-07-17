@@ -8,15 +8,17 @@ you read here is exactly what the installed code accepts.
 ## `ladcp`
 
 ```text
-usage: ladcp [-h] {init,config,process} ...
+usage: ladcp [-h] {init,status,config,process} ...
 
 The LADCP cruise hub: drives the ladcp-* commands from one cruise.toml (run
 inside a cruise directory).
 
 positional arguments:
-  {init,config,process}
+  {init,status,config,process}
     init                first-run setup: discover data, confirm, write
                         cruise.toml, optional trial station
+    status              the mid-cruise dashboard: pending casts, QA rollup,
+                        loose ends (default when run bare)
     config              show / validate / edit the cruise.toml
     process             process stations per the cruise.toml
 
@@ -58,6 +60,17 @@ options:
                         mid-cruise)
   --no-trial            skip the trial-station offer
   --force               overwrite an existing cruise.toml
+```
+
+## `ladcp status`
+
+```text
+usage: ladcp status [-h] [--config PATH] [--json]
+
+options:
+  -h, --help     show this help message and exit
+  --config PATH  cruise.toml to use (default: auto-discovered upward from cwd)
+  --json         emit the dashboard as JSON (for scripts)
 ```
 
 ## `ladcp process`
