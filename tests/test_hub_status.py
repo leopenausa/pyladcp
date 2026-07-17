@@ -148,7 +148,8 @@ def test_cli_status_json_schema(cruise, monkeypatch, capsys):
     assert hub.main(["status", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert set(data) == {"config", "cruise", "root", "outdir", "n_stations",
-                         "freshness", "qa", "stations", "index_stale"}
+                         "freshness", "qa", "stations", "index_stale",
+                         "sadcp_source", "sadcp_folder"}
     assert set(data["stations"][0]) == {"label", "freshness", "reason", "qa",
                                         "problems", "loose_ends"}
 

@@ -103,7 +103,10 @@ def gather(ccfg: cc.CruiseConfig) -> dict:
     return {"config": str(ccfg.path), "cruise": args.cruise, "root": str(root),
             "outdir": str(outdir), "n_stations": len(stations),
             "freshness": fresh, "qa": qa_counts, "stations": stations,
-            "index_stale": _index_stale(idx_path, root)}
+            "index_stale": _index_stale(idx_path, root),
+            # the configured constraint identity (the GUI's EK80 panel keys off this)
+            "sadcp_source": args.sadcp_source if has_sadcp else None,
+            "sadcp_folder": ccfg.args_map.get("sadcp")}
 
 
 def render(data: dict) -> list[str]:

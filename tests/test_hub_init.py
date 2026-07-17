@@ -149,6 +149,46 @@ def test_init_offers_from_hex_on_master_slave_hex_only_cruise(tmp_path, monkeypa
     assert cc.load_config(tmp_path / "cruise.toml").args_map["from_hex"] is True
 
 
+def _fake_ek(monkeypatch, share_file="/share/a.nc"):
+    from datetime import datetime, timezone
+
+    from ladcp.io import ek80_files as ek
+    t0 = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(ek, "scan", lambda paths, peek=True: [{"file": share_file,
+                                                               "start": t0}])
+    monkeypatch.setattr(ek, "read_casts", lambda p: [("A-01", t0, None, None)])
+    monkeypatch.setattr(ek, "correlate",
+                        lambda rows, casts, **kw: {"A-01": [share_file]})
+
+    def fake_slim(src, dst):
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_bytes(b"slim")
+        return 1000
+
+    monkeypatch.setattr(ek, "slim_extract", fake_slim)
+
+
+def test_init_ek80_extract_repoints_config(tmp_path, monkeypatch, capsys):
+    """EK-B terminal parity: --ek80-extract copies + re-points; --yes alone never copies."""
+    _tree(tmp_path)
+    (tmp_path / ".ladcp_archive.json").write_text('{"casts": {}}', encoding="utf-8")
+    _fake_ek(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    assert hub.main(["init", "--yes", "--no-trial", "--sadcp", "EK80_run",
+                     "--sadcp-source", "ek80"]) == 0
+    assert "never copies without --ek80-extract" in capsys.readouterr().out
+    assert cc.load_config(tmp_path / "cruise.toml").raw["sadcp"]["folder"] == "EK80_run"
+
+    assert hub.main(["init", "--yes", "--force", "--no-trial", "--sadcp", "EK80_run",
+                     "--sadcp-source", "ek80", "--ek80-extract"]) == 0
+    out = capsys.readouterr().out
+    assert "1/1 cast(s) covered" in out and "re-pointed" in out
+    assert (tmp_path / "ek80" / "A-01" / "a.nc").is_file()
+    cfg = cc.load_config(tmp_path / "cruise.toml")
+    assert cfg.raw["sadcp"] == {"folder": "ek80", "source": "ek80"}
+
+
 def test_init_refuses_existing_config_without_force(tmp_path, monkeypatch, capsys):
     _tree(tmp_path)
     (tmp_path / "cruise.toml").write_text("", encoding="utf-8")
