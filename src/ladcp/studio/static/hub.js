@@ -80,7 +80,9 @@ function confirmStep(det) {
   ctd.appendChild(el("div", "ev",
     det.ctd.dir === null ? det.ctd.evidence : `${det.ctd.dir || "."}/ — ${det.ctd.evidence}`));
   let fromHex = null;
-  if (det.ctd.n_hex > 0 && det.ctd.missing_cnv.length) {
+  // offer conversion when any cast lacks a cleaned .cnv — incl. MASTER/SLAVE archives
+  // (no name-paired stations, so missing_cnv is empty but n_cnv says it all)
+  if (det.ctd.n_hex > 0 && (det.ctd.missing_cnv.length || det.ctd.n_cnv === 0)) {
     const l = el("label");
     fromHex = el("input");
     fromHex.type = "checkbox";
@@ -111,8 +113,8 @@ function confirmStep(det) {
   };
   mk("", "no ship-ADCP constraint").checked = true;
   det.sadcp.forEach((c, i) => mk(String(i), `${c.path}  (${c.source}: ${c.evidence})`));
-  let navSel = null;
-  if (det.nav.length) {
+  let navSel = null;                 // clock check only makes sense with a raw source
+  if (det.nav.length && det.sadcp.some((c) => c.source === "vmdas")) {
     const l = el("label");
     navSel = el("input");
     navSel.type = "checkbox";
