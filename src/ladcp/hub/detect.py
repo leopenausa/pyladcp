@@ -190,6 +190,8 @@ class SadcpCandidate:
     source: str                       # "vmdas" | "codas" | "ek80"
     path: str                         # relative to root when inside it
     evidence: str
+    extracted: bool = False           # already a per-station EK80 extract tree:
+                                      # nothing left to copy, point [sadcp] at it
 
 
 @dataclass(frozen=True)
@@ -207,18 +209,45 @@ def _rel(p: Path, root: Path) -> str:
 
 def _detect_sadcp(root: Path) -> tuple[SadcpCandidate, ...]:
     out: list[SadcpCandidate] = []
+    ek_dirs: dict[str, tuple[int, bool]] = {}   # rel -> (n_nc, ek80-named)
     for d in _dirs(root):
         for ft in ("STA", "LTA"):
             n = len(list(d.glob(f"*.{ft}")))
             if n:
                 out.append(SadcpCandidate("vmdas", _rel(d, root),
                                           f"{n} VmDAS .{ft} file(s)"))
-        if "ek80" in d.name.lower():
-            n = len(list(d.glob("*.nc")))
-            if n:
-                out.append(SadcpCandidate("ek80", _rel(d, root),
-                                          f"{n} .nc file(s) (verify with "
-                                          "ladcp-ek80 timetable)"))
+        n_nc = len(list(d.glob("*.nc")))
+        named = "ek80" in d.name.lower()
+        if n_nc and (named or (n_nc >= 2
+                               and "codas" not in Path(_rel(d, root)).parts)):
+            ek_dirs[_rel(d, root)] = (n_nc, named)
+
+    # per-station extract trees (the `ladcp-ek80 extract --out` layout): >=2 .nc-rich
+    # sibling folders collapse into ONE candidate for their parent — each cast picks
+    # its files by the time window, so the parent is the right [sadcp] folder
+    # (guide ch. 8) and a 30-station tree must not become 30 radio buttons.
+    by_parent: dict[str, list[str]] = {}
+    for rel in ek_dirs:
+        by_parent.setdefault(str(Path(rel).parent), []).append(rel)
+    grouped: set[str] = set()
+    for parent, kids in by_parent.items():
+        # never group direct children of the cruise root: top-level dirs are
+        # heterogeneous by nature (extract trees live under EK80/, adcp_local/, …)
+        if parent != "." and len(kids) >= 2:
+            total = sum(ek_dirs[k][0] for k in kids)
+            out.append(SadcpCandidate("ek80", parent, extracted=True,
+                                      evidence=f"{len(kids)} station folder(s), "
+                                               f"{total} .nc file(s) — per-station "
+                                               "EK80 extracts; each cast picks its "
+                                               "files by time window"))
+            grouped.update(kids)
+    for rel, (n_nc, named) in ek_dirs.items():
+        if rel in grouped or rel in by_parent and len(by_parent[rel]) >= 2:
+            continue                             # covered by (or is) a grouped parent
+        out.append(SadcpCandidate("ek80", rel,
+                                  f"{n_nc} .nc file(s)"
+                                  + ("" if named else " — possibly EK80")
+                                  + " (verify with ladcp-ek80 timetable)"))
     from ..studio.state import codas_label, discover_codas_products
     for nc in discover_codas_products(root):
         folder = nc.parent.parent if nc.parent.name == "contour" else nc

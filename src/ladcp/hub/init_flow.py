@@ -153,8 +153,10 @@ def run_init(ns, *, ask=input, say=print) -> int:
     else:
         say("\nship-ADCP: no candidate sources found (add a [sadcp] table later)")
     if sadcp is not None and sadcp.source == "ek80":
-        say("  EK80 note: point [sadcp] at the extracted current profiles; on a remote "
-            "share use `ladcp-ek80 timetable` + `ladcp-ek80 extract` first — nothing "
+        say("  EK80 note: a SHALLOW constraint (~15-140 m) — most valuable on "
+            "single-head casts and for upper-ocean referencing; on dual-head casts "
+            "it is a consistency check more than a constraint (guide ch. 8). "
+            "The slim-extraction step is offered after the index build; nothing "
             "is copied without that explicit step")
 
     if sadcp is not None and sadcp.source == "vmdas":
@@ -227,7 +229,11 @@ def run_init(ns, *, ask=input, say=print) -> int:
 
     # -- step 6b: EK80 share -> slim local copy (needs the index for cast windows) -----
     if sadcp is not None and sadcp.source == "ek80":
-        _ek80_offer(ns, root, cfg_path, raw, sadcp.path, ask, say)
+        if getattr(sadcp, "extracted", False):
+            say(f"EK80: {sadcp.path} is already a per-station extract tree — "
+                "nothing to copy; each cast picks its files by time window")
+        else:
+            _ek80_offer(ns, root, cfg_path, raw, sadcp.path, ask, say)
 
     # -- step 7: trial station (suggested, skippable) ----------------------------------
     if labels and not ns.no_trial:

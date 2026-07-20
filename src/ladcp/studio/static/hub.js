@@ -118,6 +118,11 @@ function confirmStep(det, prev) {
   det.sadcp.forEach((c, i) => mk(String(i), `${c.path}  (${c.source}: ${c.evidence})`));
   if (ans.sadcpIdx !== undefined && ans.sadcpIdx !== null && radios[ans.sadcpIdx + 1])
     radios[ans.sadcpIdx + 1].checked = true;
+  if (det.sadcp.some((c) => c.source === "ek80"))
+    sad.appendChild(el("div", "note",
+      "EK80 is a shallow constraint (~15–140 m): most valuable on single-head "
+      + "casts and for upper-ocean referencing; on dual-head casts it is a "
+      + "consistency check more than a constraint (guide ch. 8)"));
   let navSel = null;                 // clock check only makes sense with a raw source
   if (det.nav.length && det.sadcp.some((c) => c.source === "vmdas")) {
     const l = el("label");
@@ -219,7 +224,8 @@ function trialStep(det, saved, ans) {
   main.replaceChildren(steps(3));
   const chosen = ans && ans.sadcpIdx !== null && ans.sadcpIdx !== undefined
     ? det.sadcp[ans.sadcpIdx] : null;
-  if (chosen && chosen.source === "ek80") {      // the share->slim-copy offer (EK-B)
+  // the share->slim-copy offer (EK-B) — pointless for an already-extracted tree
+  if (chosen && chosen.source === "ek80" && !chosen.extracted) {
     const ek = el("div", "card");
     ek80Panel(ek, chosen.path, repointConfigToExtract);
     main.appendChild(ek);

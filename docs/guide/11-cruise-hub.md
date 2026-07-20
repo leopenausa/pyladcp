@@ -35,6 +35,11 @@ the cruise stands:
 - **`ladcp studio 07`** skips straight to the interactive single-station editor of
   [Chapter 10](10-studio.md) for that cast, with the cruise configuration already
   loaded.
+- **EK80 on a remote share?** Choosing an EK80 source opens the extraction panel:
+  the cast↔file timetable first (header peeks only), then — after your explicit
+  confirmation — slim copies into `ek80/<station>/` with live progress, and
+  `cruise.toml` re-pointed at the local copy. It is a *shallow* constraint
+  (~15–140 m); [chapter 8](08-ship-adcp.md) says when it is worth it.
 
 The window is a thin skin: every button presses the same code path as the terminal
 commands below, and the setup wizard writes the same `cruise.toml` that `ladcp

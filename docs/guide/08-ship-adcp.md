@@ -198,6 +198,16 @@ If the EK80 was off over that cast, `timetable` shows `0 file(s) — none` and `
 refuses with a logging-gap notice (no constraint is possible — process that station
 without `--sadcp`).
 
+### The wizard does this for you
+
+The [cruise hub](11-cruise-hub.md) automates the whole flow: choose the EK80 source
+in the setup wizard (or open *EK80 extraction tools* on the dashboard), point it at
+the share, and the window shows the timetable, asks before copying, extracts the slim
+files into `<cruise-root>/ek80/<station>/` with live progress, and re-points
+`cruise.toml` at the local copy — displaying the equivalent `ladcp-ek80` commands at
+each step. In the terminal, `ladcp init` makes the same offer after the index build
+(`--ek80-extract` is the non-interactive consent; `--yes` alone never copies).
+
 ### Before you trust it
 
 - **Coverage is upper-ocean only** — set expectations accordingly (above).
