@@ -102,8 +102,8 @@ def run_init(ns, *, ask=input, say=print) -> int:
     if down_only_labels:
         say(f"  note: {len(down_only_labels)} single-head cast(s) "
             f"({', '.join(down_only_labels[:4])}{'…' if len(down_only_labels) > 4 else ''})"
-            " — process those with `ladcp process <station>` plus --down-only via "
-            "[params], or a per-station [edit] later")
+            " — solved from the down-looker alone automatically (WARN in their QA "
+            "reports; reduced near-surface coverage)")
 
     # -- step 2: CTD -----------------------------------------------------------------
     ctd_dir = ns.ctd or det.ctd.dir

@@ -88,6 +88,11 @@ def gather(ccfg: cc.CruiseConfig) -> dict:
                 entry["loose_ends"].append("no CTD (velocity impossible)")
             if sf.up is None:
                 entry["loose_ends"].append("single-head (no up-looker)")
+        # processed but no velocity solution (.lad is written on every solve) —
+        # only when a CTD exists, else the no-CTD loose end already explains it
+        if qa is not None and (sf is None or sf.ctd is not None) \
+                and not (outdir / "stations" / label / f"{label}.lad").is_file():
+            entry["loose_ends"].append("processed, no velocity solution")
         if has_sadcp and qa is not None and \
                 not any(k.startswith("sadcp_") for k in qa.get("metrics") or {}):
             entry["loose_ends"].append("last solve had no SADCP constraint")
@@ -151,7 +156,10 @@ def render(data: dict) -> list[str]:
     if loose or data["index_stale"]:
         lines.append("loose ends:")
         actions = {"no CTD (velocity impossible)": "check the CTD dir / --from-hex",
-                   "single-head (no up-looker)": "ladcp-qa {label} --down-only",
+                   "single-head (no up-looker)":
+                       "solves down-only automatically (reduced near-surface coverage)",
+                   "processed, no velocity solution":
+                       "ladcp process {label} (cause in {label}_qa.txt)",
                    "last solve had no SADCP constraint": "ladcp process {label}",
                    "edit journal not applied":
                        'set edits = ".ladcp_edits" under [edit] in cruise.toml',

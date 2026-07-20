@@ -164,8 +164,11 @@ These rows appear after the velocity solve and cross-check the *finished solutio
   ship was not station-keeping; the barotropic reference handles the drift, but a
   moving ship on a long wire leaves residual layback uncertainty).
 - **`single_head_solve`** — present (WARN) when the profile was solved from the
-  down-looker alone (`--down-only`): reduced near-surface coverage, reference from
-  down bins only.
+  down-looker alone (no up-looker file — automatic — or explicit `--down-only`):
+  reduced near-surface coverage, reference from down bins only.
+- **`velocity_skipped`** — present (WARN) when a CTD exists but **no velocity
+  solution could be produced** (e.g. an unsupported coordinate frame); the station
+  then has QA output only.
 - **`declination`** — the magnetic declination applied, with its provenance (IGRF-13
   from the cast position, or user-supplied). **WARN only when the IGRF lookup failed**
   and the fallback of 0° was used — the profile is then in the *magnetic* frame, not

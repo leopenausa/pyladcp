@@ -49,9 +49,11 @@ def _fake_discover_for(root: Path):
     return fake_discover
 
 
-def _write_qa_json(outdir: Path, label: str) -> Path:
+def _write_qa_json(outdir: Path, label: str, lad: bool = True) -> Path:
     st = Path(outdir) / "stations" / label
     st.mkdir(parents=True, exist_ok=True)
+    if lad:                       # the velocity solution written on every solve
+        (st / f"{label}.lad").write_text("", encoding="utf-8")
     p = st / f"{label}_qa.json"
     p.write_text('{"overall_status": "ok"}', encoding="utf-8")
     return p
@@ -116,6 +118,14 @@ def test_station_state_matrix(cruise):
 
     _age(root / "cruise.toml", 60)
     assert freshness.station_state("MORIA-07", **kw).state == "fresh"
+
+    lad = out / "stations" / "MORIA-07" / "MORIA-07.lad"        # QA-only output of a
+    lad.unlink()                                                # CTD cast: still owed
+    st = freshness.station_state("MORIA-07", **kw)
+    assert st.state == "stale" and "no velocity solution" in st.reason
+    lad.write_text("", encoding="utf-8")
+    assert freshness.station_state("MORIA-07", **kw).state == "fresh"
+
     qa.unlink()
     assert freshness.station_state("MORIA-07", **kw).state == "missing"
 

@@ -2,9 +2,10 @@
 
 No state file (wizard spec §9.3): a station is *done* when its QA report
 (``<outdir>/stations/<label>/<label>_qa.json``, the last artifact
-:func:`~ladcp.qa.pipeline.process_station` rewrites) exists and is newer than every
+:func:`~ladcp.qa.pipeline.process_station` rewrites) exists, is newer than every
 input — the raw PD0 head(s), the CTD file, the station's edit journal, and
-``cruise.toml`` itself. Anything else is ``missing`` (never processed) or ``stale``
+``cruise.toml`` itself — and, when a CTD exists, came with a velocity solution
+(``<label>.lad``). Anything else is ``missing`` (never processed) or ``stale``
 (an input or the config changed), and rerunning ``--new`` after an interruption
 resumes exactly where the batch died. The rule deliberately errs toward
 reprocessing: a touched-but-unchanged input costs one redundant run, never a stale
@@ -55,6 +56,12 @@ def station_state(station: str, *, root, outdir, cruise: str = DEFAULT_CRUISE,
     if not done.is_file():
         return StationState(sf.label, MISSING, "no QA report yet")
     done_mtime = done.stat().st_mtime
+
+    # a CTD cast still owes a velocity solution: QA-only output (no .lad) is stale,
+    # so runs from before the automatic single-head solve get picked up by --new
+    if sf.ctd is not None \
+            and not (Path(outdir) / "stations" / sf.label / f"{sf.label}.lad").is_file():
+        return StationState(sf.label, STALE, "no velocity solution (.lad missing)")
 
     inputs: list[Path] = [p for p in (sf.down, sf.up, sf.ctd) if p is not None]
     journal = journal_path(root, sf.label)

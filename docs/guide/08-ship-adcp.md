@@ -215,6 +215,9 @@ each step. In the terminal, `ladcp init` makes the same offer after the index bu
   bottom track can't reach abyssal depths). The EK80 product reports geographic-frame
   currents that already do this; a healthy `sadcp_consistency` (≲0.05 m/s) against the
   independent LADCP is your confirmation.
-- **Per-station selection** — one `--sadcp` folder per cast. `ladcp-ek80 extract
-  --index` does the sorting for you; a single `--all-stations` run can instead point
-  `--sadcp` at the parent `adcp_local/` and let each cast pick its files by time window.
+- **Per-station selection** — `ladcp-ek80 extract --index` sorts the files into
+  `adcp_local/<station>/`. Point `--sadcp` (or `[sadcp] folder` in `cruise.toml`) at
+  the parent `adcp_local/`: when a subdir named after the cast exists, only that
+  subdir is read — so one folder serves the whole cruise without each cast re-reading
+  every other cast's files. A flat folder (no station subdirs) still works; every
+  file is read and each cast picks its ensembles by time window.

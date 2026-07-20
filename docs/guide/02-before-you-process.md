@@ -7,8 +7,9 @@ rather than archaeology.
 ## LADCP files
 
 - **Format:** RDI PD0 binary (`*.000` deployment files) from Workhorse-class
-  instruments. Dual-head (down + up looker) is the design case; single down-looker
-  casts process with `--down-only`.
+  instruments. Dual-head (down + up looker) is the design case; a cast with only a
+  down-looker file solves down-only automatically (with a `single_head_solve` WARN);
+  `--down-only` explicitly excludes an up-looker that exists.
 - **Coordinates:** earth or beam — beam-coordinate data is rotated to earth
   automatically at ingest using the PD0's own geometry. (Recording in beam
   coordinates is actually the more conservative at-sea choice: it preserves the
