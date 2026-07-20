@@ -81,6 +81,7 @@ def test_process_job_and_scorecard(client, monkeypatch):
         for st in plan:
             d = Path(outdir) / "stations" / st
             d.mkdir(parents=True, exist_ok=True)
+            (d / f"{st}.lad").write_text("", encoding="utf-8")
             (d / f"{st}_qa.json").write_text("{}", encoding="utf-8")
             (d / f"{st}_qa.txt").write_text(f"scorecard {st}\n", encoding="utf-8")
         return [(st, "ok") for st in plan]

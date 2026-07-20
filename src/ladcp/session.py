@@ -485,10 +485,12 @@ class StationSession:
         t = prep.dh.down.time
         if cfg.solve.solver != "inverse":       # constraint ignored (with the CLI's notice)
             return sadcp_profile(cfg.sadcp, t.min(), t.max(),
-                                 prep.lat, prep.lon, cfg.solve.solver)
+                                 prep.lat, prep.lon, cfg.solve.solver,
+                                 station=self.station)
         if cfg.sadcp not in self._sadcp_profiles:
             self._sadcp_profiles[cfg.sadcp] = sadcp_profile(
-                cfg.sadcp, t.min(), t.max(), prep.lat, prep.lon, "inverse")
+                cfg.sadcp, t.min(), t.max(), prep.lat, prep.lon, "inverse",
+                station=self.station)
         return self._sadcp_profiles[cfg.sadcp]
 
 

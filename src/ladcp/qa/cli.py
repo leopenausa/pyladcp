@@ -89,9 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="curvature-smoothing weight, legacy ps.smoofac "
                          "(inverse only; default: 0, golden value)")
     ap.add_argument("--down-only", action="store_true",
-                    help="solve velocity from the down-looker alone, ignoring any up-looker "
-                         "(cross-check / single-instrument casts); acquisition QA still "
-                         "covers both heads")
+                    help="solve velocity from the down-looker alone, EXCLUDING an up-looker "
+                         "that exists (cross-check); casts with no up-looker file solve "
+                         "down-only automatically; acquisition QA still covers both heads")
     ap.add_argument("--nearfield-dn-bins", metavar="LIST", default=None,
                     help="mask down-looker near-field bins (a device hung below the "
                          "package): comma 1-based bins, e.g. 3,4. Default: NO mask -- "

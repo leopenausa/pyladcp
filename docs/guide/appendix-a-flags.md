@@ -196,8 +196,9 @@ options:
                         (inverse only; default: 1)
   --smoofac SMOOFAC     curvature-smoothing weight, legacy ps.smoofac (inverse
                         only; default: 0, golden value)
-  --down-only           solve velocity from the down-looker alone, ignoring
-                        any up-looker (cross-check / single-instrument casts);
+  --down-only           solve velocity from the down-looker alone, EXCLUDING
+                        an up-looker that exists (cross-check); casts with no
+                        up-looker file solve down-only automatically;
                         acquisition QA still covers both heads
   --nearfield-dn-bins LIST
                         mask down-looker near-field bins (a device hung below

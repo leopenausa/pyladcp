@@ -26,9 +26,11 @@ def _age(path: Path, seconds: float = 60.0) -> None:
 
 
 def _qa_json(outdir: Path, label: str, overall: str = "ok",
-             metrics: dict[str, str] | None = None) -> Path:
+             metrics: dict[str, str] | None = None, lad: bool = True) -> Path:
     d = outdir / "stations" / label
     d.mkdir(parents=True, exist_ok=True)
+    if lad:                       # the velocity solution written on every solve
+        (d / f"{label}.lad").write_text("", encoding="utf-8")
     payload = {"station": label, "overall_status": overall, "warnings": [],
                "metrics": {name: {"status": s} for name, s in (metrics or {}).items()}}
     p = d / f"{label}_qa.json"
@@ -87,6 +89,23 @@ def test_gather_flags_unconstrained_and_journal(cruise):
     assert "edit journal not applied" in le["A-01"]
 
 
+def test_gather_flags_missing_solution(cruise):
+    """qa.json without a .lad on a CTD cast -> 'processed, no velocity solution'."""
+    _qa_json(cruise / "qa_out", "A-01", "warn", {"tilt_max": "warn"}, lad=False)
+    data = status.gather(cc.load_config(cruise / "cruise.toml"))
+    by = {e["label"]: e for e in data["stations"]}
+    assert "processed, no velocity solution" in by["A-01"]["loose_ends"]
+    assert by["A-01"]["freshness"] == "stale"           # --new picks it back up
+    text = "\n".join(status.render(data))
+    assert "processed, no velocity solution" in text and "ladcp process A-01" in text
+    # A-03 has no CTD: the no-CTD loose end explains it, no double flag
+    _qa_json(cruise / "qa_out", "A-03", "ok", lad=False)
+    data = status.gather(cc.load_config(cruise / "cruise.toml"))
+    by = {e["label"]: e for e in data["stations"]}
+    assert "processed, no velocity solution" not in by["A-03"]["loose_ends"]
+    assert "no CTD (velocity impossible)" in by["A-03"]["loose_ends"]
+
+
 def test_gather_index_staleness(cruise):
     (cruise / ".ladcp_archive.json").write_text(
         json.dumps({"version": 2, "casts": {"A-01": {
@@ -117,7 +136,7 @@ def test_render_blocks_and_actions(cruise):
         and "A-01_report.pdf" in fail_line
     assert text.splitlines().index(fail_line) < text.splitlines().index(
         next(line for line in text.splitlines() if "[WARN]" in line))
-    assert "single-head" in text and "--down-only" in text
+    assert "single-head" in text and "down-only automatically" in text
 
 
 def test_render_all_current(cruise):

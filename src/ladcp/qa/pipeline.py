@@ -103,25 +103,33 @@ def process_station(down, up, ctd_path, station, outdir, make_plots, cfg: Sessio
     st_dir = Path(outdir) / "stations" / station
     fig_dir = st_dir / "figures"
     st_dir.mkdir(parents=True, exist_ok=True)
+
+    # velocity solve (requires CTD + earth-frame data): .lad + .bot text, figures.
+    # A cast with no up-looker file is solved down-only automatically (with a WARN
+    # metric); --down-only stays the explicit way to EXCLUDE an up-looker that exists.
+    from ..models import CoordFrame
+    earth = all(h.coord_frame == CoordFrame.EARTH for h in (dh.down, dh.up) if h is not None)
+    down_only = cfg.edit.down_only
+    if ctd is not None and not earth:
+        qc.add(Metric("velocity_skipped", dh.down.coord_frame.value, "", Status.WARN,
+                      source_stage="qa.cli",
+                      note="NO velocity solution: "
+                           f"{dh.down.coord_frame.value}-coordinate data is unsupported "
+                           "(beam frames are auto-rotated to earth at ingest; only "
+                           "earth/beam are handled)"))
+
     (st_dir / f"{station}_qa.txt").write_text(text_report(qc) + "\n", encoding="utf-8")
     (st_dir / f"{station}_qa.json").write_text(json.dumps(qc.to_dict(), indent=2),
                                                encoding="utf-8")
     log.info("[%-5s] %s  ->  %s/", qc.overall_status.value.upper(), station, st_dir)
 
-    # velocity solve (requires CTD + earth-frame data): .lad + .bot text, figures
-    from ..models import CoordFrame
-    earth = all(h.coord_frame == CoordFrame.EARTH for h in (dh.down, dh.up) if h is not None)
     result = None
     export = None
-    down_only = cfg.edit.down_only
     if ctd is not None and not earth:
         log.warning("        velocity skipped: %s-coordinate data is unsupported (beam frames are "
                     "auto-rotated to earth at ingest; only earth/beam are handled); QA metrics "
                     "still written", dh.down.coord_frame.value)
-    if ctd is not None and earth and not dh.has_up and not down_only:
-        log.warning("        velocity skipped: no up-looker (pass --down-only to solve from "
-                    "the down-looker alone); QA metrics still written")
-    if ctd is not None and earth and (dh.has_up or down_only):
+    if ctd is not None and earth:
         dh_solve = dh
         if down_only and dh.has_up:
             from dataclasses import replace
@@ -129,11 +137,16 @@ def process_station(down, up, ctd_path, station, outdir, make_plots, cfg: Sessio
             log.warning("        velocity: --down-only -- up-looker EXCLUDED from the solve "
                         "(acquisition QA above still covers both heads)")
         if not dh_solve.has_up:
-            from ..models import Metric, Status
+            if not down_only:
+                log.warning("        velocity: no up-looker for this cast -- solving from "
+                            "the down-looker alone (automatic --down-only)")
             qc.add(Metric("single_head_solve", "down-only", "", Status.WARN,
                           source_stage="qa.cli",
-                          note="velocity solved from the down-looker alone: reduced "
-                               "near-surface coverage, reference layer from down bins only"))
+                          note="velocity solved from the down-looker alone"
+                               + ("" if down_only
+                                  else " (no up-looker found; automatic --down-only)")
+                               + ": reduced near-surface coverage, reference layer "
+                                 "from down bins only"))
         result, meta = _velocity_outputs(dh_solve, ctd, station, st_dir, cfg)
         from ..qa.checks import consistency_checks
         for m in consistency_checks(result):       # checkinv -> scorecard
@@ -179,7 +192,8 @@ def _velocity_outputs(dh, ctd, station, out, cfg: SessionConfig):
         drot, drot_source = resolve_declination(lat, lon, when, logger=log)
 
     t_lad = dh.down.time
-    sadcp = (sadcp_profile(cfg.sadcp, t_lad.min(), t_lad.max(), lat, lon, solver)
+    sadcp = (sadcp_profile(cfg.sadcp, t_lad.min(), t_lad.max(), lat, lon, solver,
+                           station=station)
              if cfg.sadcp is not None else None)
     sadcpfac = cfg.solve.sadcpfac
     # Build the expensive front end once so the SADCP-withheld validation solve below reuses
@@ -306,13 +320,34 @@ def _load_sadcp_dataset(sadcp):
                           file_type=sadcp.filetype, transducer_depth=sadcp.xducer)
 
 
-def sadcp_profile(sadcp, time_start, time_end, lat, lon, solver):
+def _narrow_to_station(sadcp, station):
+    """Point a folder source at its ``<folder>/<station>/`` subdir when one exists.
+
+    The hub's EK80 slim extraction writes per-station subdirs
+    (:func:`ladcp.hub.ek80_ops.extract_jobs`); narrowing keeps one whole-cruise
+    ``[sadcp]`` folder usable without every cast re-reading every other cast's files.
+    A folder with no matching subdir is used as-is (recursive read, time-windowed).
+    """
+    if station is None:
+        return sadcp
+    sub = Path(sadcp.folder) / station
+    if sub.is_dir() and any(sub.glob("*.nc")):
+        from dataclasses import replace
+        log.info("        sadcp: per-station folder %s", sub)
+        return replace(sadcp, folder=str(sub))
+    return sadcp
+
+
+def sadcp_profile(sadcp, time_start, time_end, lat, lon, solver, station=None):
     """Build the cast's ship-ADCP constraint profile for a :class:`SadcpConfig`.
 
     Loads the dataset once (raw VmDAS folder ingested+cached, or a CODAS/EK80 NetCDF
     read directly per ``--sadcp-source``), then windows it to this cast's LADCP time
     span and position. Only the ``inverse`` solver consumes the constraint; with
     ``shear`` the folder is ignored with a notice. Returns the ``svel`` array or ``None``.
+
+    When ``station`` is given and the source folder has a subdir of that name, only
+    that subdir is read (the hub's per-station EK80 extraction layout).
 
     ``timeoff='auto'`` is resolved here when still present (library callers); the CLI
     batch path resolves it once up front instead (:func:`warm_sadcp`).
@@ -322,7 +357,7 @@ def sadcp_profile(sadcp, time_start, time_end, lat, lon, solver):
         return None
     from ..io.sadcp_vmdas import extract_profile
 
-    ds = _load_sadcp_dataset(sadcp)
+    ds = _load_sadcp_dataset(_narrow_to_station(sadcp, station))
     toff = sadcp.timeoff
     if toff == "auto":
         from ..io.nav import estimate_time_offset, read_nav

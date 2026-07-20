@@ -57,11 +57,12 @@ care (does each profile reach its station's expected depth?).
 
 ## Running `ladcp-qa`
 
-**Symptom:** `velocity skipped: no up-looker`.
-**Cause:** the cast has only a down-looker file (or the slave never paired).
-**Fix:** if the up-looker truly is missing, `--down-only` solves from the down-looker
-alone — the scorecard then carries a `single_head_solve` WARN (reduced near-surface
-coverage). If the slave file exists but didn't pair, check `ladcp-index show`.
+**Symptom:** a `single_head_solve` WARN on a cast you expected to be dual-head.
+**Cause:** the cast resolved only a down-looker file (the slave never paired), so it
+was solved from the down-looker alone automatically (reduced near-surface coverage).
+**Fix:** if the up-looker truly is missing there is nothing to do — the WARN is the
+honest record. If the slave file exists but didn't pair, check `ladcp-index show`
+and rebuild the index.
 
 **Symptom:** `velocity skipped: ...-coordinate data is unsupported`.
 **Cause:** a head recorded in a frame pyladcp cannot rotate (beam coordinates *are*
